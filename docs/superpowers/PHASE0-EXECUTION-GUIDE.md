@@ -101,7 +101,15 @@ cmake --build --preset linux-debug
 ctest --test-dir build/linux-debug --output-on-failure
 ```
 
-Dockerized unit run (added in Task 8): `docker compose -f test/docker-compose.yml run --rm unit`
+Containerized unit run (added in Task 8) — **prefer rootless podman** (host-safe, doesn't touch
+the host kernel/system; matches this project's "don't mutate the host" testing posture):
+
+```bash
+podman-compose -f test/docker-compose.yml run --rm unit   # rootless (preferred locally)
+docker  compose  -f test/docker-compose.yml run --rm unit  # equivalent; CI uses this on ubuntu-latest
+```
+
+The `test/docker-compose.yml` is OCI-standard and runs identically under both engines.
 
 ### Formatting (keep the tree clang-format-clean)
 
@@ -155,14 +163,19 @@ commands above to regenerate. **Never** delete tracked sources or `docs/`.
       *Tasks 4–6 done together in one session; landing as a single combined commit. Awaiting user commit.*
 - [x] **Task 7 — PAL interfaces + in-memory FakePal** (`pal/`, `tests/fakes/`). ✅ TDD, 3/3
       `FakePal.*` tests green (full suite 19/19), clang-format clean. *Awaiting user commit.*
-- [~] **Task 8 — Docker dev/test image** (`Dockerfile`, `test/docker-compose.yml`). Files written;
-      `docker compose config` validates. **Live `docker compose ... build/run` NOT executed — the
-      docker daemon was not running in the build session.** Run `docker compose -f
-      test/docker-compose.yml run --rm unit` (exits 0) before considering this fully verified.
-      *Awaiting user commit.*
+- [x] **Task 8 — Docker dev/test image** (`Dockerfile`, `test/docker-compose.yml`). ✅ image builds
+      and the in-container suite passes **19/19, exit 0** — verified via `podman-compose -f
+      test/docker-compose.yml run --rm unit` (rootless; the compose file is OCI-standard so plain
+      `docker compose` works too). *Awaiting user commit.*
 - [x] **Task 9 — Disposable VM scaffold + CI workflow** (`test/vm/`, `.github/workflows/ci.yml`). ✅
       `bash -n` clean, no-arg run prints usage + exits 2, `ci.yml` parses as valid YAML. VM not
-      exercised (no dangerous ops until Phase 4). *Awaiting user commit.*
+      exercised (no dangerous ops until Phase 4). CI gates on **format + clang-tidy + dockerized
+      tests** — the clang-tidy step runs inside the container (`--warnings-as-errors='*'` over
+      `core/src/*.cpp`), so it's a hard gate. Enabling it surfaced one `modernize-use-scoped-lock`
+      finding; fixed by converting all `std::lock_guard` → `std::scoped_lock` in `task_scheduler`
+      and `event_bus` (those files are from Tasks 4/6 — already committed in `d09d957` — so they
+      now show as modifications). Verified locally: clang-tidy exit 0, full suite 19/19, format
+      clean. *Awaiting user commit.*
 
 When all boxes are checked: run the final whole-branch review (opus), then use the
 `finishing-a-development-branch` skill.

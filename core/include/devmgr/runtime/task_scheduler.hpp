@@ -29,7 +29,7 @@ class TaskScheduler {
             std::bind(std::forward<F>(f), std::forward<Args>(args)...));
         std::future<Return> future = task->get_future();
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             if (stopping_) throw std::runtime_error("TaskScheduler is stopping");
             queue_.emplace([task] { (*task)(); });
         }

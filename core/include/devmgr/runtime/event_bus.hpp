@@ -51,7 +51,7 @@ class EventBus {
     [[nodiscard]] Subscription subscribe(std::function<void(const Event&)> handler) {
         const auto type = std::type_index(typeid(Event));
         auto stored = std::make_shared<std::function<void(const Event&)>>(std::move(handler));
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_);
         const auto id = nextId_++;
         handlers_[type].push_back(Entry{id, std::move(stored)});
         return Subscription(this, type, id);
@@ -61,7 +61,7 @@ class EventBus {
     void publish(const Event& event) {
         std::vector<std::shared_ptr<void>> targets;
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock lock(mutex_);
             const auto it = handlers_.find(std::type_index(typeid(Event)));
             if (it == handlers_.end()) return;
             targets.reserve(it->second.size());
@@ -81,7 +81,7 @@ class EventBus {
     };
 
     void unsubscribe(std::type_index type, std::uint64_t id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_);
         const auto it = handlers_.find(type);
         if (it == handlers_.end()) return;
         auto& vec = it->second;

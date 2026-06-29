@@ -14,3 +14,7 @@ jobs:
           find core tests -name '*.hpp' -o -name '*.cpp' | xargs clang-format --dry-run --Werror
       - name: Build and unit-test (Docker)
         run: docker compose -f test/docker-compose.yml run --rm unit
+      - name: Static analysis (clang-tidy)
+        # Reuses the image built above (toolchain + deps + compile_commands.json baked in).
+        # Hard gate: any clang-tidy diagnostic in core/src fails the build.
+        run: docker compose -f test/docker-compose.yml run --rm unit bash -c "clang-tidy -p build/linux-debug --warnings-as-errors='*' core/src/*.cpp"

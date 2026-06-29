@@ -18,7 +18,7 @@ TaskScheduler::TaskScheduler(std::size_t threadCount) {
 
 TaskScheduler::~TaskScheduler() {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_);
         stopping_ = true;
     }
     cv_.notify_all();
