@@ -147,9 +147,12 @@ commands above to regenerate. **Never** delete tracked sources or `docs/`.
       see **Formatting** below.)
 - [x] **Task 3 — Domain models + enum string helpers** (`models.hpp/.cpp`). ✅ implemented via
       TDD, 6/6 tests green, clang-format clean. *Awaiting user commit.*
-- [ ] Task 4 — Event types + thread-safe EventBus (`events.hpp`, `runtime/event_bus.hpp`).
-- [ ] Task 5 — Logging facade (`runtime/logging.hpp/.cpp`).
-- [ ] Task 6 — Cancellation + TaskScheduler + progress (`runtime/`).
+- [x] **Task 4 — Event types + thread-safe EventBus** (`events.hpp`, `runtime/event_bus.hpp`). ✅
+      TDD, 4/4 tests green (concurrency test stress-passed 20×), clang-format clean.
+- [x] **Task 5 — Logging facade** (`runtime/logging.hpp/.cpp`). ✅ TDD, 2/2 tests green.
+- [x] **Task 6 — Cancellation + TaskScheduler + progress** (`runtime/`). ✅ TDD, 4/4 tests green
+      (pool + cancellation + progress), clang-format clean.
+      *Tasks 4–6 done together in one session; landing as a single combined commit. Awaiting user commit.*
 - [ ] Task 7 — PAL interfaces + in-memory FakePal (`pal/`, `tests/fakes/`).
 - [ ] Task 8 — Docker dev/test image (`Dockerfile`, `test/docker-compose.yml`).
 - [ ] Task 9 — Disposable VM scaffold + CI workflow (`test/vm/`, `.github/workflows/ci.yml`).
