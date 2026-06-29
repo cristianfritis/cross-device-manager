@@ -145,7 +145,8 @@ commands above to regenerate. **Never** delete tracked sources or `docs/`.
 - [x] **Task 2 — Result/Error type** (`core/include/devmgr/core/result.hpp`). ✅ implemented via
       TDD, 3/3 tests green. *Awaiting user commit.* (Folded in: clang-format baseline settled —
       see **Formatting** below.)
-- [ ] Task 3 — Domain models + enum string helpers (`models.hpp/.cpp`).
+- [x] **Task 3 — Domain models + enum string helpers** (`models.hpp/.cpp`). ✅ implemented via
+      TDD, 6/6 tests green, clang-format clean. *Awaiting user commit.*
 - [ ] Task 4 — Event types + thread-safe EventBus (`events.hpp`, `runtime/event_bus.hpp`).
 - [ ] Task 5 — Logging facade (`runtime/logging.hpp/.cpp`).
 - [ ] Task 6 — Cancellation + TaskScheduler + progress (`runtime/`).

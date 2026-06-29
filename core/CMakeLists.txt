@@ -5,6 +5,7 @@ find_package(Threads REQUIRED)
 
 add_library(devmgr_core
     src/version.cpp
+    src/models.cpp
 )
 target_include_directories(devmgr_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_core
