@@ -1,0 +1,6 @@
+services:
+  unit:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["ctest", "--test-dir", "build/linux-debug", "--output-on-failure"]
