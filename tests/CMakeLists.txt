@@ -8,6 +8,7 @@ add_executable(devmgr_tests
     unit/test_event_bus.cpp
     unit/test_logging.cpp
     unit/test_task_scheduler.cpp
+    unit/test_fake_pal.cpp
 )
 target_link_libraries(devmgr_tests PRIVATE devmgr_core GTest::gtest GTest::gtest_main)
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
