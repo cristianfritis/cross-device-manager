@@ -103,6 +103,23 @@ ctest --test-dir build/linux-debug --output-on-failure
 
 Dockerized unit run (added in Task 8): `docker compose -f test/docker-compose.yml run --rm unit`
 
+### Formatting (keep the tree clang-format-clean)
+
+`.clang-format` is tuned away from raw Google defaults so the plan's authored style is canonical
+under clang-format 21.x: `SortIncludes: false` + `IncludeBlocks: Preserve` (keep author include
+grouping) and `AllowShortFunctionsOnASingleLine: Inline` (in-class one-liners like FakePal
+accessors stay one line; free functions and gtest `TEST(...)` bodies stay multi-line). Trade-off:
+namespace-scope one-liners get expanded — write them multi-line (e.g. Task 3's `operator==`).
+
+**After writing each task's code, before handoff, run:**
+
+```bash
+find core tests -name '*.hpp' -o -name '*.cpp' | xargs clang-format -i
+```
+
+Task 9's CI runs `clang-format --dry-run --Werror` over `core`/`tests`, so an unformatted tree
+fails CI. Keep it clean per-task.
+
 ---
 
 ## Safe cleanup between sessions
@@ -126,9 +143,8 @@ commands above to regenerate. **Never** delete tracked sources or `docs/`.
       *Awaiting user commit at time of writing.* Note: `tests/CMakeLists.txt` includes
       `${CMAKE_CURRENT_SOURCE_DIR}` — needed by Task 7's `fakes/` include, keep it.
 - [x] **Task 2 — Result/Error type** (`core/include/devmgr/core/result.hpp`). ✅ implemented via
-      TDD, 3/3 tests green. *Awaiting user commit.* Note: local clang-format 21.1.8 disagrees with
-      the committed code style (regroups includes, collapses short `TEST` bodies) — affects Task 1
-      files too. Resolve project-wide before Task 9's CI lands (pin `.clang-format` or reformat tree).
+      TDD, 3/3 tests green. *Awaiting user commit.* (Folded in: clang-format baseline settled —
+      see **Formatting** below.)
 - [ ] Task 3 — Domain models + enum string helpers (`models.hpp/.cpp`).
 - [ ] Task 4 — Event types + thread-safe EventBus (`events.hpp`, `runtime/event_bus.hpp`).
 - [ ] Task 5 — Logging facade (`runtime/logging.hpp/.cpp`).

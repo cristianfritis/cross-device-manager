@@ -3,3 +3,9 @@ ColumnLimit: 100
 IndentWidth: 4
 DerivePointerAlignment: false
 PointerAlignment: Left
+# Keep author-grouped includes; do not regroup/reorder across blank-line blocks.
+SortIncludes: false
+IncludeBlocks: Preserve
+# Keep in-class one-liners (e.g. FakePal accessors) on one line, but never collapse
+# free functions or TEST(...) bodies — keeps the gtest suites readable and multi-line.
+AllowShortFunctionsOnASingleLine: Inline
