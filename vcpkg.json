@@ -1,0 +1,5 @@
+{
+  "name": "cross-device-manager",
+  "version": "0.1.0",
+  "dependencies": ["gtest", "spdlog", "nlohmann-json", "tl-expected"]
+}
