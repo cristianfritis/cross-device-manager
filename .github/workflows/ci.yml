@@ -1,0 +1,16 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang-format
+          find core tests -name '*.hpp' -o -name '*.cpp' | xargs clang-format --dry-run --Werror
+      - name: Build and unit-test (Docker)
+        run: docker compose -f test/docker-compose.yml run --rm unit

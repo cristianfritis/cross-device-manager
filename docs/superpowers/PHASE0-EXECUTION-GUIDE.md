@@ -153,9 +153,16 @@ commands above to regenerate. **Never** delete tracked sources or `docs/`.
 - [x] **Task 6 — Cancellation + TaskScheduler + progress** (`runtime/`). ✅ TDD, 4/4 tests green
       (pool + cancellation + progress), clang-format clean.
       *Tasks 4–6 done together in one session; landing as a single combined commit. Awaiting user commit.*
-- [ ] Task 7 — PAL interfaces + in-memory FakePal (`pal/`, `tests/fakes/`).
-- [ ] Task 8 — Docker dev/test image (`Dockerfile`, `test/docker-compose.yml`).
-- [ ] Task 9 — Disposable VM scaffold + CI workflow (`test/vm/`, `.github/workflows/ci.yml`).
+- [x] **Task 7 — PAL interfaces + in-memory FakePal** (`pal/`, `tests/fakes/`). ✅ TDD, 3/3
+      `FakePal.*` tests green (full suite 19/19), clang-format clean. *Awaiting user commit.*
+- [~] **Task 8 — Docker dev/test image** (`Dockerfile`, `test/docker-compose.yml`). Files written;
+      `docker compose config` validates. **Live `docker compose ... build/run` NOT executed — the
+      docker daemon was not running in the build session.** Run `docker compose -f
+      test/docker-compose.yml run --rm unit` (exits 0) before considering this fully verified.
+      *Awaiting user commit.*
+- [x] **Task 9 — Disposable VM scaffold + CI workflow** (`test/vm/`, `.github/workflows/ci.yml`). ✅
+      `bash -n` clean, no-arg run prints usage + exits 2, `ci.yml` parses as valid YAML. VM not
+      exercised (no dangerous ops until Phase 4). *Awaiting user commit.*
 
 When all boxes are checked: run the final whole-branch review (opus), then use the
 `finishing-a-development-branch` skill.

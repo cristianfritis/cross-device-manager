@@ -1,0 +1,14 @@
+# Disposable VM for kernel-level tests (Phase 4+): real module load, bind/unbind.
+# Snapshot before a dangerous run, revert after. Not used by Phase 0 tests.
+Vagrant.configure("2") do |config|
+  config.vm.box = "generic/ubuntu2404"
+  config.vm.hostname = "devmgr-test"
+  config.vm.provider "libvirt" do |lv|
+    lv.memory = 2048
+    lv.cpus = 2
+  end
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get install -y build-essential cmake ninja-build pkg-config libudev-dev libkmod-dev
+  SHELL
+end
