@@ -125,7 +125,10 @@ commands above to regenerate. **Never** delete tracked sources or `docs/`.
 - [x] **Task 1 — Build scaffold + version smoke test.** ✅ implemented, reviewed clean (1/1 test).
       *Awaiting user commit at time of writing.* Note: `tests/CMakeLists.txt` includes
       `${CMAKE_CURRENT_SOURCE_DIR}` — needed by Task 7's `fakes/` include, keep it.
-- [ ] Task 2 — Result/Error type (`core/include/devmgr/core/result.hpp`).
+- [x] **Task 2 — Result/Error type** (`core/include/devmgr/core/result.hpp`). ✅ implemented via
+      TDD, 3/3 tests green. *Awaiting user commit.* Note: local clang-format 21.1.8 disagrees with
+      the committed code style (regroups includes, collapses short `TEST` bodies) — affects Task 1
+      files too. Resolve project-wide before Task 9's CI lands (pin `.clang-format` or reformat tree).
 - [ ] Task 3 — Domain models + enum string helpers (`models.hpp/.cpp`).
 - [ ] Task 4 — Event types + thread-safe EventBus (`events.hpp`, `runtime/event_bus.hpp`).
 - [ ] Task 5 — Logging facade (`runtime/logging.hpp/.cpp`).
