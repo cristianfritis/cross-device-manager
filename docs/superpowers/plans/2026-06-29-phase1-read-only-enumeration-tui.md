@@ -155,6 +155,7 @@ target_compile_features(devmgr_app PUBLIC cxx_std_20)
 
 `tui/src/main.cpp`:
 ```cpp
+#include <ftxui/component/component.hpp>          // Renderer
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
@@ -396,7 +397,7 @@ Expected: FAILS — `fatal error: devmgr/platform/linux/udev_field_mapping.hpp: 
 namespace devmgr::platform_linux {
 
 inline std::uint64_t fnv1a64(std::string_view s) {
-    std::uint64_t h = 1469598103934665603ULL;
+    std::uint64_t h = 14695981039346656037ULL;
     for (unsigned char c : s) {
         h ^= c;
         h *= 1099511628211ULL;
