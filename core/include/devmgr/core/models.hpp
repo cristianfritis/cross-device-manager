@@ -37,6 +37,8 @@ struct Device {
     std::optional<std::string> boundDriver;
     std::map<std::string, std::string> properties;
     std::optional<std::string> errorNote;
+
+    friend bool operator==(const Device&, const Device&) = default;
 };
 
 struct Driver {
