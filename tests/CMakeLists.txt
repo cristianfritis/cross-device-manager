@@ -12,6 +12,8 @@ add_executable(devmgr_tests
     unit/test_udev_field_mapping.cpp
     unit/test_device_service.cpp
     unit/test_application_facade.cpp
+    unit/test_device_list_vm.cpp
+    unit/test_device_detail_vm.cpp
 )
 target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest GTest::gtest_main)
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
