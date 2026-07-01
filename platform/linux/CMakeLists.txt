@@ -1,8 +1,12 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UDEV REQUIRED IMPORTED_TARGET libudev)   # -> PkgConfig::UDEV
 
-add_library(devmgr_pal_linux STATIC src/udev_device_enumerator.cpp)
-target_include_directories(devmgr_pal_linux PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_library(devmgr_pal_linux STATIC
+    src/udev_device_enumerator.cpp
+    src/udev_device_mapper.cpp)
+target_include_directories(devmgr_pal_linux
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(devmgr_pal_linux
     PUBLIC devmgr_core
     PRIVATE PkgConfig::UDEV)

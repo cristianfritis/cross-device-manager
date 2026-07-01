@@ -5,7 +5,11 @@
 #include <string>
 #include <string_view>
 
+#include <array>
+#include <optional>
+
 #include "devmgr/core/models.hpp"
+#include "devmgr/pal/hotplug_event.hpp"
 
 namespace devmgr::platform_linux {
 
@@ -16,6 +20,25 @@ inline std::uint64_t fnv1a64(std::string_view s) {
         h *= 1099511628211ULL;
     }
     return h;
+}
+
+// The subsystems this app models. Shared by the enumerator (scan filter) and the
+// hotplug monitor (netlink match + post-receive re-validation) so they stay in sync.
+inline constexpr std::array<std::string_view, 4> kSubsystems{"pci", "usb", "platform", "virtio"};
+
+// Maps a udev action string (from udev_device_get_action) to a domain action.
+// add->Added, remove->Removed, everything else that mutates an existing device
+// (change/bind/unbind/move/online/offline)->Changed; unknown/null -> nullopt (ignore).
+inline std::optional<pal::HotplugEvent::Action> actionFromString(const char* action) {
+    if (action == nullptr) return std::nullopt;
+    const std::string_view a(action);
+    if (a == "add") return pal::HotplugEvent::Action::Added;
+    if (a == "remove") return pal::HotplugEvent::Action::Removed;
+    if (a == "change" || a == "bind" || a == "unbind" || a == "move" || a == "online" ||
+        a == "offline") {
+        return pal::HotplugEvent::Action::Changed;
+    }
+    return std::nullopt;
 }
 
 // Deterministic, process-stable device identity (unlike std::hash<string>).

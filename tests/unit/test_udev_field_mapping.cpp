@@ -49,3 +49,16 @@ TEST(UdevFieldMapping, FirstNonEmptyPicksFirstUsableValue) {
     EXPECT_EQ(firstNonEmpty({a, b, c}), "good");
     EXPECT_EQ(firstNonEmpty({a, b}), "");
 }
+
+TEST(UdevFieldMapping, ActionFromStringCoversTheFullUdevActionSet) {
+    using devmgr::platform_linux::actionFromString;
+    using Action = devmgr::pal::HotplugEvent::Action;
+
+    EXPECT_EQ(actionFromString("add"), Action::Added);
+    EXPECT_EQ(actionFromString("remove"), Action::Removed);
+    for (const char* changed : {"change", "bind", "unbind", "move", "online", "offline"}) {
+        EXPECT_EQ(actionFromString(changed), Action::Changed) << changed;
+    }
+    EXPECT_EQ(actionFromString(nullptr), std::nullopt);
+    EXPECT_EQ(actionFromString("bogus"), std::nullopt);
+}
