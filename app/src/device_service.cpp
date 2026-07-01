@@ -1,5 +1,6 @@
 #include "devmgr/app/device_service.hpp"
 
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -37,6 +38,37 @@ void DeviceService::applyEnumeration(std::vector<core::Device> snapshot) {
     for (const auto& id : removed) bus_.publish(core::DeviceRemovedEvent{id});
     for (auto& d : added) bus_.publish(core::DeviceAddedEvent{std::move(d)});
     for (auto& d : changed) bus_.publish(core::DeviceChangedEvent{std::move(d)});
+}
+
+void DeviceService::applyDelta(const pal::HotplugEvent& event) {
+    std::optional<core::DeviceAddedEvent> added;
+    std::optional<core::DeviceChangedEvent> changed;
+    std::optional<core::DeviceRemovedEvent> removed;
+
+    {
+        std::scoped_lock lock(mutex_);
+        const std::string key = event.device.id.value;
+        auto it = model_.find(key);
+        if (event.action == pal::HotplugEvent::Action::Removed) {
+            if (it != model_.end()) {
+                removed = core::DeviceRemovedEvent{it->second.id};
+                model_.erase(it);
+            }
+        } else {  // Added or Changed — reconcile against the live model
+            if (it == model_.end()) {
+                model_.emplace(key, event.device);
+                added = core::DeviceAddedEvent{event.device};
+            } else if (!(it->second == event.device)) {
+                it->second = event.device;
+                changed = core::DeviceChangedEvent{event.device};
+            }
+        }
+    }
+
+    // Publish outside the lock (same discipline as applyEnumeration).
+    if (removed) bus_.publish(*removed);
+    if (added) bus_.publish(*added);
+    if (changed) bus_.publish(*changed);
 }
 
 std::vector<core::Device> DeviceService::devices() const {

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "devmgr/core/models.hpp"
+#include "devmgr/pal/hotplug_event.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 
 namespace devmgr::app {
@@ -17,6 +18,7 @@ class DeviceService {
     explicit DeviceService(runtime::EventBus& bus) : bus_(bus) {}
 
     void applyEnumeration(std::vector<core::Device> snapshot);
+    void applyDelta(const pal::HotplugEvent& event);
     std::vector<core::Device> devices() const;
     std::optional<core::Device> findById(const core::DeviceId& id) const;
 
