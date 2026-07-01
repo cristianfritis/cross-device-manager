@@ -2,7 +2,7 @@ find_package(GTest CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UMOCKDEV REQUIRED IMPORTED_TARGET umockdev-1.0)   # -> PkgConfig::UMOCKDEV
 
-add_executable(devmgr_integration_tests test_udev_enumerator.cpp)
+add_executable(devmgr_integration_tests test_udev_enumerator.cpp test_udev_hotplug_monitor.cpp)
 target_link_libraries(devmgr_integration_tests
     PRIVATE devmgr_pal_linux devmgr_core
             PkgConfig::UMOCKDEV
