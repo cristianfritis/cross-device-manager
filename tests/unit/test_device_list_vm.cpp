@@ -3,6 +3,7 @@
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_list_vm.hpp"
 #include "devmgr/app/device_service.hpp"
+#include "devmgr/pal/hotplug_event.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "fakes/fake_pal.hpp"
@@ -90,4 +91,42 @@ TEST(DeviceListVmTest, SelectedDeviceIdMapsRowsAndIsNulloptOnHeader) {
             EXPECT_EQ(vm.selectedDeviceId()->value, "u1");
         }
     }
+}
+
+TEST(DeviceListVmTest, PreservesSelectionByDeviceIdAcrossRebuild) {
+    Fixture f;
+    // Two USB devices; names chosen so inserting "Alpha" later shifts row order.
+    f.pal.seedDevice(dev("dev-beta", core::BusType::Usb, "Beta"));
+
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+
+    f.facade.refresh().wait();  // publishes Added; InlineUiDispatcher rebuilds synchronously
+
+    // Select "Beta" by finding its row.
+    auto rowOf = [&](const char* id) {
+        for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i) {
+            vm.selectedRef() = i;
+            auto sel = vm.selectedDeviceId();
+            if (sel && sel->value == id) return i;
+        }
+        return -1;
+    };
+    const int betaRow = rowOf("dev-beta");
+    ASSERT_GE(betaRow, 0);
+    vm.selectedRef() = betaRow;
+
+    // A new device "Alpha" appears and sorts before "Beta", shifting indices.
+    core::Device alpha;
+    alpha.id = core::DeviceId{"dev-alpha"};
+    alpha.name = "Alpha";
+    alpha.bus = core::BusType::Usb;
+    alpha.status = core::DeviceStatus::Active;
+    f.svc.applyDelta(
+        pal::HotplugEvent{.action = pal::HotplugEvent::Action::Added, .device = alpha});
+
+    // Selection must still resolve to Beta, not whatever now sits at the old index.
+    auto sel = vm.selectedDeviceId();
+    ASSERT_TRUE(sel.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    EXPECT_EQ(sel->value, "dev-beta");
 }

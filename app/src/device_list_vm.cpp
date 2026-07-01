@@ -54,6 +54,7 @@ void DeviceListVM::rebuild() {
         core::BusType::Pci, core::BusType::Usb, core::BusType::Platform, core::BusType::Virtio,
         core::BusType::Other};
 
+    const std::optional<core::DeviceId> keep = selectedDeviceId();
     const std::string needle = toLower(filter_);
     auto devices = facade_.devices();
 
@@ -79,9 +80,12 @@ void DeviceListVM::rebuild() {
         rows_.emplace_back("(no devices)");
         rowIds_.emplace_back(std::nullopt);
     }
-    if (selected_ < 0) selected_ = 0;
-    if (std::cmp_greater_equal(selected_, rows_.size()))
-        selected_ = static_cast<int>(rows_.size()) - 1;
+    if (keep) {  // keep the highlighted device stable across mutations
+        if (auto it = std::ranges::find(rowIds_, keep); it != rowIds_.end())
+            selected_ = static_cast<int>(std::distance(rowIds_.begin(), it));
+    }
+    // device vanished -> clamp to nearest valid row
+    selected_ = std::max(0, std::min(static_cast<int>(rows_.size()) - 1, selected_));
 }
 
 std::optional<core::DeviceId> DeviceListVM::selectedDeviceId() const {
