@@ -8,6 +8,7 @@ add_executable(devmgr_tests
     unit/test_event_bus.cpp
     unit/test_logging.cpp
     unit/test_task_scheduler.cpp
+    unit/test_delayed_scheduler.cpp
     unit/test_fake_pal.cpp
     unit/test_udev_field_mapping.cpp
     unit/test_device_service.cpp
