@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
+#include <iterator>
 #include <utility>
 
 #include "devmgr/core/events.hpp"
@@ -20,11 +22,8 @@ std::string toUpper(std::string s) {
     return s;
 }
 
-bool matchesFilter(const core::Device& d, const std::string& needleLower) {
-    if (needleLower.empty()) return true;
-    std::string hay =
-        toLower(d.name + " " + d.vendorId + ":" + d.productId + " " + core::to_string(d.bus));
-    return hay.find(needleLower) != std::string::npos;
+std::string haystackFor(const core::Device& d) {
+    return toLower(d.name + " " + d.vendorId + ":" + d.productId + " " + core::to_string(d.bus));
 }
 
 }  // namespace
@@ -40,13 +39,41 @@ DeviceListVM::DeviceListVM(ApplicationFacade& facade, runtime::EventBus& bus,
 }
 
 void DeviceListVM::onModelChanged() {
-    // Handler may run on a TaskScheduler worker — marshal the rebuild to the UI thread.
-    dispatcher_.post([this] { rebuild(); });
+    // Handler may run on a TaskScheduler worker or the hotplug timer thread.
+    // Invalidate the snapshot first, then marshal the rebuild to the UI thread
+    // — at most one queued rebuild per burst of deltas: the flag is cleared
+    // before rebuild() runs, so a delta arriving mid-rebuild posts a fresh one.
+    snapshotValid_.store(false);
+    if (!rebuildQueued_.exchange(true)) {
+        dispatcher_.post([this] {
+            rebuildQueued_.store(false);
+            rebuild();
+        });
+    }
 }
 
 void DeviceListVM::setFilter(std::string filter) {
     filter_ = std::move(filter);
-    rebuild();  // called on the UI thread (Input.on_change)
+    rebuild();  // called on the UI thread (Input.on_change); reuses the cached snapshot
+}
+
+void DeviceListVM::refreshSnapshot() {
+    snapshot_ = facade_.devices();
+    haystacks_.clear();
+    haystacks_.reserve(snapshot_.size());
+    for (const auto& d : snapshot_) haystacks_.push_back(haystackFor(d));
+}
+
+void DeviceListVM::appendRows(core::BusType bus, std::vector<const core::Device*>& group) {
+    if (group.empty()) return;
+    std::ranges::sort(
+        group, [](const core::Device* a, const core::Device* b) { return a->name < b->name; });
+    rows_.push_back(std::string("── ") + toUpper(core::to_string(bus)) + " ──");
+    rowIds_.emplace_back(std::nullopt);  // header
+    for (const core::Device* d : group) {
+        rows_.push_back("  " + d->name + "  (" + d->vendorId + ":" + d->productId + ")");
+        rowIds_.emplace_back(d->id);
+    }
 }
 
 void DeviceListVM::rebuild() {
@@ -56,25 +83,23 @@ void DeviceListVM::rebuild() {
 
     const std::optional<core::DeviceId> keep = selectedDeviceId();
     const std::string needle = toLower(filter_);
-    auto devices = facade_.devices();
+
+    // Claim-then-fetch: exchange before copying so an invalidation racing this
+    // fetch is observed by that event's own posted rebuild (see onModelChanged).
+    if (!snapshotValid_.exchange(true)) refreshSnapshot();
+
+    // Group matches by bus in one pass, by pointer — no Device copies per rebuild.
+    std::vector<std::vector<const core::Device*>> groups(kOrder.size());
+    for (std::size_t i = 0; i < snapshot_.size(); ++i) {
+        if (!needle.empty() && haystacks_[i].find(needle) == std::string::npos) continue;
+        const auto slot = static_cast<std::size_t>(
+            std::distance(kOrder.begin(), std::ranges::find(kOrder, snapshot_[i].bus)));
+        if (slot < groups.size()) groups[slot].push_back(&snapshot_[i]);
+    }
 
     rows_.clear();
     rowIds_.clear();
-    for (core::BusType bus : kOrder) {
-        std::vector<core::Device> group;
-        for (auto& d : devices) {
-            if (d.bus == bus && matchesFilter(d, needle)) group.push_back(d);
-        }
-        if (group.empty()) continue;
-        std::ranges::sort(
-            group, [](const core::Device& a, const core::Device& b) { return a.name < b.name; });
-        rows_.push_back(std::string("── ") + toUpper(core::to_string(bus)) + " ──");
-        rowIds_.emplace_back(std::nullopt);  // header
-        for (const auto& d : group) {
-            rows_.push_back("  " + d.name + "  (" + d.vendorId + ":" + d.productId + ")");
-            rowIds_.emplace_back(d.id);
-        }
-    }
+    for (std::size_t g = 0; g < kOrder.size(); ++g) appendRows(kOrder.at(g), groups[g]);
 
     if (rows_.empty()) {
         rows_.emplace_back("(no devices)");

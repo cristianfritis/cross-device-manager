@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,16 +23,31 @@ class DeviceListVM {
     int& selectedRef() { return selected_; }
     void setFilter(std::string filter);
     std::optional<core::DeviceId> selectedDeviceId() const;
-    void rebuild();  // UI-thread: re-read model, filter, group, clamp selection
+    void rebuild();  // UI-thread: refresh snapshot if stale, filter, group, clamp selection
 
    private:
-    void onModelChanged();  // EventBus handler — marshals rebuild() via dispatcher
+    void onModelChanged();   // EventBus handler — marshals one coalesced rebuild() via dispatcher
+    void refreshSnapshot();  // UI-thread: re-copy the model and rebuild filter haystacks
+    // Sorts `group` by name and appends its header + device rows to rows_/rowIds_.
+    void appendRows(core::BusType bus, std::vector<const core::Device*>& group);
 
     ApplicationFacade& facade_;
     IUiDispatcher& dispatcher_;
     std::string filter_;
     std::vector<std::string> rows_;
     std::vector<std::optional<core::DeviceId>> rowIds_;  // nullopt == group header
+    // Model snapshot cached on the UI thread so filter keystrokes rebuild rows
+    // without re-copying the whole model out of DeviceService. haystacks_ holds
+    // the per-device lowercase filter text, aligned with snapshot_, computed
+    // once per snapshot refresh instead of once per device per keystroke.
+    std::vector<core::Device> snapshot_;
+    std::vector<std::string> haystacks_;
+    // false => snapshot_ is stale and the next rebuild() must re-fetch. Written
+    // by onModelChanged() on publisher threads, claimed (exchange) on the UI
+    // thread; a store(false) racing a rebuild's fetch is followed by that
+    // event's own posted rebuild, so no invalidation is ever lost.
+    std::atomic<bool> snapshotValid_{false};
+    std::atomic<bool> rebuildQueued_{false};  // one dispatcher post per burst of deltas
     int selected_ = 0;
     runtime::Subscription subAdded_;
     runtime::Subscription subRemoved_;

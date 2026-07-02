@@ -1,6 +1,8 @@
 #include "tui/src/tui_app.hpp"
 
+#include <chrono>
 #include <future>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -72,11 +74,25 @@ int runTuiApp() {
 
     auto leftPane = Container::Vertical({searchInput, deviceMenu});
 
+    // Detail-pane render cache: FTXUI re-renders after every event (mouse moves
+    // included), but the detail content can only change when the selection
+    // moves or a model update arrives via Event::Custom. Rebuilding lines()
+    // per frame copies the selected Device (properties map included) out of
+    // the model every time — cache until selection or model changes instead.
+    std::optional<core::DeviceId> detailForId;
+    std::vector<std::string> detailLines;
+    bool detailDirty = true;
+
     auto detailRenderer = Renderer([&] {
-        Elements els;
-        for (const auto& line : detailVm.lines(listVm.selectedDeviceId())) {
-            els.push_back(text(line));
+        const auto id = listVm.selectedDeviceId();
+        if (detailDirty || id != detailForId) {
+            detailLines = detailVm.lines(id);
+            detailForId = id;
+            detailDirty = false;
         }
+        Elements els;
+        els.reserve(detailLines.size());
+        for (const auto& line : detailLines) els.push_back(text(line));
         return vbox(std::move(els)) | flex;
     });
 
@@ -101,6 +117,7 @@ int runTuiApp() {
 
     auto root = CatchEvent(ui, [&](const Event& event) {
         if (event == Event::Custom) {  // worker posted a UI update
+            detailDirty = true;        // the model may have changed under the detail pane
             dispatcher.drain();
             return true;
         }
@@ -109,6 +126,11 @@ int runTuiApp() {
             return true;
         }
         if (event == Event::Character('r')) {
+            // Drop already-completed refreshes so `pending` stays bounded over
+            // a long session instead of growing by one future per keypress.
+            std::erase_if(pending, [](const std::future<void>& f) {
+                return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+            });
             pending.push_back(facade.refresh());  // fire; results arrive via the dispatcher
             return true;
         }

@@ -76,7 +76,7 @@ void HotplugService::flush(const std::string& id) {
         std::scoped_lock lock(mutex_);
         auto it = pending_.find(id);
         if (it != pending_.end()) {
-            event = it->second.event;
+            event = std::move(it->second.event);
             pending_.erase(it);
         }
         // Else: cancelled/superseded — a faster flush() for this id (or
