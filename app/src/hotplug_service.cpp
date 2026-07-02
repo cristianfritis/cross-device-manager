@@ -20,12 +20,25 @@ core::Result<void> HotplugService::start() {
 void HotplugService::stop() {
     monitor_.stop();  // joins the reader thread — onEvent will no longer be called
     std::unique_lock<std::mutex> lock(mutex_);
-    for (auto& [id, pending] : pending_) timer_.cancel(pending.handle);
+    for (auto& [id, pending] : pending_) {
+        // cancel() returning true guarantees this flush will never run, so we
+        // can resolve (decrement) its outstanding claim right here; false
+        // means the timer thread had already dequeued it — flush() itself
+        // will decrement once it actually runs (it will find pending_
+        // already cleared below and simply skip applying, per its own
+        // comment). See the class doc comment for why the wait below, not
+        // this cancel() call, is what actually resolves that case.
+        if (timer_.cancel(pending.handle)) --outstandingFlushes_;
+    }
     pending_.clear();
     // Wait for any flush() the scheduler had already dequeued (and which the
-    // cancel() calls above therefore could not reach) to finish running before
-    // returning — see the class doc comment for why this barrier is required.
-    flushDone_.wait(lock, [this] { return inFlightFlushes_ == 0; });
+    // cancel() calls above therefore could not reach) to finish running
+    // before returning — see the class doc comment for why this barrier is
+    // required, and why claiming outstandingFlushes_ at schedule() time (in
+    // onEvent()), not from inside flush(), is what makes this wait correct:
+    // it cannot observe zero while a dequeued-but-not-yet-run flush is still
+    // about to touch `this`.
+    flushDone_.wait(lock, [this] { return outstandingFlushes_ == 0; });
 }
 
 void HotplugService::onEvent(const pal::HotplugEvent& event) {
@@ -38,12 +51,22 @@ void HotplugService::onEvent(const pal::HotplugEvent& event) {
         // ahead of the nominal window) carrying whatever event it already
         // captured. The final state is still correct — this newer event lands
         // in `pending_` and gets its own fresh window — just the debounce
-        // timing is approximate under adversarial scheduler racing.
-        timer_.cancel(it->second.handle);  // reset this device's trailing window
+        // timing is approximate under adversarial scheduler racing. cancel()
+        // returning true guarantees the old flush will never run, so we
+        // resolve its outstanding claim immediately; false means it's
+        // already dequeued and stays counted until flush() itself resolves
+        // it (see flush()).
+        if (timer_.cancel(it->second.handle)) --outstandingFlushes_;
         it->second.event = event;
     } else {
         it = pending_.emplace(id, Pending{.event = event, .handle = 0}).first;
     }
+    // Claim this schedule's outstanding status right here, in the same
+    // critical section as the schedule() call below — not from inside
+    // flush() — so stop()'s barrier can never observe zero outstanding work
+    // while this flush is dequeued-but-not-yet-run. See the class doc
+    // comment.
+    ++outstandingFlushes_;
     it->second.handle = timer_.schedule(window_, [this, id] { flush(id); });
 }
 
@@ -52,21 +75,27 @@ void HotplugService::flush(const std::string& id) {
     {
         std::scoped_lock lock(mutex_);
         auto it = pending_.find(id);
-        if (it == pending_.end()) return;  // cancelled/superseded
-        event = it->second.event;
-        pending_.erase(it);
-        // Marked in-flight in the same critical section as the pending_ erase
-        // above so stop()'s locked cancel-and-clear pass and this increment are
-        // strictly ordered by mutex_: whichever runs first, stop() is
-        // guaranteed to observe this flush as either absent from pending_ (not
-        // yet started) or counted in inFlightFlushes_ (already started) —
-        // never neither, which is what would let stop() return early.
-        ++inFlightFlushes_;
+        if (it != pending_.end()) {
+            event = it->second.event;
+            pending_.erase(it);
+        }
+        // Else: cancelled/superseded — a faster flush() for this id (or
+        // stop()) already erased the pending_ entry (see onEvent()'s comment
+        // above). Either way this schedule must still resolve exactly once,
+        // below.
     }
-    service_.applyDelta(*event);  // cheap, non-blocking; publishes on this timer thread
+    if (event) service_.applyDelta(*event);  // cheap, non-blocking; publishes on this timer thread
     {
         std::scoped_lock lock(mutex_);
-        --inFlightFlushes_;
+        // This schedule is now resolved regardless of which branch above ran
+        // — it has definitely finished running, including any applyDelta()
+        // call above (which touches this->service_). This is the only place
+        // a false-cancel()'d schedule (dequeued by the worker thread but not
+        // yet run when onEvent()'s reschedule or stop() raced it) ever gets
+        // resolved, which is exactly what makes stop()'s flushDone_.wait()
+        // safe to block on: it cannot return while any dequeued-but-not-yet-
+        // run flush is still touching `this`.
+        --outstandingFlushes_;
     }
     flushDone_.notify_all();
 }

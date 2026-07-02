@@ -89,3 +89,54 @@ TEST(HotplugService, AddThenRemoveWithinWindowCancelsCleanly) {
     EXPECT_TRUE(service.devices().empty());
     hotplug.stop();
 }
+
+// Regression/stress test for the confirmed use-after-free race: flush() must
+// claim its outstanding status at schedule() time (in onEvent()), not from
+// inside the callback itself, or stop()'s outstandingFlushes_==0 barrier can
+// observe zero outstanding work and return early while DelayedScheduler's
+// worker thread has already dequeued a flush() entry (so a subsequent
+// cancel() on it reports false) but not yet acquired mutex_ to run it — at
+// which point ~HotplugService() proceeds to destroy mutex_/pending_/etc.
+// while that dequeued flush() is still about to touch them. See the class
+// doc comment in hotplug_service.hpp.
+//
+// A true UAF race is inherently non-deterministic to force open on demand, so
+// this test instead stresses the window heavily, mirroring
+// StatusLineVM.RepeatedShortTtlDestructionDoesNotRaceOrHang: many
+// construct/start/inject-event/destroy cycles against a single shared, busy
+// DelayedScheduler with a ~0ms debounce window, so the flush is very likely
+// already due — and often already dequeued by the worker thread — the
+// instant the destructor runs. A hang or crash here is a real regression,
+// not test flakiness (see the task report for the revert-experiment that
+// confirms this test actually fails without the fix).
+//
+// kIterations is much larger here than StatusLineVM's analogous 200: this
+// class's per-iteration constructor/destructor path is far cheaper (no
+// EventBus subscribe()/unsubscribe() calls), so each loop iteration completes
+// in only a few microseconds — far too fast, empirically, for
+// DelayedScheduler's worker thread to reliably wake and dequeue an entry
+// before the object is already gone. At 200-20,000 iterations the
+// claim-inside-callback bug reproduced only intermittently (0/3-5 runs); at
+// 100,000 it reproduced 5/5 (a glibc fatal error locking a destroyed mutex)
+// while still completing in well under a second under the fix — see the task
+// report for the full tuning data.
+TEST(HotplugService, RepeatedNearZeroWindowDestructionDoesNotRaceOrHang) {
+    devmgr::runtime::EventBus bus;
+    devmgr::runtime::DelayedScheduler timer;  // shared across iterations: one busy worker thread
+    devmgr::app::DeviceService service(bus);
+
+    constexpr int kIterations = 100000;
+    for (int i = 0; i < kIterations; ++i) {
+        devmgr::test::FakeHotplugMonitor monitor;
+        devmgr::app::HotplugService hotplug(monitor, service, timer, 0ms);
+        ASSERT_TRUE(hotplug.start().has_value());
+
+        using Ev = devmgr::pal::HotplugEvent;
+        monitor.emit(Ev{Ev::Action::Added, usbDevice("dev-" + std::to_string(i), "Widget")});
+        // No synchronization delay here on purpose: destroying immediately
+        // maximizes the chance the ~0ms flush is already due (or already
+        // dequeued by the timer thread) right as the destructor's cancel()
+        // calls race it.
+    }
+    SUCCEED();
+}

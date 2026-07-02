@@ -21,6 +21,9 @@ class IHotplugMonitor {
     using Callback = std::function<void(const HotplugEvent&)>;
     virtual ~IHotplugMonitor() = default;
     virtual core::Result<void> start(Callback callback) = 0;
+    // Implementations must block until the reader thread is joined and must
+    // guarantee no further callbacks fire after stop() returns —
+    // HotplugService::stop()'s correctness depends on this.
     virtual void stop() = 0;
 };
 
