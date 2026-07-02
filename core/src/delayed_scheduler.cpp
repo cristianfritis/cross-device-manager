@@ -13,6 +13,17 @@ DelayedScheduler::~DelayedScheduler() {
 
 DelayedScheduler::Handle DelayedScheduler::schedule(std::chrono::milliseconds delay,
                                                     std::function<void()> fn) {
+    // Deliberately does NOT check stopping_ here — always enqueues, even after
+    // shutdown() has been called. This is load-bearing for the completion-barrier
+    // consumers (HotplugService, StatusLineVM): they claim outstanding work at
+    // schedule() time and resolve it via cancel()'s bool return. A post-shutdown
+    // schedule() must still land in index_ so a later cancel() can find it and
+    // return true, resolving the consumer's claim. If schedule() instead dropped
+    // the entry post-shutdown while still returning a handle, cancel() would
+    // return false for it, the callback would never run to resolve the claim
+    // either, and the consumer's outstanding-work count would never reach zero —
+    // hanging its stop()/destructor forever. Do not "optimize" this to early-
+    // return post-shutdown.
     const auto due = Clock::now() + delay;
     std::scoped_lock lock(mutex_);
     const Handle id = nextId_++;
@@ -22,13 +33,14 @@ DelayedScheduler::Handle DelayedScheduler::schedule(std::chrono::milliseconds de
     return id;
 }
 
-void DelayedScheduler::cancel(Handle handle) {
+bool DelayedScheduler::cancel(Handle handle) {
     std::scoped_lock lock(mutex_);
     auto found = index_.find(handle);
-    if (found == index_.end()) return;
+    if (found == index_.end()) return false;
     queue_.erase(found->second);
     index_.erase(found);
     cv_.notify_all();
+    return true;
 }
 
 void DelayedScheduler::shutdown() {

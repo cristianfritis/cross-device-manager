@@ -36,9 +36,25 @@ TEST(DelayedScheduler, CancelBeforeFireSuppressesCallback) {
     DelayedScheduler timer;
     std::atomic<int> fired{0};
     auto h = timer.schedule(100ms, [&] { fired.fetch_add(1); });
-    timer.cancel(h);
+    EXPECT_TRUE(timer.cancel(h));  // still queued: found-and-removed, guaranteed suppressed
     std::this_thread::sleep_for(150ms);
     EXPECT_EQ(fired.load(), 0);
+}
+
+// Callers (HotplugService, StatusLineVM) build a completion barrier on top of
+// this return value: true means the callback is guaranteed to never run, so
+// it's safe to resolve/decrement outstanding work immediately; false means
+// cancel() could not confirm that and the caller must instead wait for the
+// callback itself to run and resolve. An unknown/already-fired/already-
+// cancelled handle must therefore report false, not silently succeed.
+TEST(DelayedScheduler, CancelOfUnknownOrAlreadyFiredHandleReturnsFalse) {
+    DelayedScheduler timer;
+    std::atomic<int> fired{0};
+    EXPECT_FALSE(timer.cancel(999));  // never scheduled
+
+    auto h = timer.schedule(5ms, [&] { fired.fetch_add(1); });
+    EXPECT_TRUE(waitFor([&] { return fired.load() == 1; }, 1s));
+    EXPECT_FALSE(timer.cancel(h));  // already fired — no longer queued
 }
 
 TEST(DelayedScheduler, RunsDueCallbacksInOrderAcrossHandles) {
