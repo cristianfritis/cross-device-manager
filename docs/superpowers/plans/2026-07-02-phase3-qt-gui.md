@@ -15,12 +15,12 @@
 id|status|task|note
 T1|x|VM isHeader + rebuild hooks|committed `86238c2`; 56/56
 T2|x|CMake gating + QtUiDispatcher + offscreen harness|committed `345fef6`; 60/60
-T3|x|DeviceListModel|IMPL DONE, awaits user commit; 64/64, format+tidy clean
-T4|.|MainWindow|next; target 69 tests
-T5|.|runGuiApp + --self-test|70 tests
+T3|x|DeviceListModel|committed `faa1a0d`; 64/64
+T4|x|MainWindow|IMPL DONE, awaits user commit; 69/69, format clean
+T5|.|runGuiApp + --self-test|next; 70 tests
 T6|.|CI/Docker/purity guard|then user manual parity smoke (§ below) = phase exit gate
 
-Next session: verify T3 commit landed (`git log`) → T4 Step 1 (write `gui/tests/test_main_window.cpp`, code verbatim in task). Skill flow: superpowers:executing-plans, inline, caveman docs.
+Next: USER commits T4 → T5 Step 1 (write `gui/src/gui_app.hpp/.cpp` + `main.cpp`, code verbatim in task; no new unit test — selftest smoke is the cycle). Skill flow: superpowers:executing-plans, inline, caveman docs.
 
 Env gotchas (full detail: memory `phase3-execution-status`):
 - Host clang-tidy (LLVM 21) dies on `-mno-direct-extern-access` — GCC-only flag from host Qt (`/usr/lib64/cmake/Qt6/Qt6Targets.cmake`) ∈ compile_commands.json ∀ gui/ TU. CI container unaffected. ⊥ strip from build. Local tidy: `sed 's/-mno-direct-extern-access //g' build/linux-debug/compile_commands.json > <dir>/compile_commands.json && clang-tidy -p <dir> --warnings-as-errors='*' <files>`. ! again @ T6 Step 4.
@@ -682,7 +682,7 @@ Expected: 4/4 pass (the ModelTester runs its checks inside the first test — a 
 Run: `clang-format --dry-run --Werror gui/src/device_list_model.hpp gui/src/device_list_model.cpp gui/tests/test_device_list_model.cpp`
 Expected: clean.
 
-- [ ] **Step 6: USER commits**
+- [x] **Step 6: USER commits** — committed `faa1a0d`
 
 ```
 feat(gui): DeviceListModel — flat QAbstractListModel over shared DeviceListVM, reset-bracketed rebuilds
@@ -710,7 +710,7 @@ Behavior contract (mirrors the TUI):
 - `dispatcher.taskExecuted` → re-read `statusVm.text()` into the status bar (the Qt analogue of the TUI re-rendering on `Event::Custom`; `StatusLineVM` posts a wake closure on every message set/clear).
 - Detail pane: two-column read-only `QTreeWidget` (Field | Value). `DeviceDetailVM::lines()` emits `"Label:   value"` strings — split each on the **first** `':'`, trim both halves; a line with no `':'` (e.g. `"(no device selected)"`) goes into column 0 alone. No per-frame caching (deliberate deviation from the TUI's detail cache: Qt only calls these slots on sparse events, not per frame).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `gui/tests/test_main_window.cpp`:
 
@@ -860,12 +860,13 @@ Add to `gui/CMakeLists.txt`: `src/main_window.cpp` under `devmgr_gui`, `tests/te
 
 Note: `<utility>` for `std::cmp_less` comes in via the app headers already included; add `#include <utility>` explicitly at the top of the test file anyway (include-what-you-use).
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cmake --build --preset linux-debug`
 Expected: BUILD FAILURE — `gui/src/main_window.hpp: No such file or directory`.
+(Actual: CMake generate error on missing `src/main_window.cpp` — same failing state as Tasks 2–3.)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `gui/src/main_window.hpp`:
 
@@ -1036,15 +1037,15 @@ void MainWindow::updateStatusBar() {
 }  // namespace devmgr::gui
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R MainWindowTest --output-on-failure`
-Expected: 5/5 pass. Then full suite: 69 tests, all pass.
+Expected: 5/5 pass. Then full suite: 69 tests, all pass. (Confirmed: 5/5, then 69/69.)
 
-- [ ] **Step 5: Format gate**
+- [x] **Step 5: Format gate**
 
 Run: `clang-format --dry-run --Werror gui/src/main_window.hpp gui/src/main_window.cpp gui/tests/test_main_window.cpp`
-Expected: clean.
+Expected: clean. (Plan-verbatim wraps needed `-i` touch-up — 3 lines rewrapped; suite re-verified 69/69 after.)
 
 - [ ] **Step 6: USER commits**
 
