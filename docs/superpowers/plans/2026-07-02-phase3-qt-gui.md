@@ -10,6 +10,23 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-29-phase3-qt-gui-design.md` (approved 2026-07-02).
 
+## Resume State (2026-07-02, session end)
+
+id|status|task|note
+T1|x|VM isHeader + rebuild hooks|committed `86238c2`; 56/56
+T2|x|CMake gating + QtUiDispatcher + offscreen harness|committed `345fef6`; 60/60
+T3|x|DeviceListModel|IMPL DONE, awaits user commit; 64/64, format+tidy clean
+T4|.|MainWindow|next; target 69 tests
+T5|.|runGuiApp + --self-test|70 tests
+T6|.|CI/Docker/purity guard|then user manual parity smoke (§ below) = phase exit gate
+
+Next session: verify T3 commit landed (`git log`) → T4 Step 1 (write `gui/tests/test_main_window.cpp`, code verbatim in task). Skill flow: superpowers:executing-plans, inline, caveman docs.
+
+Env gotchas (full detail: memory `phase3-execution-status`):
+- Host clang-tidy (LLVM 21) dies on `-mno-direct-extern-access` — GCC-only flag from host Qt (`/usr/lib64/cmake/Qt6/Qt6Targets.cmake`) ∈ compile_commands.json ∀ gui/ TU. CI container unaffected. ⊥ strip from build. Local tidy: `sed 's/-mno-direct-extern-access //g' build/linux-debug/compile_commands.json > <dir>/compile_commands.json && clang-tidy -p <dir> --warnings-as-errors='*' <files>`. ! again @ T6 Step 4.
+- "Verify it fails" steps → CMake generate error on missing `.cpp` (add_library ref), not plan's predicted compile error — same failing state, expected ∀ remaining create-file tasks.
+- clangd flags fresh gui/ files not-found pre-configure — stale, ignore. `rtk` hook mangles some grep output — prefer direct commands / Read.
+
 ## Global Constraints
 
 - **Qt floor is 6.4** (Ubuntu 24.04 CI). Never use the functor + `Qt::ConnectionType` overload of `QMetaObject::invokeMethod` — it is Qt 6.7+. Use the auto-connection functor overload (`invokeMethod(context, functor)`).
@@ -431,7 +448,7 @@ Expected: configures successfully with no Qt targets (proves the guarded-build r
 Run: `clang-format --dry-run --Werror gui/src/*.hpp gui/src/*.cpp gui/tests/*.cpp`
 Expected: clean. Fix with `-i` if not.
 
-- [ ] **Step 9: USER commits**
+- [x] **Step 9: USER commits** — committed `345fef6`
 
 ```
 feat(gui): scaffold Qt 6 GUI — CMake gating + QtUiDispatcher + offscreen GTest harness
@@ -451,7 +468,7 @@ feat(gui): scaffold Qt 6 GUI — CMake gating + QtUiDispatcher + offscreen GTest
 - Consumes: Task 1's `vm.isHeader(int)`, `vm.setRebuildHooks(before, after)`, plus existing `vm.rowsRef()`; Task 2's `QtUiDispatcher`.
 - Produces (Task 4 depends on this): `class devmgr::gui::DeviceListModel final : public QAbstractListModel` — `explicit DeviceListModel(app::DeviceListVM& vm, QObject* parent = nullptr)`; standard `rowCount`/`data`/`flags` overrides; emits `modelAboutToBeReset`/`modelReset` around every VM rebuild; destructor unregisters the hooks.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `gui/tests/test_device_list_model.cpp`:
 
@@ -571,12 +588,13 @@ TEST(DeviceListModelTest, DataMirrorsVmRows) {
 
 Add to `gui/CMakeLists.txt`: `src/device_list_model.cpp` under `devmgr_gui` sources and `tests/test_device_list_model.cpp` under `devmgr_gui_tests` sources.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cmake --build --preset linux-debug`
 Expected: BUILD FAILURE — `gui/src/device_list_model.hpp: No such file or directory`.
+(Actual: CMake generate error on missing `src/device_list_model.cpp` — same failing state as Task 2 Step 4.)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `gui/src/device_list_model.hpp`:
 
@@ -654,12 +672,12 @@ Qt::ItemFlags DeviceListModel::flags(const QModelIndex& index) const {
 }  // namespace devmgr::gui
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R DeviceListModelTest --output-on-failure`
 Expected: 4/4 pass (the ModelTester runs its checks inside the first test — a contract violation aborts loudly). Then full suite: 64 tests, all pass.
 
-- [ ] **Step 5: Format gate**
+- [x] **Step 5: Format gate**
 
 Run: `clang-format --dry-run --Werror gui/src/device_list_model.hpp gui/src/device_list_model.cpp gui/tests/test_device_list_model.cpp`
 Expected: clean.
