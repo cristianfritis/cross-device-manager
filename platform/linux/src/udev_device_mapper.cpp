@@ -85,7 +85,11 @@ core::Device mapDevice(udev_device* d) {
     dev.productId = strip0x(product);
     dev.serial = std::move(serial);
     dev.boundDriver = opt(udev_device_get_driver(d));
-    dev.status = core::DeviceStatus::Active;
+    // Phase 4: a deauthorized USB device (authorized == "0") is Disabled;
+    // everything else stays Active as before.
+    dev.status = (dev.bus == core::BusType::Usb && sv(attr(d, "authorized")) == "0")
+                     ? core::DeviceStatus::Disabled
+                     : core::DeviceStatus::Active;
 
     if (udev_device* parent = udev_device_get_parent(d)) {  // BORROWED — no unref
         dev.parent = core::DeviceId{idFor(parent)};

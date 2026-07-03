@@ -14,7 +14,7 @@
 
 id|status|task|note
 T1|✅ done|Core seams: criticality facts + guard + PAL signature changes|79/79 green; tidy fixes applied to guard .cpp (starts_with/ranges/designated-init); awaiting user commit
-T2|—|SysfsDeviceController + mapper authorized→Disabled|
+T2|✅ done|SysfsDeviceController + mapper authorized→Disabled|84/84 green; plan-snippet fix: mapper compares sv(attr(d,"authorized")) == "0" (attr returns const char* — literal == would be a pointer compare); mapper umockdev test is container-only (runs at T10); awaiting user commit
 T3|—|LinuxCriticalityProber|
 T4|—|devmgrd_lib: IAuthority + RequestProcessor|
 T5|—|StatusLineVM TaskCompleted + facade setDeviceEnabled/canDisable|

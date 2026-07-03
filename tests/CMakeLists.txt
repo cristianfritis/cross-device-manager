@@ -24,5 +24,8 @@ target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(UNIX AND NOT APPLE)
     # Header-only udev mapping helpers (NO libudev link) — unit-test them directly.
     target_include_directories(devmgr_tests PRIVATE ${CMAKE_SOURCE_DIR}/platform/linux/include)
+    # Linux-only concrete PAL units (controller/prober) — these DO link the PAL lib.
+    target_sources(devmgr_tests PRIVATE unit/test_sysfs_device_controller.cpp)
+    target_link_libraries(devmgr_tests PRIVATE devmgr_pal_linux)
 endif()
 gtest_discover_tests(devmgr_tests)

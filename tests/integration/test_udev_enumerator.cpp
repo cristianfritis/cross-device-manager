@@ -49,4 +49,21 @@ TEST_F(UdevEnumeratorTest, MapsUsbDeviceFieldsAndIsDeterministic) {
     EXPECT_NE(it2, res2->end());
 }
 
+TEST_F(UdevEnumeratorTest, DeauthorizedUsbDeviceMapsToDisabled) {
+    gchar* sys = umockdev_testbed_add_device(bed_, "usb", "1-9", nullptr, "authorized", "0",
+                                             "idVendor", "abcd", "idProduct", "ef01", nullptr,
+                                             "SUBSYSTEM", "usb", nullptr);
+    ASSERT_NE(sys, nullptr);
+    g_free(sys);
+
+    devmgr::platform_linux::UdevDeviceEnumerator enumr;
+    auto res = enumr.enumerate();
+    ASSERT_TRUE(res.has_value()) << res.error().message;
+    auto it = std::find_if(res->begin(), res->end(), [](const auto& d) {
+        return d.vendorId == "abcd" && d.productId == "ef01";
+    });
+    ASSERT_NE(it, res->end());
+    EXPECT_EQ(it->status, devmgr::core::DeviceStatus::Disabled);
+}
+
 }  // namespace
