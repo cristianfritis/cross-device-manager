@@ -13,9 +13,9 @@
 ## Resume State (fill in as tasks complete)
 
 id|status|task|note
-T1|✅ done|Core seams: criticality facts + guard + PAL signature changes|79/79 green; tidy fixes applied to guard .cpp (starts_with/ranges/designated-init); awaiting user commit
-T2|✅ done|SysfsDeviceController + mapper authorized→Disabled|84/84 green; plan-snippet fix: mapper compares sv(attr(d,"authorized")) == "0" (attr returns const char* — literal == would be a pointer compare); mapper umockdev test is container-only (runs at T10); awaiting user commit
-T3|—|LinuxCriticalityProber|
+T1|✅ done|Core seams: criticality facts + guard + PAL signature changes|committed 1263cfc; tidy fixes in guard .cpp (starts_with/ranges/designated-init)
+T2|✅ done|SysfsDeviceController + mapper authorized→Disabled|committed 5732ea1; plan-snippet fix: mapper compares sv(attr(d,"authorized")) == "0" (attr returns const char* — literal == would be pointer compare); mapper umockdev test container-only (runs at T10)
+T3|✅ done|LinuxCriticalityProber|91/91 green (+7); tidy+format clean; plan-snippet deltas: probe() split → collectStorageFacts/collectInputFacts (cognitive-complexity ≤15 gate), rfind→starts_with, std::sort/unique→std::ranges::, consts kKeyQ/kKeyP/kBitsPerWord (magic-number gate), source[0]=='/' → source.starts_with('/'); awaiting user commit
 T4|—|devmgrd_lib: IAuthority + RequestProcessor|
 T5|—|StatusLineVM TaskCompleted + facade setDeviceEnabled/canDisable|
 T6|—|sdbus gating + dbus_contract + ManagerAdaptor + PolkitAuthority + devmgrd|
