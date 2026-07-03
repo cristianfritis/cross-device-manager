@@ -18,9 +18,9 @@ T2|x|CMake gating + QtUiDispatcher + offscreen harness|committed `345fef6`; 60/6
 T3|x|DeviceListModel|committed `faa1a0d`; 64/64
 T4|x|MainWindow|committed `25ba52e`; 69/69
 T5|x|runGuiApp + --self-test|committed `4c2ad70`; 70/70, selftest rows=128
-T6|x|CI/Docker/purity guard|agent steps 1–4 done; awaits USER: container run (Step 5) + commit (Step 6); tidy needed 14 targeted NOLINTs (Qt idiom, § T6 Step 4)
+T6|x|CI/Docker/purity guard|committed `2b84ebb`; container run 71/71; tidy needed 14 targeted NOLINTs (Qt idiom, § T6 Step 4)
 
-Next: USER runs `podman-compose -f test/docker-compose.yml run --rm unit` → USER commits T6 → manual parity smoke (§ below) = phase exit. Skill flow: superpowers:executing-plans, inline, caveman docs.
+All 6 tasks committed. Next: USER manual parity smoke (§ below) = phase exit → finishing-a-development-branch (merge/PR) for `feature/phase3`. Skill flow: superpowers:executing-plans, inline, caveman docs.
 
 Env gotchas (full detail: memory `phase3-execution-status`):
 - Host clang-tidy (LLVM 21) dies on `-mno-direct-extern-access` — GCC-only flag from host Qt (`/usr/lib64/cmake/Qt6/Qt6Targets.cmake`) ∈ compile_commands.json ∀ gui/ TU. CI container unaffected. ⊥ strip from build. Local tidy: `sed 's/-mno-direct-extern-access //g' build/linux-debug/compile_commands.json > <dir>/compile_commands.json && clang-tidy -p <dir> --warnings-as-errors='*' <files>`. ! again @ T6 Step 4.
@@ -1321,7 +1321,7 @@ Hand the user: `podman-compose -f test/docker-compose.yml run --rm unit`
 Expected: image rebuilds with Qt, full ctest passes in-container (including `devmgr_gui_tests` and `devmgr_gui_selftest` offscreen).
 (Confirmed: 71/71 in-container — 70 host suite + `devmgr_integration` (umockdev, container-only). Gotcha: `podman-compose run` reuses stale image, ⊥ auto-rebuild → ! explicit `podman-compose -f test/docker-compose.yml build unit` first. First attempt hit transient netavark/iptables error, retry clean.)
 
-- [ ] **Step 6: USER commits**
+- [x] **Step 6: USER commits** — committed `2b84ebb`
 
 ```
 ci: build+test Qt GUI in container; format/tidy cover gui/; toolkit-purity guard for core/app/platform
