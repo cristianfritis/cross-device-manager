@@ -15,8 +15,8 @@
 id|status|task|note
 T1|✅ done|Core seams: criticality facts + guard + PAL signature changes|committed 1263cfc; tidy fixes in guard .cpp (starts_with/ranges/designated-init)
 T2|✅ done|SysfsDeviceController + mapper authorized→Disabled|committed 5732ea1; plan-snippet fix: mapper compares sv(attr(d,"authorized")) == "0" (attr returns const char* — literal == would be pointer compare); mapper umockdev test container-only (runs at T10)
-T3|✅ done|LinuxCriticalityProber|91/91 green (+7); tidy+format clean; plan-snippet deltas: probe() split → collectStorageFacts/collectInputFacts (cognitive-complexity ≤15 gate), rfind→starts_with, std::sort/unique→std::ranges::, consts kKeyQ/kKeyP/kBitsPerWord (magic-number gate), source[0]=='/' → source.starts_with('/'); awaiting user commit
-T4|—|devmgrd_lib: IAuthority + RequestProcessor|
+T3|✅ done|LinuxCriticalityProber|committed e8ca43e; plan-snippet deltas: probe() split → collectStorageFacts/collectInputFacts (cognitive-complexity ≤15 gate), rfind→starts_with, std::sort/unique→std::ranges::, consts kKeyQ/kKeyP/kBitsPerWord (magic-number gate), source[0]=='/' → source.starts_with('/')
+T4|✅ done|devmgrd_lib: IAuthority + RequestProcessor|99/99 green (+8); tidy+format clean; deltas: rfind→starts_with in containment check; NOLINT bugprone-easily-swappable-parameters on setDeviceEnabled def (CallerId aliases std::string — repo precedent test_status_line_vm.cpp:57); Step-2 correction: configure does NOT fail on unknown devmgrd_lib (CMake treats bare name as -l flag) — failing state = compile error on missing daemon header; awaiting user commit
 T5|—|StatusLineVM TaskCompleted + facade setDeviceEnabled/canDisable|
 T6|—|sdbus gating + dbus_contract + ManagerAdaptor + PolkitAuthority + devmgrd|
 T7|—|DbusPrivilegedChannel + IPC round-trip suite (tests/ipc)|

@@ -18,6 +18,7 @@ add_subdirectory(core)
 add_subdirectory(app)
 if(UNIX AND NOT APPLE)
     add_subdirectory(platform/linux)
+    add_subdirectory(daemon)
     add_subdirectory(tui)
     # Qt 6 GUI: auto-ON where system Qt is present, so the tree still
     # configures and builds with no Qt installed. (System packages by design —
