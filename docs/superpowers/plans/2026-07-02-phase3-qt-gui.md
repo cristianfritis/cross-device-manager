@@ -16,11 +16,11 @@ id|status|task|note
 T1|x|VM isHeader + rebuild hooks|committed `86238c2`; 56/56
 T2|x|CMake gating + QtUiDispatcher + offscreen harness|committed `345fef6`; 60/60
 T3|x|DeviceListModel|committed `faa1a0d`; 64/64
-T4|x|MainWindow|IMPL DONE, awaits user commit; 69/69, format clean
-T5|.|runGuiApp + --self-test|next; 70 tests
-T6|.|CI/Docker/purity guard|then user manual parity smoke (§ below) = phase exit gate
+T4|x|MainWindow|committed `25ba52e`; 69/69
+T5|x|runGuiApp + --self-test|IMPL DONE, awaits user commit; 70/70, selftest rows=128, format clean
+T6|.|CI/Docker/purity guard|next; then user manual parity smoke (§ below) = phase exit gate
 
-Next: USER commits T4 → T5 Step 1 (write `gui/src/gui_app.hpp/.cpp` + `main.cpp`, code verbatim in task; no new unit test — selftest smoke is the cycle). Skill flow: superpowers:executing-plans, inline, caveman docs.
+Next: USER commits T5 (+ optional interactive launch check, T5 Step 4) → T6 Step 1 (Dockerfile `qt6-base-dev`). Skill flow: superpowers:executing-plans, inline, caveman docs.
 
 Env gotchas (full detail: memory `phase3-execution-status`):
 - Host clang-tidy (LLVM 21) dies on `-mno-direct-extern-access` — GCC-only flag from host Qt (`/usr/lib64/cmake/Qt6/Qt6Targets.cmake`) ∈ compile_commands.json ∀ gui/ TU. CI container unaffected. ⊥ strip from build. Local tidy: `sed 's/-mno-direct-extern-access //g' build/linux-debug/compile_commands.json > <dir>/compile_commands.json && clang-tidy -p <dir> --warnings-as-errors='*' <files>`. ! again @ T6 Step 4.
@@ -1047,7 +1047,7 @@ Expected: 5/5 pass. Then full suite: 69 tests, all pass. (Confirmed: 5/5, then 6
 Run: `clang-format --dry-run --Werror gui/src/main_window.hpp gui/src/main_window.cpp gui/tests/test_main_window.cpp`
 Expected: clean. (Plan-verbatim wraps needed `-i` touch-up — 3 lines rewrapped; suite re-verified 69/69 after.)
 
-- [ ] **Step 6: USER commits**
+- [x] **Step 6: USER commits** — committed `25ba52e`
 
 ```
 feat(gui): MainWindow — parity list/detail/filter/status UI with VM-mirrored selection
@@ -1069,7 +1069,7 @@ feat(gui): MainWindow — parity list/detail/filter/status UI with VM-mirrored s
 
 **Teardown ordering is load-bearing** — it is a line-for-line mirror of `tui/src/tui_app.cpp` (read its comments before touching this): declaration order guarantees hotplug/delayed outlive the VMs/dispatcher; stop sources → drain refresh futures → unwind; the catch-block duplicates the stop/drain so exception unwind is equally safe.
 
-- [ ] **Step 1: Implement `gui_app` (no new unit test — this task's test cycle is the selftest smoke below plus the full existing suite)**
+- [x] **Step 1: Implement `gui_app` (no new unit test — this task's test cycle is the selftest smoke below plus the full existing suite)**
 
 `gui/src/gui_app.hpp`:
 
@@ -1208,7 +1208,7 @@ int runGuiApp(int argc, char** argv) {
 int main(int argc, char** argv) { return devmgr::gui::runGuiApp(argc, argv); }
 ```
 
-- [ ] **Step 2: Build wiring**
+- [x] **Step 2: Build wiring**
 
 In `gui/CMakeLists.txt`: add `src/gui_app.cpp` to the `devmgr_gui` sources, then append after the test target:
 
@@ -1223,21 +1223,21 @@ add_test(NAME devmgr_gui_selftest COMMAND devmgr-gui --self-test)
 set_tests_properties(devmgr_gui_selftest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 ```
 
-- [ ] **Step 3: Run the smoke to verify**
+- [x] **Step 3: Run the smoke to verify**
 
 Run: `cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R devmgr_gui_selftest --output-on-failure`
-Expected: PASS; the test log contains `self-test rows: N` with N ≥ 1.
+Expected: PASS; the test log contains `self-test rows: N` with N ≥ 1. (Confirmed: PASS, `self-test rows: 128`, exit 0.)
 
-- [ ] **Step 4: Full suite + interactive sanity launch**
+- [x] **Step 4: Full suite + interactive sanity launch** — suite 70/70; interactive launch = USER (with commit below)
 
 Run: `ctest --test-dir build/linux-debug --output-on-failure`
 Expected: 70 tests, all pass.
 Then (host, interactive — skip in a container): `./build/linux-debug/gui/devmgr-gui` — window opens with grouped devices, filter narrows, selecting fills the detail pane, Refresh works, `q`uitting the window exits cleanly (exit code 0).
 
-- [ ] **Step 5: Format gate**
+- [x] **Step 5: Format gate**
 
 Run: `clang-format --dry-run --Werror gui/src/gui_app.hpp gui/src/gui_app.cpp gui/src/main.cpp`
-Expected: clean.
+Expected: clean. (Plan-verbatim wraps needed `-i` touch-up — `main.cpp` body un-inlined, one `bus.publish` rewrap; suite re-verified 70/70 after.)
 
 - [ ] **Step 6: USER commits**
 

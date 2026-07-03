@@ -6,6 +6,7 @@ set(CMAKE_AUTOMOC ON)
 
 add_library(devmgr_gui STATIC
     src/device_list_model.cpp
+    src/gui_app.cpp
     src/main_window.cpp
     src/qt_ui_dispatcher.cpp)
 target_include_directories(devmgr_gui PUBLIC ${CMAKE_SOURCE_DIR})
@@ -21,3 +22,12 @@ add_executable(devmgr_gui_tests
 target_include_directories(devmgr_gui_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_link_libraries(devmgr_gui_tests PRIVATE devmgr_gui Qt6::Test GTest::gtest)
 gtest_discover_tests(devmgr_gui_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(devmgr-gui src/main.cpp)
+target_link_libraries(devmgr-gui PRIVATE devmgr_gui)
+
+# Offscreen launch smoke: full wiring (real PAL) + one enumeration + rebuild.
+# In containers the netlink hotplug start may fail — the degrade path still
+# exits 0; the smoke asserts wiring, not host capabilities.
+add_test(NAME devmgr_gui_selftest COMMAND devmgr-gui --self-test)
+set_tests_properties(devmgr_gui_selftest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
