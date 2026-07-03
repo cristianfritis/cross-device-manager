@@ -34,6 +34,9 @@ void drainPending(std::vector<std::future<void>>& pending) {
 }
 }  // namespace
 
+// Deliberately one function: the declaration order below IS the teardown
+// contract, and the line-for-line mirror with runTuiApp() is the point.
+// NOLINTNEXTLINE(readability-function-size)
 int runGuiApp(int argc, char** argv) {
     QApplication qapp(argc, argv);
     const bool selfTest = QCoreApplication::arguments().contains(QStringLiteral("--self-test"));

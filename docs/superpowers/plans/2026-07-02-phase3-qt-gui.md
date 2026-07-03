@@ -17,10 +17,10 @@ T1|x|VM isHeader + rebuild hooks|committed `86238c2`; 56/56
 T2|x|CMake gating + QtUiDispatcher + offscreen harness|committed `345fef6`; 60/60
 T3|x|DeviceListModel|committed `faa1a0d`; 64/64
 T4|x|MainWindow|committed `25ba52e`; 69/69
-T5|x|runGuiApp + --self-test|IMPL DONE, awaits user commit; 70/70, selftest rows=128, format clean
-T6|.|CI/Docker/purity guard|next; then user manual parity smoke (§ below) = phase exit gate
+T5|x|runGuiApp + --self-test|committed `4c2ad70`; 70/70, selftest rows=128
+T6|x|CI/Docker/purity guard|agent steps 1–4 done; awaits USER: container run (Step 5) + commit (Step 6); tidy needed 14 targeted NOLINTs (Qt idiom, § T6 Step 4)
 
-Next: USER commits T5 (+ optional interactive launch check, T5 Step 4) → T6 Step 1 (Dockerfile `qt6-base-dev`). Skill flow: superpowers:executing-plans, inline, caveman docs.
+Next: USER runs `podman-compose -f test/docker-compose.yml run --rm unit` → USER commits T6 → manual parity smoke (§ below) = phase exit. Skill flow: superpowers:executing-plans, inline, caveman docs.
 
 Env gotchas (full detail: memory `phase3-execution-status`):
 - Host clang-tidy (LLVM 21) dies on `-mno-direct-extern-access` — GCC-only flag from host Qt (`/usr/lib64/cmake/Qt6/Qt6Targets.cmake`) ∈ compile_commands.json ∀ gui/ TU. CI container unaffected. ⊥ strip from build. Local tidy: `sed 's/-mno-direct-extern-access //g' build/linux-debug/compile_commands.json > <dir>/compile_commands.json && clang-tidy -p <dir> --warnings-as-errors='*' <files>`. ! again @ T6 Step 4.
@@ -1239,7 +1239,7 @@ Then (host, interactive — skip in a container): `./build/linux-debug/gui/devmg
 Run: `clang-format --dry-run --Werror gui/src/gui_app.hpp gui/src/gui_app.cpp gui/src/main.cpp`
 Expected: clean. (Plan-verbatim wraps needed `-i` touch-up — `main.cpp` body un-inlined, one `bus.publish` rewrap; suite re-verified 70/70 after.)
 
-- [ ] **Step 6: USER commits**
+- [x] **Step 6: USER commits** — committed `4c2ad70`
 
 ```
 feat(gui): devmgr-gui composition root — TUI-mirrored teardown ordering + --self-test smoke
@@ -1257,7 +1257,7 @@ feat(gui): devmgr-gui composition root — TUI-mirrored teardown ordering + --se
 - Consumes: everything built in Tasks 1–5.
 - Produces: CI that builds the GUI, runs all GUI tests + the selftest offscreen inside the container, format/tidy gates covering `gui/`, and a purity gate that fails the build if any Qt include appears under `core/`, `app/`, or `platform/`.
 
-- [ ] **Step 1: Add Qt to the test image**
+- [x] **Step 1: Add Qt to the test image**
 
 In `Dockerfile`, add `qt6-base-dev` to the apt install list (alphabetical slot, before `umockdev`):
 
@@ -1271,7 +1271,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 (Ubuntu 24.04's `qt6-base-dev` is Qt 6.4.x — this IS the Qt floor; anything that compiles here compiles everywhere we support. With Qt present, `DEVMGR_BUILD_GUI` defaults ON, so the image's existing `cmake --preset linux-debug && cmake --build` line and the `ctest` CMD pick up the GUI targets, GUI tests, and the offscreen selftest with no compose changes.)
 
-- [ ] **Step 2: Extend the CI gates**
+- [x] **Step 2: Extend the CI gates**
 
 In `.github/workflows/ci.yml`:
 
@@ -1297,22 +1297,29 @@ In `.github/workflows/ci.yml`:
         run: docker compose -f test/docker-compose.yml run --rm unit bash -c "clang-tidy -p build/linux-debug --warnings-as-errors='*' core/src/*.cpp app/src/*.cpp platform/linux/src/*.cpp gui/src/*.cpp"
 ```
 
-- [ ] **Step 3: Verify the purity guard logic locally (both polarities)**
+- [x] **Step 3: Verify the purity guard logic locally (both polarities)**
 
 Run: `! grep -rn --include='*.hpp' --include='*.cpp' -E '#include\s*[<"]Q[A-Za-z]' core app platform && echo GUARD-CLEAN`
-Expected: `GUARD-CLEAN`.
+Expected: `GUARD-CLEAN`. (Confirmed.)
 Run: `grep -rln --include='*.cpp' -E '#include\s*[<"]Q[A-Za-z]' gui | head -1`
-Expected: at least one `gui/` file listed (proves the pattern actually matches Qt includes — the guard isn't vacuously green).
+Expected: at least one `gui/` file listed (proves the pattern actually matches Qt includes — the guard isn't vacuously green). (Confirmed: 3 files.)
 
-- [ ] **Step 4: Run clang-tidy on gui/src locally and fix findings**
+- [x] **Step 4: Run clang-tidy on gui/src locally and fix findings**
 
 Run: `clang-tidy -p build/linux-debug --warnings-as-errors='*' gui/src/*.cpp`
 Expected: no diagnostics. If Qt macro internals (`Q_OBJECT`, `emit`) trigger checks that cannot be satisfied without fighting Qt idiom, suppress with a targeted `// NOLINT(<check-name>)` plus a one-line justification — never blanket-disable a check repo-wide for this.
 
-- [ ] **Step 5: Container parity run (user, rootless podman)**
+Result: 14 findings, all Qt-idiom collisions, ⊥ real bugs. Resolved via targeted NOLINT + justification (host run used filtered-DB workaround, § Resume State):
+- `cppcoreguidelines-owning-memory` ×8 → raw `new` under Qt parent-child ownership. NOLINTBEGIN/END over `MainWindow` ctor + NOLINTNEXTLINE @ `updateDetailPane()` item.
+- `cppcoreguidelines-prefer-member-initializer` ×4 → widgets assigned in ctor body interleaved w/ setup (Qt style). Same ctor NOLINTBEGIN block.
+- `readability-function-size` ×2 → `MainWindow` ctor (linear widget assembly) & `runGuiApp` (declaration order = teardown contract; mirror w/ `runTuiApp()` deliberate). Ctor block + NOLINTNEXTLINE @ `runGuiApp`.
+NOLINT lines stacked one-check-per-line (ColumnLimit 100 + comment reflow). After: tidy exit 0, 0 diagnostics; 70/70; format clean.
+
+- [x] **Step 5: Container parity run (user, rootless podman)**
 
 Hand the user: `podman-compose -f test/docker-compose.yml run --rm unit`
 Expected: image rebuilds with Qt, full ctest passes in-container (including `devmgr_gui_tests` and `devmgr_gui_selftest` offscreen).
+(Confirmed: 71/71 in-container — 70 host suite + `devmgr_integration` (umockdev, container-only). Gotcha: `podman-compose run` reuses stale image, ⊥ auto-rebuild → ! explicit `podman-compose -f test/docker-compose.yml build unit` first. First attempt hit transient netavark/iptables error, retry clean.)
 
 - [ ] **Step 6: USER commits**
 

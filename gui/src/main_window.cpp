@@ -16,6 +16,15 @@
 
 namespace devmgr::gui {
 
+// The constructor below is standard Qt widget-tree construction: raw `new`
+// under Qt parent-child ownership (the window, layouts, and model parent
+// delete the children), members assigned in the body interleaved with their
+// setup, and the whole build in one function. gsl::owner and the
+// member-initializer rule do not model Qt ownership, and splitting the build
+// would only scatter a linear widget assembly.
+// NOLINTBEGIN(cppcoreguidelines-owning-memory)
+// NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
+// NOLINTBEGIN(readability-function-size)
 MainWindow::MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
                        app::StatusLineVM& statusVm, QtUiDispatcher& dispatcher,
                        std::function<void()> onRefresh, QWidget* parent)
@@ -78,6 +87,9 @@ MainWindow::MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
 
     updateDetailPane();  // "(no device selected)" until something is chosen
 }
+// NOLINTEND(readability-function-size)
+// NOLINTEND(cppcoreguidelines-prefer-member-initializer)
+// NOLINTEND(cppcoreguidelines-owning-memory)
 
 void MainWindow::syncSelectionFromVm() {
     const int row = listVm_.selectedRef();
@@ -88,6 +100,8 @@ void MainWindow::syncSelectionFromVm() {
 void MainWindow::updateDetailPane() {
     detailTree_->clear();
     for (const std::string& line : detailVm_.lines(listVm_.selectedDeviceId())) {
+        // Parented to detailTree_ — the tree deletes its items.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         auto* item = new QTreeWidgetItem(detailTree_);
         const std::size_t colon = line.find(':');
         if (colon == std::string::npos) {
