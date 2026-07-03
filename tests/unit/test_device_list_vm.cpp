@@ -130,3 +130,50 @@ TEST(DeviceListVmTest, PreservesSelectionByDeviceIdAcrossRebuild) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     EXPECT_EQ(sel->value, "dev-beta");
 }
+
+TEST(DeviceListVmTest, IsHeaderDistinguishesHeaderAndDeviceRows) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+
+    ASSERT_EQ(vm.rowsRef().size(), 2u);  // one USB header + one device
+    int headers = 0;
+    int devices = 0;
+    for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i) {
+        vm.selectedRef() = i;
+        if (vm.isHeader(i)) {
+            ++headers;
+            EXPECT_FALSE(vm.selectedDeviceId().has_value());  // header ⇔ no DeviceId
+        } else {
+            ++devices;
+            EXPECT_TRUE(vm.selectedDeviceId().has_value());
+        }
+    }
+    EXPECT_EQ(headers, 1);
+    EXPECT_EQ(devices, 1);
+    EXPECT_FALSE(vm.isHeader(-1));  // out of range is never a header
+    EXPECT_FALSE(vm.isHeader(9999));
+}
+
+TEST(DeviceListVmTest, RebuildHooksBracketDeltaAndFilterRebuilds) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    std::vector<std::string> log;
+    vm.setRebuildHooks([&] { log.emplace_back("before"); }, [&] { log.emplace_back("after"); });
+
+    f.facade.refresh().wait();  // one Added event → one rebuild (InlineUiDispatcher: synchronous)
+    ASSERT_EQ(log.size(), 2u);
+    EXPECT_EQ(log[0], "before");
+    EXPECT_EQ(log[1], "after");
+
+    vm.setFilter("mouse");  // filter path calls rebuild() directly — must also be bracketed
+    ASSERT_EQ(log.size(), 4u);
+    EXPECT_EQ(log[2], "before");
+    EXPECT_EQ(log[3], "after");
+
+    vm.setRebuildHooks({}, {});  // cleared hooks: rebuild must not crash and log stays frozen
+    vm.setFilter("");
+    EXPECT_EQ(log.size(), 4u);
+}

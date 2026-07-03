@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,6 +24,19 @@ class DeviceListVM {
     int& selectedRef() { return selected_; }
     void setFilter(std::string filter);
     std::optional<core::DeviceId> selectedDeviceId() const;
+    // True iff `row` is a group-header or placeholder row (no DeviceId behind
+    // it); false for device rows and for out-of-range rows. Lets a frontend
+    // render/disable headers without re-deriving the grouping.
+    bool isHeader(int row) const;
+    // Frontend hooks invoked at entry/exit of every rebuild() — the single
+    // funnel for all row mutation (delta-triggered posts and setFilter alike).
+    // Qt uses them for beginResetModel()/endResetModel(); the TUI leaves them
+    // unset. Default-constructed hooks are no-ops. UI-thread only: set/clear
+    // them on the same thread rebuild() runs on.
+    void setRebuildHooks(std::function<void()> before, std::function<void()> after) {
+        beforeRebuild_ = std::move(before);
+        afterRebuild_ = std::move(after);
+    }
     void rebuild();  // UI-thread: refresh snapshot if stale, filter, group, clamp selection
 
    private:
@@ -30,6 +44,8 @@ class DeviceListVM {
     void refreshSnapshot();  // UI-thread: re-copy the model and rebuild filter haystacks
     // Sorts `group` by name and appends its header + device rows to rows_/rowIds_.
     void appendRows(core::BusType bus, std::vector<const core::Device*>& group);
+    // Re-resolves `keep` to its new row index (stable selection), then clamps.
+    void restoreSelection(const std::optional<core::DeviceId>& keep);
 
     ApplicationFacade& facade_;
     IUiDispatcher& dispatcher_;
@@ -49,6 +65,8 @@ class DeviceListVM {
     std::atomic<bool> snapshotValid_{false};
     std::atomic<bool> rebuildQueued_{false};  // one dispatcher post per burst of deltas
     int selected_ = 0;
+    std::function<void()> beforeRebuild_;
+    std::function<void()> afterRebuild_;
     runtime::Subscription subAdded_;
     runtime::Subscription subRemoved_;
     runtime::Subscription subChanged_;

@@ -77,6 +77,7 @@ void DeviceListVM::appendRows(core::BusType bus, std::vector<const core::Device*
 }
 
 void DeviceListVM::rebuild() {
+    if (beforeRebuild_) beforeRebuild_();
     static constexpr std::array<core::BusType, 5> kOrder = {
         core::BusType::Pci, core::BusType::Usb, core::BusType::Platform, core::BusType::Virtio,
         core::BusType::Other};
@@ -105,6 +106,11 @@ void DeviceListVM::rebuild() {
         rows_.emplace_back("(no devices)");
         rowIds_.emplace_back(std::nullopt);
     }
+    restoreSelection(keep);
+    if (afterRebuild_) afterRebuild_();
+}
+
+void DeviceListVM::restoreSelection(const std::optional<core::DeviceId>& keep) {
     if (keep) {  // keep the highlighted device stable across mutations
         if (auto it = std::ranges::find(rowIds_, keep); it != rowIds_.end())
             selected_ = static_cast<int>(std::distance(rowIds_.begin(), it));
@@ -116,6 +122,11 @@ void DeviceListVM::rebuild() {
 std::optional<core::DeviceId> DeviceListVM::selectedDeviceId() const {
     if (selected_ < 0 || std::cmp_greater_equal(selected_, rowIds_.size())) return std::nullopt;
     return rowIds_[selected_];
+}
+
+bool DeviceListVM::isHeader(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowIds_.size())) return false;
+    return !rowIds_[static_cast<std::size_t>(row)].has_value();
 }
 
 }  // namespace devmgr::app
