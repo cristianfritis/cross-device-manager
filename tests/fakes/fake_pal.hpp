@@ -14,24 +14,23 @@ class FakePal final : public pal::IDeviceEnumerator,
                       public pal::ISystemInfo {
    public:
     void seedDevice(core::Device device) {
-        const auto id = device.id;
-        enabled_[id.value] = true;
+        enabled_[device.sysfsPath] = true;
         devices_.push_back(std::move(device));
     }
     void seedDriver(const core::DeviceId& id, core::Driver driver) {
         drivers_[id.value].push_back(std::move(driver));
     }
-    bool enabled(const core::DeviceId& id) const {
-        const auto it = enabled_.find(id.value);
+    bool enabled(const std::string& sysfsPath) const {
+        const auto it = enabled_.find(sysfsPath);
         return it != enabled_.end() && it->second;
     }
 
     core::Result<std::vector<core::Device>> enumerate() override { return devices_; }
 
-    core::Result<void> setEnabled(const core::DeviceId& id, bool enabled) override {
-        const auto it = enabled_.find(id.value);
+    core::Result<void> setEnabled(const std::string& sysfsPath, bool enabled) override {
+        const auto it = enabled_.find(sysfsPath);
         if (it == enabled_.end())
-            return core::makeError(core::Error::Code::NotFound, "no such device: " + id.value);
+            return core::makeError(core::Error::Code::NotFound, "no such device: " + sysfsPath);
         it->second = enabled;
         return {};
     }

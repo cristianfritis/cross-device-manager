@@ -30,7 +30,10 @@ class IHotplugMonitor {
 class IDeviceController {
    public:
     virtual ~IDeviceController() = default;
-    virtual core::Result<void> setEnabled(const core::DeviceId& id, bool enabled) = 0;
+    // Identity is the device's canonical sysfs path — the wire format devmgrd
+    // receives and the coordinate SysfsDeviceController acts on. Phase 4
+    // mechanism: USB `authorized` only (non-USB → Error::Unsupported).
+    virtual core::Result<void> setEnabled(const std::string& sysfsPath, bool enabled) = 0;
 };
 
 class IDriverManager {
@@ -64,7 +67,10 @@ class ISystemInfo {
 class IPrivilegedChannel {
    public:
     virtual ~IPrivilegedChannel() = default;
-    virtual core::Result<void> setDeviceEnabled(const core::DeviceId& id, bool enabled) = 0;
+    // Takes the full Device (the channel needs sysfsPath on the wire and name
+    // for messages). Blocking: interactive polkit auth may take ~minutes —
+    // call from a TaskScheduler worker, never a UI thread.
+    virtual core::Result<void> setDeviceEnabled(const core::Device& device, bool enabled) = 0;
 };
 
 }  // namespace devmgr::pal

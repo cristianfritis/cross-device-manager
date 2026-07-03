@@ -9,6 +9,7 @@ add_library(devmgr_core
     src/logging.cpp
     src/task_scheduler.cpp
     src/delayed_scheduler.cpp
+    src/critical_device_guard.cpp
 )
 target_include_directories(devmgr_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(devmgr_core
