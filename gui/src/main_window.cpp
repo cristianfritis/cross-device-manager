@@ -1,6 +1,7 @@
 #include "gui/src/main_window.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -8,11 +9,14 @@
 #include <QItemSelectionModel>
 #include <QLineEdit>
 #include <QListView>
+#include <QMessageBox>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+
+#include "devmgr/core/models.hpp"
 
 namespace devmgr::gui {
 
@@ -25,20 +29,41 @@ namespace devmgr::gui {
 // NOLINTBEGIN(cppcoreguidelines-owning-memory)
 // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
 // NOLINTBEGIN(readability-function-size)
-MainWindow::MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
-                       app::StatusLineVM& statusVm, QtUiDispatcher& dispatcher,
-                       std::function<void()> onRefresh, QWidget* parent)
+MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm,
+                       app::DeviceDetailVM& detailVm, app::StatusLineVM& statusVm,
+                       QtUiDispatcher& dispatcher, std::function<void()> onRefresh,
+                       std::function<void(const core::DeviceId&, bool)> onSetEnabled,
+                       std::function<bool(const QString&)> confirm, QWidget* parent)
     : QMainWindow(parent),
+      facade_(facade),
       listVm_(listVm),
       detailVm_(detailVm),
       statusVm_(statusVm),
-      onRefresh_(std::move(onRefresh)) {
+      onRefresh_(std::move(onRefresh)),
+      onSetEnabled_(std::move(onSetEnabled)),
+      confirm_(std::move(confirm)) {
     setWindowTitle(QStringLiteral("Device Manager"));
 
     auto* toolbar = addToolBar(QStringLiteral("main"));
     toolbar->setMovable(false);
     auto* refreshAction = toolbar->addAction(QStringLiteral("Refresh"));
     connect(refreshAction, &QAction::triggered, this, [this] { onRefresh_(); });
+
+    toggleAction_ = toolbar->addAction(QStringLiteral("Disable"));
+    toggleAction_->setEnabled(false);
+    connect(toggleAction_, &QAction::triggered, this, [this] {
+        const auto id = listVm_.selectedDeviceId();
+        const auto device = id ? facade_.findById(*id) : std::nullopt;
+        if (!device) return;
+        const bool enable = device->status == core::DeviceStatus::Disabled;
+        const QString prompt = QStringLiteral("%1 %2?").arg(
+            enable ? QStringLiteral("Enable") : QStringLiteral("Disable"),
+            QString::fromStdString(device->name));
+        const bool go = confirm_ ? confirm_(prompt)
+                                 : QMessageBox::question(this, QStringLiteral("Confirm"), prompt) ==
+                                       QMessageBox::Yes;
+        if (go) onSetEnabled_(*id, enable);
+    });
 
     filterEdit_ = new QLineEdit;
     filterEdit_->setPlaceholderText(QStringLiteral("filter devices…"));
@@ -49,6 +74,10 @@ MainWindow::MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
     listView_ = new QListView;
     listView_->setModel(model_);
     listView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    // Same action doubles as the list's context menu.
+    listView_->addAction(toggleAction_);
+    listView_->setContextMenuPolicy(Qt::ActionsContextMenu);
 
     detailTree_ = new QTreeWidget;
     detailTree_->setColumnCount(2);
@@ -73,6 +102,7 @@ MainWindow::MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
             [this](const QModelIndex& current, const QModelIndex&) {
                 if (current.isValid()) listVm_.selectedRef() = current.row();
                 updateDetailPane();
+                updateToggleAction();
             });
     // After a rebuild the VM has re-resolved the selection by DeviceId; the
     // reset cleared the view's currentIndex, so re-apply the VM's row and
@@ -80,6 +110,7 @@ MainWindow::MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
     connect(model_, &QAbstractItemModel::modelReset, this, [this] {
         syncSelectionFromVm();
         updateDetailPane();
+        updateToggleAction();
     });
     // The Qt analogue of the TUI re-rendering on Event::Custom: StatusLineVM
     // posts a wake closure on every message set/clear; re-read text() then.
@@ -116,6 +147,30 @@ void MainWindow::updateDetailPane() {
 
 void MainWindow::updateStatusBar() {
     statusBar()->showMessage(QString::fromStdString(statusVm_.text()));
+}
+
+void MainWindow::updateToggleAction() {
+    const auto id = listVm_.selectedDeviceId();
+    const auto device = id ? facade_.findById(*id) : std::nullopt;
+    if (!device) {
+        toggleAction_->setEnabled(false);
+        toggleAction_->setText(QStringLiteral("Disable"));
+        toggleAction_->setToolTip({});
+        return;
+    }
+    const bool enable = device->status == core::DeviceStatus::Disabled;
+    toggleAction_->setText(enable ? QStringLiteral("Enable") : QStringLiteral("Disable"));
+    if (!enable) {
+        // Advisory only — devmgrd re-checks authoritatively on every request.
+        const auto verdict = facade_.canDisable(*id);
+        toggleAction_->setEnabled(verdict.allowed);
+        toggleAction_->setToolTip(
+            verdict.allowed ? QString{}
+                            : QString::fromStdString("cannot disable: " + verdict.reason));
+        return;
+    }
+    toggleAction_->setEnabled(true);
+    toggleAction_->setToolTip({});
 }
 
 }  // namespace devmgr::gui

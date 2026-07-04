@@ -3,6 +3,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 #include <QApplication>
@@ -17,6 +18,10 @@
 #include "devmgr/core/events.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
+#include "devmgr/platform/linux/linux_criticality_prober.hpp"
+#ifdef DEVMGR_HAS_SDBUS
+#include "devmgr/platform/linux/dbus_privileged_channel.hpp"
+#endif
 #include "devmgr/runtime/delayed_scheduler.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
@@ -50,7 +55,13 @@ int runGuiApp(int argc, char** argv) {
     platform_linux::UdevDeviceEnumerator enumerator;
     platform_linux::UdevHotplugMonitor monitor;
     app::DeviceService service(bus);
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service);
+    platform_linux::LinuxCriticalityProber prober;  // advisory guard facts
+#ifdef DEVMGR_HAS_SDBUS
+    platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober);
+#else
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober);
+#endif
     app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
 
     QtUiDispatcher dispatcher;
@@ -62,13 +73,31 @@ int runGuiApp(int argc, char** argv) {
     // ApplicationFacade::refresh()'s documented lifetime contract.
     std::vector<std::future<void>> pending;
 
-    MainWindow window(listVm, detailVm, statusVm, dispatcher, [&] {
-        // Drop already-completed refreshes so `pending` stays bounded.
-        std::erase_if(pending, [](const std::future<void>& f) {
-            return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    // Drop already-completed refreshes so `pending` stays bounded, then keep the
+    // new future. Declared before both the subscription and the window because
+    // each hands its future here.
+    auto pruneAndPush = [&](std::future<void> f) {
+        std::erase_if(pending, [](const std::future<void>& g) {
+            return g.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
         });
-        pending.push_back(facade.refresh());
-    });
+        pending.push_back(std::move(f));
+    };
+
+    // After a successful mutation, refresh so DeviceStatus mirrors sysfs again.
+    // The handler runs on a scheduler worker; `pending` is GUI-thread state, so
+    // hop through the dispatcher (delivered on the GUI thread) — same rationale
+    // as tui/src/tui_app.cpp's refreshOnTaskDone.
+    auto refreshOnTaskDone =
+        bus.subscribe<core::TaskCompletedEvent>([&](const core::TaskCompletedEvent& e) {
+            if (!e.ok) return;
+            dispatcher.post([&] { pruneAndPush(facade.refresh()); });
+        });
+
+    MainWindow window(
+        facade, listVm, detailVm, statusVm, dispatcher, [&] { pruneAndPush(facade.refresh()); },
+        [&](const core::DeviceId& id, bool enable) {
+            pruneAndPush(facade.setDeviceEnabled(id, enable));
+        });
 
     int rc = 0;
     // The try widens over hotplug.start()/publish for the same reason as

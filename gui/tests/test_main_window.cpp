@@ -1,8 +1,10 @@
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include <QAction>
 #include <QCoreApplication>
 #include <QLineEdit>
 #include <QListView>
@@ -47,9 +49,16 @@ struct Fixture {
     app::DeviceDetailVM detailVm{facade};
     app::StatusLineVM statusVm{bus, delayed, dispatcher};
     int refreshCalls = 0;
+    std::vector<std::pair<std::string, bool>> setEnabledCalls;
+    bool confirmAnswer = true;
 
     gui::MainWindow makeWindow() {
-        return gui::MainWindow(listVm, detailVm, statusVm, dispatcher, [this] { ++refreshCalls; });
+        return gui::MainWindow(
+            facade, listVm, detailVm, statusVm, dispatcher, [this] { ++refreshCalls; },
+            [this](const core::DeviceId& id, bool enable) {
+                setEnabledCalls.emplace_back(id.value, enable);
+            },
+            [this](const QString&) { return confirmAnswer; });
     }
     void refreshAndPump() {
         facade.refresh().wait();
@@ -123,6 +132,60 @@ TEST(MainWindowTest, RefreshActionInvokesInjectedCallback) {
     ASSERT_FALSE(actions.isEmpty());
     actions.first()->trigger();
     EXPECT_EQ(f.refreshCalls, 1);
+}
+
+TEST(MainWindowTest, ToggleActionDisabledWithoutSelectionEnabledOnDeviceRow) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    EXPECT_FALSE(window.toggleAction()->isEnabled());
+
+    f.refreshAndPump();
+    const int row = f.firstDeviceRow();
+    ASSERT_GE(row, 0);
+    window.listView()->setCurrentIndex(window.listView()->model()->index(row, 0));
+    EXPECT_TRUE(window.toggleAction()->isEnabled());
+    EXPECT_EQ(window.toggleAction()->text(), QStringLiteral("Disable"));
+}
+
+TEST(MainWindowTest, ConfirmedTriggerInvokesOnSetEnabled) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    f.refreshAndPump();
+    window.listView()->setCurrentIndex(window.listView()->model()->index(f.firstDeviceRow(), 0));
+
+    window.toggleAction()->trigger();
+    ASSERT_EQ(f.setEnabledCalls.size(), 1u);
+    EXPECT_EQ(f.setEnabledCalls[0].first, "u1");
+    EXPECT_FALSE(f.setEnabledCalls[0].second);  // Active device → disable
+}
+
+TEST(MainWindowTest, DeclinedConfirmSendsNothing) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    f.refreshAndPump();
+    window.listView()->setCurrentIndex(window.listView()->model()->index(f.firstDeviceRow(), 0));
+
+    f.confirmAnswer = false;
+    window.toggleAction()->trigger();
+    EXPECT_TRUE(f.setEnabledCalls.empty());
+}
+
+TEST(MainWindowTest, DisabledDeviceOffersEnableWithoutGuardCheck) {
+    Fixture f;
+    auto d = dev("u1", core::BusType::Usb, "Webcam");
+    d.status = core::DeviceStatus::Disabled;
+    f.pal.seedDevice(d);
+    auto window = f.makeWindow();
+    f.refreshAndPump();
+    window.listView()->setCurrentIndex(window.listView()->model()->index(f.firstDeviceRow(), 0));
+
+    EXPECT_EQ(window.toggleAction()->text(), QStringLiteral("Enable"));
+    window.toggleAction()->trigger();
+    ASSERT_EQ(f.setEnabledCalls.size(), 1u);
+    EXPECT_TRUE(f.setEnabledCalls[0].second);
 }
 
 TEST(MainWindowTest, StatusBarShowsTransientHotplugMessage) {

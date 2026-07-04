@@ -3,12 +3,14 @@
 
 #include <QMainWindow>
 
+#include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_detail_vm.hpp"
 #include "devmgr/app/device_list_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
 #include "gui/src/device_list_model.hpp"
 #include "gui/src/qt_ui_dispatcher.hpp"
 
+class QAction;
 class QLineEdit;
 class QListView;
 class QTreeWidget;
@@ -24,28 +26,36 @@ namespace devmgr::gui {
 class MainWindow final : public QMainWindow {
     Q_OBJECT
    public:
-    MainWindow(app::DeviceListVM& listVm, app::DeviceDetailVM& detailVm,
-               app::StatusLineVM& statusVm, QtUiDispatcher& dispatcher,
-               std::function<void()> onRefresh, QWidget* parent = nullptr);
+    MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm,
+               app::DeviceDetailVM& detailVm, app::StatusLineVM& statusVm,
+               QtUiDispatcher& dispatcher, std::function<void()> onRefresh,
+               std::function<void(const core::DeviceId&, bool)> onSetEnabled,
+               std::function<bool(const QString&)> confirm = {}, QWidget* parent = nullptr);
 
     // Test accessors (offscreen tests drive/inspect the real widgets).
     QListView* listView() const { return listView_; }
     QTreeWidget* detailTree() const { return detailTree_; }
     QLineEdit* filterEdit() const { return filterEdit_; }
+    QAction* toggleAction() const { return toggleAction_; }
 
    private:
     void syncSelectionFromVm();  // after modelReset: VM re-resolved by DeviceId
     void updateDetailPane();
     void updateStatusBar();
+    void updateToggleAction();
 
+    app::ApplicationFacade& facade_;
     app::DeviceListVM& listVm_;
     app::DeviceDetailVM& detailVm_;
     app::StatusLineVM& statusVm_;
     std::function<void()> onRefresh_;
+    std::function<void(const core::DeviceId&, bool)> onSetEnabled_;
+    std::function<bool(const QString&)> confirm_;
     DeviceListModel* model_ = nullptr;  // Qt-parented to this window
     QListView* listView_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;
     QTreeWidget* detailTree_ = nullptr;
+    QAction* toggleAction_ = nullptr;
 };
 
 }  // namespace devmgr::gui
