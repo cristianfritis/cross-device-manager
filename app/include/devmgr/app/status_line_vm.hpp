@@ -107,6 +107,7 @@ class StatusLineVM {
     runtime::Subscription subAdded_;
     runtime::Subscription subRemoved_;
     runtime::Subscription subChanged_;
+    runtime::Subscription subTaskCompleted_;
 };
 
 }  // namespace devmgr::app

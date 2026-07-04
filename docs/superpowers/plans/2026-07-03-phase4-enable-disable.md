@@ -16,8 +16,8 @@ id|status|task|note
 T1|✅ done|Core seams: criticality facts + guard + PAL signature changes|committed 1263cfc; tidy fixes in guard .cpp (starts_with/ranges/designated-init)
 T2|✅ done|SysfsDeviceController + mapper authorized→Disabled|committed 5732ea1; plan-snippet fix: mapper compares sv(attr(d,"authorized")) == "0" (attr returns const char* — literal == would be pointer compare); mapper umockdev test container-only (runs at T10)
 T3|✅ done|LinuxCriticalityProber|committed e8ca43e; plan-snippet deltas: probe() split → collectStorageFacts/collectInputFacts (cognitive-complexity ≤15 gate), rfind→starts_with, std::sort/unique→std::ranges::, consts kKeyQ/kKeyP/kBitsPerWord (magic-number gate), source[0]=='/' → source.starts_with('/')
-T4|✅ done|devmgrd_lib: IAuthority + RequestProcessor|99/99 green (+8); tidy+format clean; deltas: rfind→starts_with in containment check; NOLINT bugprone-easily-swappable-parameters on setDeviceEnabled def (CallerId aliases std::string — repo precedent test_status_line_vm.cpp:57); Step-2 correction: configure does NOT fail on unknown devmgrd_lib (CMake treats bare name as -l flag) — failing state = compile error on missing daemon header; awaiting user commit
-T5|—|StatusLineVM TaskCompleted + facade setDeviceEnabled/canDisable|
+T4|✅ done|devmgrd_lib: IAuthority + RequestProcessor|committed 377bb0e; deltas: rfind→starts_with in containment check; NOLINT bugprone-easily-swappable-parameters on setDeviceEnabled def (CallerId aliases std::string — repo precedent test_status_line_vm.cpp:57); Step-2 correction: configure does NOT fail on unknown devmgrd_lib (CMake treats bare name as -l flag) — failing state = compile error on missing daemon header
+T5|✅ done|StatusLineVM TaskCompleted + facade setDeviceEnabled/canDisable|106/106 green (+7); tidy+format clean; delta: TaskCompletedEvent constructions need designated initializers (modernize-use-designated-initializers gate); awaiting user commit
 T6|—|sdbus gating + dbus_contract + ManagerAdaptor + PolkitAuthority + devmgrd|
 T7|—|DbusPrivilegedChannel + IPC round-trip suite (tests/ipc)|
 T8|—|TUI wiring ('e' toggle + confirm + auto-refresh)|

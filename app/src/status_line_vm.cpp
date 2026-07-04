@@ -33,6 +33,12 @@ StatusLineVM::StatusLineVM(runtime::EventBus& bus, runtime::DelayedScheduler& ti
         // Removed carries only a DeviceId (the device is gone) — generic text.
         if (armed_.load()) setMessage("device removed");
     });
+    subTaskCompleted_ =
+        bus.subscribe<core::TaskCompletedEvent>([this](const core::TaskCompletedEvent& e) {
+            // Mutation results (Phase 4) share the transient line — success and
+            // failure alike; the message already says which.
+            if (armed_.load()) setMessage(e.message);
+        });
 }
 
 StatusLineVM::~StatusLineVM() {
@@ -54,6 +60,7 @@ StatusLineVM::~StatusLineVM() {
     subAdded_.reset();
     subRemoved_.reset();
     subChanged_.reset();
+    subTaskCompleted_.reset();
 
     // Cancel the pending clear so its callback can't run against a half-dead
     // VM. cancel() returning true guarantees it will never run, so we can

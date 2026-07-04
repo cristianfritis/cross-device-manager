@@ -237,3 +237,17 @@ TEST(StatusLineVM, RepeatedShortTtlDestructionDoesNotRaceOrHang) {
     }
     SUCCEED();
 }
+
+TEST(StatusLineVm, TaskCompletedMessageShownAfterArmOnly) {
+    devmgr::runtime::EventBus bus;
+    devmgr::runtime::DelayedScheduler timer;
+    devmgr::test::InlineUiDispatcher dispatcher;
+    devmgr::app::StatusLineVM vm(bus, timer, dispatcher);
+
+    bus.publish(devmgr::core::TaskCompletedEvent{"t0", true, "ignored before arm"});
+    EXPECT_EQ(vm.text(), "");
+
+    vm.arm();
+    bus.publish(devmgr::core::TaskCompletedEvent{"t1", false, "cannot disable: sole keyboard"});
+    EXPECT_EQ(vm.text(), "cannot disable: sole keyboard");
+}
