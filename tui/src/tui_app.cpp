@@ -21,6 +21,10 @@
 #include "devmgr/core/events.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
+#include "devmgr/platform/linux/linux_criticality_prober.hpp"
+#ifdef DEVMGR_HAS_SDBUS
+#include "devmgr/platform/linux/dbus_privileged_channel.hpp"
+#endif
 #include "devmgr/runtime/delayed_scheduler.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
@@ -48,7 +52,13 @@ int runTuiApp() {
     platform_linux::UdevDeviceEnumerator enumerator;
     platform_linux::UdevHotplugMonitor monitor;
     app::DeviceService service(bus);
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service);
+    platform_linux::LinuxCriticalityProber prober;  // advisory guard facts
+#ifdef DEVMGR_HAS_SDBUS
+    platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober);
+#else
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober);
+#endif
     app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
 
     auto screen = ScreenInteractive::Fullscreen();
@@ -60,6 +70,32 @@ int runTuiApp() {
     // Keep every refresh future alive so we can wait on them before teardown
     // (see the note after screen.Loop()).
     std::vector<std::future<void>> pending;
+
+    // Pending enable/disable confirmation ('e' arms it; y/n resolves it).
+    struct PendingToggle {
+        core::DeviceId id;
+        bool enable;
+        std::string prompt;
+    };
+    std::optional<PendingToggle> confirmToggle;
+
+    auto prunePending = [&] {
+        std::erase_if(pending, [](const std::future<void>& f) {
+            return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+        });
+    };
+
+    // After a successful mutation, refresh so DeviceStatus mirrors sysfs again.
+    // The handler runs on a scheduler worker; `pending` is UI-thread state, so
+    // hop through the dispatcher (drained on the UI thread via Event::Custom).
+    auto refreshOnTaskDone =
+        bus.subscribe<core::TaskCompletedEvent>([&](const core::TaskCompletedEvent& e) {
+            if (!e.ok) return;
+            dispatcher.post([&] {
+                prunePending();
+                pending.push_back(facade.refresh());
+            });
+        });
 
     static constexpr int kLeftPaneWidth = 44;
 
@@ -101,7 +137,7 @@ int runTuiApp() {
         return vbox({
                    hbox({
                        vbox({
-                           text(" Devices (r=refresh  q=quit) ") | bold,
+                           text(" Devices (r=refresh  e=enable/disable  q=quit) ") | bold,
                            separator(),
                            searchInput->Render(),
                            separator(),
@@ -110,7 +146,8 @@ int runTuiApp() {
                            border,
                        detailRenderer->Render() | border | flex,
                    }) | flex,
-                   text(" " + statusVm.text() + " ") | inverted,
+                   text(" " + (confirmToggle ? confirmToggle->prompt : statusVm.text()) + " ") |
+                       inverted,
                }) |
                flex;
     });
@@ -121,6 +158,40 @@ int runTuiApp() {
             dispatcher.drain();
             return true;
         }
+        if (confirmToggle) {  // modal y/n — swallow everything else
+            if (event == Event::Character('y')) {
+                prunePending();
+                pending.push_back(
+                    facade.setDeviceEnabled(confirmToggle->id, confirmToggle->enable));
+                confirmToggle.reset();
+            } else if (event == Event::Character('n') || event == Event::Escape) {
+                confirmToggle.reset();
+            }
+            return true;
+        }
+        if (event == Event::Character('e')) {  // global like 'r' (not typable in filter)
+            const auto id = listVm.selectedDeviceId();
+            if (!id) return true;
+            const auto device = facade.findById(*id);
+            if (!device) return true;
+            const bool enable = device->status == core::DeviceStatus::Disabled;
+            if (!enable) {
+                const auto verdict = facade.canDisable(*id);
+                if (!verdict.allowed) {
+                    // Surface the advisory refusal on the transient status line.
+                    bus.publish(
+                        core::TaskCompletedEvent{.taskId = "guard",
+                                                 .ok = false,
+                                                 .message = "cannot disable: " + verdict.reason});
+                    return true;
+                }
+            }
+            confirmToggle = PendingToggle{
+                .id = *id,
+                .enable = enable,
+                .prompt = std::string(enable ? "enable " : "disable ") + device->name + "? (y/n)"};
+            return true;
+        }
         if (event == Event::Character('q') || event == Event::Escape) {
             screen.Exit();
             return true;
@@ -128,9 +199,7 @@ int runTuiApp() {
         if (event == Event::Character('r')) {
             // Drop already-completed refreshes so `pending` stays bounded over
             // a long session instead of growing by one future per keypress.
-            std::erase_if(pending, [](const std::future<void>& f) {
-                return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-            });
+            prunePending();
             pending.push_back(facade.refresh());  // fire; results arrive via the dispatcher
             return true;
         }
