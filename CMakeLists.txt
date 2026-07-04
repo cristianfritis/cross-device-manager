@@ -17,6 +17,13 @@ option(DEVMGR_BUILD_INTEGRATION_TESTS "Build umockdev integration tests" ${UMOCK
 add_subdirectory(core)
 add_subdirectory(app)
 if(UNIX AND NOT APPLE)
+    # devmgrd + DbusPrivilegedChannel: auto-ON where sdbus-c++ >= 2 is present.
+    # v2 API only (v2.0 was a breaking rewrite): host = portage 2.3.1, Docker =
+    # pinned v2.3.1 source build — see the Phase 4 spec. The tree must still
+    # configure and build with no sdbus-c++ installed. Detected BEFORE the
+    # daemon subdirectory so its gated devmgrd target sees the option.
+    find_package(sdbus-c++ 2 QUIET)
+    option(DEVMGR_WITH_SDBUS "Build devmgrd + the D-Bus privileged channel" ${sdbus-c++_FOUND})
     add_subdirectory(platform/linux)
     add_subdirectory(daemon)
     add_subdirectory(tui)
