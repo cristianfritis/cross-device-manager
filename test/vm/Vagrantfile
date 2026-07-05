@@ -1,43 +1,19 @@
-# Disposable VM for kernel-level tests (Phase 4+): real module load, bind/unbind,
-# and USB `authorized` toggling. Snapshot before a dangerous run, revert after
-# (see test/vm/snapshot.sh). Host safety + host-side logging live in this file.
-# Not used by Phase 0 tests.
-
-# Raw image backing an *emulated* USB stick. Emulated — never host passthrough —
-# so a destructive de-authorize can never touch real host hardware. Create it
-# before `vagrant up`:   qemu-img create -f raw test/vm/spare.img 64M
+# Disposable VM for kernel-level tests (Phase 4+)
 SPARE_IMG  = File.expand_path(ENV.fetch("DEVMGR_SPARE_IMG",  "spare.img"), __dir__)
-# Host file that receives the guest serial console (kernel + anything on ttyS0).
 SERIAL_LOG = File.expand_path(ENV.fetch("DEVMGR_SERIAL_LOG", "devmgr-vm-serial.log"), __dir__)
 
 Vagrant.configure("2") do |config|
   config.vm.box = "generic/ubuntu2204"
   config.vm.hostname = "devmgr-test"
 
-  # --- Host isolation --------------------------------------------------------
-  # Kill the default /vagrant share: a destructive run must have NO writable
-  # path back to the host. Copy artifacts in via the provisioner instead.
   config.vm.synced_folder ".", "/vagrant", disabled: true
-  # Deliberately no public_network / bridged NIC and no forwarded_port: only the
-  # private management network vagrant needs for `vagrant ssh` exists. The smoke
-  # needs no networking (the IPC path uses a private session bus).
 
   config.vm.provider "libvirt" do |lv|
-    lv.memory = 2048
-    lv.cpus = 2
+    lv.memory = 4096 # Bumped to 4GB for vcpkg compilation
+    lv.cpus = 4      # Bumped to 4 cores for faster builds
 
-    # --- Host-side logging ---------------------------------------------------
-    # Redirect the guest serial console to a host file; survives guest panics.
-    # Ubuntu's generic box boots with console=ttyS0, so kernel + console output
-    # land here. (QEMU's own stderr is always at /var/log/libvirt/qemu/<dom>.log.)
-    # NOTE: the qemu process must be able to write SERIAL_LOG — if system libvirt
-    # runs qemu as a confined user, point this at a world-writable dir instead.
     lv.serial type: "file", source: { path: SERIAL_LOG }
 
-    # --- Emulated USB device under test --------------------------------------
-    # Gives the guest a real /sys/bus/usb/devices/.../authorized to toggle with
-    # zero risk to host hardware. Attached only once the backing image exists,
-    # so `vagrant up` still works before you create it.
     if File.exist?(SPARE_IMG)
       lv.qemuargs value: "-drive"
       lv.qemuargs value: "if=none,id=usbstick,format=raw,file=#{SPARE_IMG}"
@@ -46,21 +22,32 @@ Vagrant.configure("2") do |config|
       lv.qemuargs value: "-device"
       lv.qemuargs value: "usb-storage,bus=xhci.0,drive=usbstick"
     end
-
-    # --- Optional: host-side USB event tracing -------------------------------
-    # Uncomment if your QEMU has a file/simple trace backend. Logs emulated-USB
-    # events to a host file — gold for a peripheral test. Drop it again if
-    # `vagrant up` errors on an unsupported trace backend.
-    # lv.qemuargs value: "-trace"
-    # lv.qemuargs value: "enable=usb_*,file=#{File.expand_path('devmgr-vm-usb-trace.log', __dir__)}"
   end
 
   config.vm.provision "shell", inline: <<-SHELL
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y build-essential cmake ninja-build pkg-config libudev-dev libkmod-dev
-    # devmgrd's runtime path additionally needs the system D-Bus + polkit, and
-    # sdbus-c++ v2 (build from source as in the repo Dockerfile) plus the built
-    # binaries copied in. Left out here on purpose — wire it in during setup.
+    apt-get install -y build-essential cmake ninja-build pkg-config \
+      libudev-dev libkmod-dev git curl zip unzip tar \
+      libsystemd-dev libdbus-1-dev libpolkit-gobject-1-dev
+
+    # Build and install sdbus-c++ v2 from source
+    if [ ! -d /usr/local/include/sdbus-c++ ]; then
+      cd /tmp
+      rm -rf sdbus-cpp
+      git clone --depth 1 https://github.com/Kistler-Group/sdbus-cpp.git
+      cd sdbus-cpp
+      cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      cmake --build build
+      cmake --install build
+      ldconfig
+    fi
+
+    # Install vcpkg globally for the vagrant user
+    if [ ! -d /home/vagrant/vcpkg ]; then
+      git clone https://github.com/microsoft/vcpkg.git /home/vagrant/vcpkg
+      /home/vagrant/vcpkg/bootstrap-vcpkg.sh
+      chown -R vagrant:vagrant /home/vagrant/vcpkg
+    fi
   SHELL
 end
-
