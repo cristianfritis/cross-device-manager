@@ -38,6 +38,7 @@ Thumbs.db
 # This is scratch — safe to delete between sessions. The durable resume state
 # lives in docs/superpowers/PHASE0-EXECUTION-GUIDE.md (committed).
 /.superpowers/
+.claude/
 
 # ---- Vagrant & VM Test Artifacts ----
 # Vagrant stores machine state, SSH keys, and synced folder metadata here
