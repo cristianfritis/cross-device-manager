@@ -40,4 +40,26 @@ GuardVerdict evaluateDisable(const pal::CriticalityFacts& facts,
     return {};
 }
 
+GuardVerdict evaluateModuleUnload(const pal::CriticalityFacts& facts,
+                                  const ModuleUnloadFacts& module) {
+    if (!module.holders.empty()) {
+        std::string names;
+        for (const auto& h : module.holders) {
+            if (!names.empty()) names += ", ";
+            names += h;
+        }
+        return {.allowed = false, .reason = "in use by " + names};
+    }
+    if (module.refCount > 0)
+        return {.allowed = false,
+                .reason = "in use (refcount " + std::to_string(module.refCount) + ")"};
+    for (const auto& path : module.affectedDevicePaths) {
+        const auto verdict = evaluateDisable(facts, path);
+        if (!verdict.allowed)
+            return {.allowed = false,
+                    .reason = "module backs a critical device: " + verdict.reason};
+    }
+    return {};
+}
+
 }  // namespace devmgr::services

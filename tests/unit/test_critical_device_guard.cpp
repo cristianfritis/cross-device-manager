@@ -75,3 +75,44 @@ TEST(CriticalDeviceGuardTest, RootRefusalWinsOverInputRefusal) {
     EXPECT_FALSE(v.allowed);
     EXPECT_EQ(v.reason, "backs the root filesystem");
 }
+
+TEST(EvaluateModuleUnload, CleanModuleIsAllowed) {
+    const auto v = devmgr::services::evaluateModuleUnload({}, {});
+    EXPECT_TRUE(v.allowed);
+}
+
+TEST(EvaluateModuleUnload, HoldersRefuseFirstWithNames) {
+    devmgr::services::ModuleUnloadFacts m;
+    m.holders = {"child_a", "child_b"};
+    m.refCount = 2;
+    const auto v = devmgr::services::evaluateModuleUnload({}, m);
+    ASSERT_FALSE(v.allowed);
+    EXPECT_EQ(v.reason, "in use by child_a, child_b");
+}
+
+TEST(EvaluateModuleUnload, NonZeroRefcountWithoutHoldersRefuses) {
+    devmgr::services::ModuleUnloadFacts m;
+    m.refCount = 3;
+    const auto v = devmgr::services::evaluateModuleUnload({}, m);
+    ASSERT_FALSE(v.allowed);
+    EXPECT_EQ(v.reason, "in use (refcount 3)");
+}
+
+TEST(EvaluateModuleUnload, ModuleBackingRootDeviceRefusesWithGuardReason) {
+    devmgr::pal::CriticalityFacts facts;
+    facts.rootBackingPaths = {"/sys/devices/pci0000:00/0000:03:00.0/nvme/nvme0"};
+    devmgr::services::ModuleUnloadFacts m;
+    m.affectedDevicePaths = {"/sys/devices/pci0000:00/0000:03:00.0"};
+    const auto v = devmgr::services::evaluateModuleUnload(facts, m);
+    ASSERT_FALSE(v.allowed);
+    // Prefix + the underlying evaluateDisable reason.
+    EXPECT_EQ(v.reason.rfind("module backs a critical device: ", 0), 0U) << v.reason;
+}
+
+TEST(EvaluateModuleUnload, HarmlessBoundDevicesAllowed) {
+    devmgr::pal::CriticalityFacts facts;
+    facts.rootBackingPaths = {"/sys/devices/pci0000:00/0000:03:00.0/nvme/nvme0"};
+    devmgr::services::ModuleUnloadFacts m;
+    m.affectedDevicePaths = {"/sys/devices/pci0000:00/usb1/1-2"};  // unrelated device
+    EXPECT_TRUE(devmgr::services::evaluateModuleUnload(facts, m).allowed);
+}

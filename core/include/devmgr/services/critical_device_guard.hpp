@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 #include "devmgr/pal/criticality.hpp"
 
@@ -16,5 +17,16 @@ struct GuardVerdict {
 // advisorily by the frontends — same function, one behavior.
 GuardVerdict evaluateDisable(const pal::CriticalityFacts& facts,
                              const std::string& targetSysfsPath);
+
+struct ModuleUnloadFacts {
+    std::vector<std::string> affectedDevicePaths;  // canonical sysfs paths bound via the module
+    std::vector<std::string> holders;              // dependent modules (/sys/module/<m>/holders)
+    long refCount = 0;
+};
+
+// Pure policy (spec §4.3, order matters): holders → refcount → per-device
+// evaluateDisable. Authoritative in devmgrd, advisory in the frontends.
+GuardVerdict evaluateModuleUnload(const pal::CriticalityFacts& facts,
+                                  const ModuleUnloadFacts& module);
 
 }  // namespace devmgr::services
