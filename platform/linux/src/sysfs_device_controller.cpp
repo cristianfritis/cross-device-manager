@@ -22,7 +22,8 @@ bool isContained(const fs::path& canonicalPath, const fs::path& canonicalRoot) {
 SysfsDeviceController::SysfsDeviceController(std::string sysfsRoot)
     : sysfsRoot_(std::move(sysfsRoot)) {}
 
-core::Result<void> SysfsDeviceController::setEnabled(const std::string& sysfsPath, bool enabled) {
+core::Result<std::optional<std::string>> SysfsDeviceController::setEnabled(
+    const std::string& sysfsPath, bool enabled, const std::string& /*rebindDriverHint*/) {
     std::error_code ec;
     const fs::path canonical = fs::weakly_canonical(fs::path(sysfsPath), ec);
     if (ec) return core::makeError(core::Error::Code::NotFound, "cannot resolve " + sysfsPath);
@@ -45,7 +46,14 @@ core::Result<void> SysfsDeviceController::setEnabled(const std::string& sysfsPat
     out << (enabled ? '1' : '0');
     out.flush();
     if (!out) return core::makeError(core::Error::Code::Io, "write failed: " + attr.string());
-    return {};
+    return std::optional<std::string>{};
+}
+
+core::Result<void> SysfsDeviceController::bindDriver(const std::string&, const std::string&) {
+    return core::makeError(core::Error::Code::Unsupported, "bindDriver arrives in Task 3");
+}
+core::Result<void> SysfsDeviceController::unbindDriver(const std::string&) {
+    return core::makeError(core::Error::Code::Unsupported, "unbindDriver arrives in Task 3");
 }
 
 }  // namespace devmgr::platform_linux

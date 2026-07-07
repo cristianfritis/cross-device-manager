@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string>
 
 #include "devmgr/pal/interfaces.hpp"
@@ -12,7 +13,11 @@ namespace devmgr::platform_linux {
 class SysfsDeviceController final : public pal::IDeviceController {
    public:
     explicit SysfsDeviceController(std::string sysfsRoot = "/sys");
-    core::Result<void> setEnabled(const std::string& sysfsPath, bool enabled) override;
+    core::Result<std::optional<std::string>> setEnabled(
+        const std::string& sysfsPath, bool enabled, const std::string& rebindDriverHint) override;
+    core::Result<void> bindDriver(const std::string& sysfsPath,
+                                  const std::string& driverName) override;
+    core::Result<void> unbindDriver(const std::string& sysfsPath) override;
 
    private:
     std::string sysfsRoot_;

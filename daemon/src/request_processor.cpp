@@ -42,7 +42,9 @@ core::Result<void> RequestProcessor::setDeviceEnabled(const CallerId& caller,
     if (!authorized) return tl::unexpected(authorized.error());
     if (!*authorized) return core::makeError(core::Error::Code::Permission, "authorization denied");
 
-    return controller_.setEnabled(canonical.string(), enabled);
+    auto applied = controller_.setEnabled(canonical.string(), enabled, "");
+    if (!applied) return tl::unexpected(applied.error());
+    return {};
 }
 
 }  // namespace devmgr::daemon

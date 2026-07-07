@@ -28,4 +28,21 @@ core::Result<void> DbusPrivilegedChannel::setDeviceEnabled(const core::Device& d
     }
 }
 
+// Module/driver verbs arrive in Task 9 (IPC v2) with the real D-Bus calls.
+core::Result<void> DbusPrivilegedChannel::loadModule(const std::string&) {
+    return core::makeError(core::Error::Code::Unsupported, "loadModule arrives in Task 9");
+}
+core::Result<void> DbusPrivilegedChannel::unloadModule(const std::string&) {
+    return core::makeError(core::Error::Code::Unsupported, "unloadModule arrives in Task 9");
+}
+core::Result<void> DbusPrivilegedChannel::bindDriver(const core::Device&, const std::string&) {
+    return core::makeError(core::Error::Code::Unsupported, "bindDriver arrives in Task 9");
+}
+core::Result<void> DbusPrivilegedChannel::unbindDriver(const core::Device&) {
+    return core::makeError(core::Error::Code::Unsupported, "unbindDriver arrives in Task 9");
+}
+core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::listDisabledDevices() {
+    return core::makeError(core::Error::Code::Unsupported, "listDisabledDevices arrives in Task 9");
+}
+
 }  // namespace devmgr::platform_linux

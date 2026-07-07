@@ -17,10 +17,15 @@ namespace {
 
 class RecordingController final : public pal::IDeviceController {
    public:
-    core::Result<void> setEnabled(const std::string& sysfsPath, bool enabled) override {
+    core::Result<std::optional<std::string>> setEnabled(
+        const std::string& sysfsPath, bool enabled,
+        const std::string& /*rebindDriverHint*/) override {
         calls.push_back({sysfsPath, enabled});
-        return next;
+        if (!next) return tl::unexpected(next.error());
+        return std::optional<std::string>{};
     }
+    core::Result<void> bindDriver(const std::string&, const std::string&) override { return {}; }
+    core::Result<void> unbindDriver(const std::string&) override { return {}; }
     struct Call {
         std::string sysfsPath;
         bool enabled;

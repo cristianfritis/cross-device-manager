@@ -41,15 +41,15 @@ class SysfsControllerTest : public ::testing::Test {
 
 TEST_F(SysfsControllerTest, DisableWritesZeroAndEnableWritesOne) {
     SysfsDeviceController controller(root_.string());
-    ASSERT_TRUE(controller.setEnabled(device_.string(), false).has_value());
+    ASSERT_TRUE(controller.setEnabled(device_.string(), false, "").has_value());
     EXPECT_EQ(readFile(device_ / "authorized"), "0");
-    ASSERT_TRUE(controller.setEnabled(device_.string(), true).has_value());
+    ASSERT_TRUE(controller.setEnabled(device_.string(), true, "").has_value());
     EXPECT_EQ(readFile(device_ / "authorized"), "1");
 }
 
 TEST_F(SysfsControllerTest, MissingDeviceIsNotFound) {
     SysfsDeviceController controller(root_.string());
-    auto r = controller.setEnabled((root_ / "devices/ghost").string(), false);
+    auto r = controller.setEnabled((root_ / "devices/ghost").string(), false, "");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, Error::Code::NotFound);
 }
@@ -57,7 +57,7 @@ TEST_F(SysfsControllerTest, MissingDeviceIsNotFound) {
 TEST_F(SysfsControllerTest, PathOutsideRootIsNotFound) {
     SysfsDeviceController controller((root_ / "devices").string());
     // ".." escape attempts must be rejected after canonicalization.
-    auto r = controller.setEnabled((root_ / "devices/../..").string(), false);
+    auto r = controller.setEnabled((root_ / "devices/../..").string(), false, "");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, Error::Code::NotFound);
 }
@@ -66,7 +66,7 @@ TEST_F(SysfsControllerTest, NoAuthorizedAttrIsUnsupported) {
     const fs::path pci = root_ / "devices/pci0000:00/0000:00:02.0";
     fs::create_directories(pci);
     SysfsDeviceController controller(root_.string());
-    auto r = controller.setEnabled(pci.string(), false);
+    auto r = controller.setEnabled(pci.string(), false, "");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, Error::Code::Unsupported);
 }
@@ -75,7 +75,7 @@ TEST_F(SysfsControllerTest, UnwritableAttrIsIo) {
     if (::geteuid() == 0) GTEST_SKIP() << "root ignores file permissions";
     fs::permissions(device_ / "authorized", fs::perms::owner_read);
     SysfsDeviceController controller(root_.string());
-    auto r = controller.setEnabled(device_.string(), false);
+    auto r = controller.setEnabled(device_.string(), false, "");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, Error::Code::Io);
 }

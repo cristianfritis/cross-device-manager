@@ -27,5 +27,6 @@ struct ErrorEvent {
     std::string source;
     std::string message;
 };
+struct ModulesChangedEvent {};
 
 }  // namespace devmgr::core
