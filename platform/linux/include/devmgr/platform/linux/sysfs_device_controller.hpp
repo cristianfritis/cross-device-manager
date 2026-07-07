@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -6,10 +7,10 @@
 
 namespace devmgr::platform_linux {
 
-// IDeviceController over sysfs. Phase 4 mechanism: the USB `authorized`
-// attribute only — the one path whose disabled-state round-trips purely
-// through sysfs (spec 2026-07-03). Runs in-process in devmgrd (as root);
-// the sysfs root is injectable so tests drive a fake tree in a temp dir.
+// Acts on canonical sysfs paths under an injectable root (tests use tmp trees).
+// Mechanism selection is attribute-driven: `authorized` present => USB
+// authorized mechanism; otherwise driver unbind + driver_override/drivers_probe
+// rebind (spec §5.4).
 class SysfsDeviceController final : public pal::IDeviceController {
    public:
     explicit SysfsDeviceController(std::string sysfsRoot = "/sys");
@@ -20,6 +21,7 @@ class SysfsDeviceController final : public pal::IDeviceController {
     core::Result<void> unbindDriver(const std::string& sysfsPath) override;
 
    private:
+    core::Result<std::filesystem::path> canonicalDevice(const std::string& sysfsPath) const;
     std::string sysfsRoot_;
 };
 
