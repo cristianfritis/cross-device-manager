@@ -26,6 +26,8 @@ T10|✅ done|Dockerfile sdbus build + CI guards + README + VM script|Dockerfile:
 
 Phase exit gate after T10: USER manual smoke (§ "Manual smoke" at the end) + VM dangerous script.
 
+**✅ PHASE 4 COMPLETE — exit gate PASSED 2026-07-05.** All 9 manual-smoke items green on real host (Gentoo, Ryzen AI 9 HX 375): T5 TUI round-trip (real polkit prompt + auth-cache re-enable), T6 GUI round-trip, T7 guard advisory refusals (audio coprocessor + keyboard), T8 negative path (devmgrd killed → "helper not available", UI stayed up). VM dangerous script: `PHASE4 VM SMOKE OK` (automated via `./test-vm.sh`). Host suite 114/114, container 115/115. Branch `feature/phase4` kept as-is (stacked workflow) — not merged/pushed; Phase 5 stacks on top.
+
 ## Global Constraints
 
 - **sdbus-c++ v2 API only.** Never use v1-isms (`registerMethod` directly on the object, pointer-returning `getCurrentlyProcessedMessage`). v2 uses strong types: `sdbus::ServiceName`, `sdbus::ObjectPath`, `sdbus::InterfaceName`, `sdbus::Error::Name`. Host has 2.3.1; user must `emerge dev-cpp/sdbus-c++` before T6.
