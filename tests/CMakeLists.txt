@@ -31,7 +31,37 @@ if(UNIX AND NOT APPLE)
         unit/test_linux_criticality_prober.cpp
         unit/test_request_processor.cpp
         unit/test_dbus_contract.cpp
-        unit/test_state_store.cpp)
+        unit/test_state_store.cpp
+        unit/test_kmod_driver_manager.cpp)
     target_link_libraries(devmgr_tests PRIVATE devmgr_pal_linux devmgrd_lib)
+
+    # KmodDriverManagerTest needs real depmod-processed .ko files: libkmod's
+    # module lookup reads modules.dep.bin/modules.alias.bin exclusively and
+    # has never had a text-index fallback. Build three tiny fake .ko files
+    # (host CC + objcopy) once, at configure/build time, and hand the tests
+    # the directory they land in via a compile definition.
+    find_program(DEVMGR_HOST_CC NAMES cc gcc clang)
+    find_program(DEVMGR_HOST_OBJCOPY NAMES objcopy)
+    if(NOT DEVMGR_HOST_CC OR NOT DEVMGR_HOST_OBJCOPY)
+        message(FATAL_ERROR "KmodDriverManagerTest fixtures need a host C compiler and objcopy")
+    endif()
+    set(DEVMGR_KMOD_FIXTURE_DIR ${CMAKE_CURRENT_BINARY_DIR}/kmod_fixtures)
+    set(DEVMGR_KMOD_FIXTURE_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/kmod/generate_fixtures.sh)
+    add_custom_command(
+        OUTPUT ${DEVMGR_KMOD_FIXTURE_DIR}/helper.ko
+               ${DEVMGR_KMOD_FIXTURE_DIR}/dummy.ko
+               ${DEVMGR_KMOD_FIXTURE_DIR}/usbhid.ko
+        COMMAND ${DEVMGR_KMOD_FIXTURE_SCRIPT} ${DEVMGR_KMOD_FIXTURE_DIR} ${DEVMGR_HOST_CC}
+                ${DEVMGR_HOST_OBJCOPY}
+        DEPENDS ${DEVMGR_KMOD_FIXTURE_SCRIPT}
+        COMMENT "Generating fake .ko fixtures for KmodDriverManagerTest"
+        VERBATIM)
+    add_custom_target(devmgr_kmod_fixtures DEPENDS
+        ${DEVMGR_KMOD_FIXTURE_DIR}/helper.ko
+        ${DEVMGR_KMOD_FIXTURE_DIR}/dummy.ko
+        ${DEVMGR_KMOD_FIXTURE_DIR}/usbhid.ko)
+    add_dependencies(devmgr_tests devmgr_kmod_fixtures)
+    target_compile_definitions(devmgr_tests PRIVATE
+        DEVMGR_KMOD_FIXTURE_DIR="${DEVMGR_KMOD_FIXTURE_DIR}")
 endif()
 gtest_discover_tests(devmgr_tests)
