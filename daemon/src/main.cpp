@@ -2,6 +2,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -13,9 +14,12 @@
 #include "daemon/src/polkit_authority.hpp"
 #include "devmgr/daemon/authority.hpp"
 #include "devmgr/daemon/request_processor.hpp"
+#include "devmgr/daemon/state_store.hpp"
 #include "devmgr/platform/linux/dbus_contract.hpp"
+#include "devmgr/platform/linux/kmod_driver_manager.hpp"
 #include "devmgr/platform/linux/linux_criticality_prober.hpp"
 #include "devmgr/platform/linux/sysfs_device_controller.hpp"
+#include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/runtime/logging.hpp"
 
 namespace {
@@ -25,6 +29,7 @@ struct Options {
     std::string sysfsRoot = "/sys";
     std::string mountsPath = "/proc/self/mounts";
     std::string authority = "polkit";
+    std::string stateDir = "/var/lib/devmgrd";
     bool valid = true;
 };
 
@@ -34,7 +39,8 @@ Options parse(std::span<char*> args) {
     const std::map<std::string_view, std::string*> flags = {{"--bus", &opts.bus},
                                                             {"--sysfs-root", &opts.sysfsRoot},
                                                             {"--mounts-path", &opts.mountsPath},
-                                                            {"--authority", &opts.authority}};
+                                                            {"--authority", &opts.authority},
+                                                            {"--state-dir", &opts.stateDir}};
     for (std::size_t i = 1; i < args.size(); ++i) {
         const auto flag = flags.find(args[i]);
         if (flag == flags.end() || i + 1 == args.size()) {
@@ -62,16 +68,18 @@ int main(int argc, char** argv) {
     const Options opts = parse(std::span<char*>(argv, static_cast<std::size_t>(argc)));
     if (!opts.valid) {
         std::cerr << "usage: devmgrd [--bus system|session] [--sysfs-root PATH] "
-                     "[--mounts-path PATH] [--authority polkit|allow-all|deny-all]\n";
+                     "[--mounts-path PATH] [--authority polkit|allow-all|deny-all] "
+                     "[--state-dir PATH]\n";
         return 2;
     }
     devmgr::runtime::init();  // spdlog global setup — the repo's logging entry point
     if (opts.bus != "system" || opts.sysfsRoot != "/sys" ||
-        opts.mountsPath != "/proc/self/mounts" || opts.authority != "polkit") {
+        opts.mountsPath != "/proc/self/mounts" || opts.authority != "polkit" ||
+        opts.stateDir != "/var/lib/devmgrd") {
         spdlog::warn(
             "running with NON-DEFAULT seams (test/dev mode): bus={} sysfs={} mounts={} "
-            "authority={} — never use these in production",
-            opts.bus, opts.sysfsRoot, opts.mountsPath, opts.authority);
+            "authority={} state-dir={} — never use these in production",
+            opts.bus, opts.sysfsRoot, opts.mountsPath, opts.authority, opts.stateDir);
     }
     try {
         auto connection =
@@ -80,8 +88,16 @@ int main(int argc, char** argv) {
                 : sdbus::createSystemBusConnection(sdbus::ServiceName{platform_linux::kBusName});
         platform_linux::SysfsDeviceController controller(opts.sysfsRoot);
         platform_linux::LinuxCriticalityProber prober(opts.sysfsRoot, opts.mountsPath);
+        platform_linux::KmodDriverManager drivers;
+        platform_linux::UdevDeviceEnumerator enumerator;
+        daemon::StateStore store(opts.stateDir);
+        if (auto loaded = store.load(); !loaded) {
+            spdlog::warn("failed to load state store: {}", loaded.error().message);
+        }
+        std::mutex applyMutex;
         auto authority = makeAuthority(opts.authority);
-        daemon::RequestProcessor processor(controller, prober, *authority, opts.sysfsRoot);
+        daemon::RequestProcessor processor(controller, prober, *authority, drivers, enumerator,
+                                           store, applyMutex, opts.sysfsRoot);
         daemon::ManagerAdaptor adaptor(*connection, processor);
         spdlog::info("devmgrd serving {} on the {} bus", platform_linux::kBusName, opts.bus);
         connection->enterEventLoop();

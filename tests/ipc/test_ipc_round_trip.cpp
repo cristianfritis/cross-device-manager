@@ -57,7 +57,8 @@ class IpcRoundTripTest : public ::testing::Test {
         ASSERT_NE(daemonPid_, -1);
         if (daemonPid_ == 0) {
             ::execl(DEVMGRD_BIN, "devmgrd", "--bus", "session", "--sysfs-root", root_.c_str(),
-                    "--mounts-path", (root_ / "mounts").c_str(), "--authority", authority,
+                    "--mounts-path", (root_ / "mounts").c_str(), "--state-dir",
+                    (root_ / "state").c_str(), "--authority", authority,
                     static_cast<char*>(nullptr));
             ::_exit(127);
         }
