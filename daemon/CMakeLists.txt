@@ -2,10 +2,12 @@
 # Built unconditionally so its unit tests always run; the devmgrd executable
 # itself (main + sdbus adaptor + polkit) is added behind DEVMGR_WITH_SDBUS in
 # Task 6.
+find_package(nlohmann_json CONFIG REQUIRED)
 add_library(devmgrd_lib STATIC
-    src/request_processor.cpp)
+    src/request_processor.cpp
+    src/state_store.cpp)
 target_include_directories(devmgrd_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(devmgrd_lib PUBLIC devmgr_core)
+target_link_libraries(devmgrd_lib PUBLIC devmgr_core PRIVATE nlohmann_json::nlohmann_json)
 target_compile_features(devmgrd_lib PUBLIC cxx_std_20)
 
 if(DEVMGR_WITH_SDBUS)

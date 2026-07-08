@@ -30,7 +30,8 @@ if(UNIX AND NOT APPLE)
         unit/test_sysfs_device_controller.cpp
         unit/test_linux_criticality_prober.cpp
         unit/test_request_processor.cpp
-        unit/test_dbus_contract.cpp)
+        unit/test_dbus_contract.cpp
+        unit/test_state_store.cpp)
     target_link_libraries(devmgr_tests PRIVATE devmgr_pal_linux devmgrd_lib)
 endif()
 gtest_discover_tests(devmgr_tests)
