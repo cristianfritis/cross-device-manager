@@ -8,7 +8,8 @@ add_library(devmgr_pal_linux STATIC
     src/sysfs_device_controller.cpp
     src/linux_criticality_prober.cpp
     src/udev_hotplug_monitor.cpp
-    src/kmod_driver_manager.cpp)
+    src/kmod_driver_manager.cpp
+    src/linux_system_info.cpp)
 target_include_directories(devmgr_pal_linux
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

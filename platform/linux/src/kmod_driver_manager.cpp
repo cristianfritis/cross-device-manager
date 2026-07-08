@@ -8,6 +8,9 @@
 #include <optional>
 #include <utility>
 
+#include "devmgr/platform/linux/kmod_error_taxonomy.hpp"
+#include "devmgr/platform/linux/linux_system_info.hpp"
+
 namespace devmgr::platform_linux {
 namespace fs = std::filesystem;
 
@@ -61,6 +64,25 @@ void applyBlacklistConfig(kmod_ctx* ctx, const std::string& wanted, core::Modpro
         if (key != nullptr && normalized(key) == wanted) info.blacklisted = true;
     }
     kmod_config_iter_free_iter(it);
+}
+
+// Checks for modprobe.d `install` command rule and returns error if found
+// (devmgrd does not execute shell commands).
+core::Result<void> checkNoInstallCommand(kmod_ctx* ctx, const std::string& wanted) {
+    kmod_config_iter* it = kmod_config_get_install_commands(ctx);
+    if (it == nullptr) return {};
+    std::string command;
+    while (kmod_config_iter_next(it)) {
+        const char* key = kmod_config_iter_get_key(it);
+        const char* value = kmod_config_iter_get_value(it);
+        if (key != nullptr && normalized(key) == wanted) command = value != nullptr ? value : "";
+    }
+    kmod_config_iter_free_iter(it);
+    if (!command.empty())
+        return core::makeError(core::Error::Code::Unsupported,
+                               "module has a modprobe.d install rule (" + command +
+                                   "); devmgrd does not execute shell commands — use modprobe");
+    return {};
 }
 }  // namespace
 
@@ -250,12 +272,74 @@ core::Result<std::vector<std::string>> KmodDriverManager::devicesUsingModule(
     return out;
 }
 
-// loadModule / unloadModule arrive in Task 6.
-core::Result<void> KmodDriverManager::loadModule(const std::string&) {
-    return core::makeError(core::Error::Code::Unsupported, "loadModule arrives in Task 6");
+core::Result<void> KmodDriverManager::loadModule(const std::string& name) {
+    auto mod = impl_->byName(name);
+    if (!mod) return tl::unexpected(mod.error());
+
+    // Pre-flight: refuse modprobe.d `install`-command modules — devmgrd never
+    // fork/execs (spec §8.1; IGNORE_COMMAND below is belt-and-braces).
+    const std::string wanted = normalized(name);
+    if (auto r = checkNoInstallCommand(impl_->ctx, wanted); !r) {
+        kmod_module_unref(*mod);
+        return tl::unexpected(r.error());
+    }
+
+    const int ret = kmod_module_probe_insert_module(
+        *mod, KMOD_PROBE_APPLY_BLACKLIST | KMOD_PROBE_IGNORE_COMMAND, nullptr, nullptr, nullptr,
+        nullptr);
+    if (ret == 0) {
+        kmod_module_unref(*mod);
+        return {};  // loaded (or already loaded: idempotent success)
+    }
+    if (ret > 0) {  // stopped by blacklist (spec §8.1: distinct from failure)
+        kmod_module_unref(*mod);
+        return core::makeError(core::Error::Code::Unsupported, "blacklisted by modprobe.d");
+    }
+    // Negative errno: gather dependency initstates to name the culprit.
+    std::vector<DepState> deps;
+    kmod_list* deplist = kmod_module_get_dependencies(*mod);
+    kmod_list* it = nullptr;
+    kmod_list_foreach(it, deplist) {
+        kmod_module* dep = kmod_module_get_module(it);
+        const int state = kmod_module_get_initstate(dep);
+        deps.push_back(
+            {kmod_module_get_name(dep), state == KMOD_MODULE_LIVE || state == KMOD_MODULE_BUILTIN});
+        kmod_module_unref(dep);
+    }
+    kmod_module_unref_list(deplist);
+    kmod_module_unref(*mod);
+    return tl::unexpected(
+        describeLoadFailure(-ret, name, deps, readLockdownMode(impl_->options.securityDir)));
 }
-core::Result<void> KmodDriverManager::unloadModule(const std::string&) {
-    return core::makeError(core::Error::Code::Unsupported, "unloadModule arrives in Task 6");
+
+core::Result<void> KmodDriverManager::unloadModule(const std::string& name) {
+    if (auto r = impl_->ready(); !r) return tl::unexpected(r.error());
+    kmod_module* mod = nullptr;
+    if (kmod_module_new_from_name(impl_->ctx, name.c_str(), &mod) < 0 || mod == nullptr)
+        return core::makeError(core::Error::Code::NotFound, "module '" + name + "' not loaded");
+    const int state = kmod_module_get_initstate(mod);
+    if (state == KMOD_MODULE_BUILTIN) {
+        kmod_module_unref(mod);
+        return core::makeError(core::Error::Code::Unsupported,
+                               "module '" + name + "' is built into the kernel");
+    }
+    if (state < 0) {
+        kmod_module_unref(mod);
+        return core::makeError(core::Error::Code::NotFound, "module '" + name + "' not loaded");
+    }
+    std::vector<std::string> holders;
+    kmod_list* hlist = kmod_module_get_holders(mod);
+    kmod_list* h = nullptr;
+    kmod_list_foreach(h, hlist) {
+        kmod_module* hm = kmod_module_get_module(h);
+        holders.emplace_back(kmod_module_get_name(hm));
+        kmod_module_unref(hm);
+    }
+    kmod_module_unref_list(hlist);
+    const int ret = kmod_module_remove_module(mod, 0);
+    kmod_module_unref(mod);
+    if (ret == 0) return {};
+    return tl::unexpected(describeUnloadFailure(-ret, name, holders));
 }
 
 }  // namespace devmgr::platform_linux
