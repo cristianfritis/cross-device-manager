@@ -1,4 +1,5 @@
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -210,4 +211,82 @@ TEST(ApplicationFacadeTest, CanDisableIsAllowedWithoutProberOrOnProbeError) {
     app::ApplicationFacade withFailing(pal, scheduler, bus, svc, nullptr, &failing);
     withFailing.refresh().wait();
     EXPECT_TRUE(withFailing.canDisable(core::DeviceId{"u1"}).allowed);
+}
+
+TEST(ApplicationFacadeTest, LoadModulePublishesCompletionAndModulesChanged) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    int modulesChanged = 0;
+    auto sub = bus.subscribe<core::ModulesChangedEvent>(
+        [&](const core::ModulesChangedEvent&) { ++modulesChanged; });
+    std::optional<core::TaskCompletedEvent> done;
+    auto sub2 = bus.subscribe<core::TaskCompletedEvent>(
+        [&](const core::TaskCompletedEvent& e) { done = e; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel, nullptr, &pal, &pal);
+    facade.loadModule("dummy").wait();
+
+    ASSERT_TRUE(done.has_value());
+    EXPECT_EQ(done->taskId, "load-module:dummy");
+    EXPECT_TRUE(done->ok);
+    EXPECT_EQ(modulesChanged, 1);
+    ASSERT_EQ(channel.moduleCalls.size(), 1U);
+    EXPECT_EQ(channel.moduleCalls[0], "load:dummy");
+}
+
+TEST(ApplicationFacadeTest, UnbindDriverResolvesDeviceAndCallsChannel) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    pal.seedDevice(devAt("u1", "/sys/devices/usb1/1-4", "Webcam"));
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel, nullptr, &pal, &pal);
+    facade.refresh().wait();
+    facade.unbindDriver(core::DeviceId{"u1"}).wait();
+
+    ASSERT_EQ(channel.moduleCalls.size(), 1U);
+    EXPECT_EQ(channel.moduleCalls[0], "unbind:/sys/devices/usb1/1-4");
+}
+
+TEST(ApplicationFacadeTest, RefreshMergesDisabledOverlayFromChannel) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    pal.seedDevice(devAt("u1", "/sys/devices/usb1/1-4", "Webcam"));
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    core::DisabledDeviceEntry e;
+    e.lastSysfsPath = "/sys/devices/usb1/1-4";  // empty key => lastSysfsPath fallback matches
+    channel.disabledEntries = std::vector<core::DisabledDeviceEntry>{e};
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel, nullptr, &pal, &pal);
+    facade.refresh().wait();
+
+    const auto devices = facade.devices();
+    ASSERT_FALSE(devices.empty());
+    EXPECT_EQ(devices[0].status, core::DeviceStatus::Disabled);
+}
+
+TEST(ApplicationFacadeTest, CanUnloadModuleAdvisesInUse) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::LoadedModule m;
+    m.name = "usbcore";
+    m.holders = {"usbhid"};
+    pal.seedLoadedModule(m);
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    test::FakeCriticalityProber prober;  // REQUIRED: null prober => advisory-unavailable => allowed
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel, &prober, &pal, &pal);
+    const auto verdict = facade.canUnloadModule("usbcore");
+
+    EXPECT_FALSE(verdict.allowed);
+    EXPECT_EQ(verdict.reason, "in use by usbhid");
 }

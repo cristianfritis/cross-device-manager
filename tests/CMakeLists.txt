@@ -19,6 +19,8 @@ add_executable(devmgr_tests
     unit/test_status_line_vm.cpp
     unit/test_critical_device_guard.cpp
     unit/test_device_key.cpp
+    unit/test_disabled_overlay.cpp
+    unit/test_modules_vm.cpp
 )
 target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest GTest::gtest_main)
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

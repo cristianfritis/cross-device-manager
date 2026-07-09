@@ -1,6 +1,8 @@
 add_library(devmgr_app STATIC
     src/device_service.cpp
     src/application_facade.cpp
+    src/disabled_overlay.cpp
+    src/modules_vm.cpp
     src/device_list_vm.cpp
     src/device_detail_vm.cpp
     src/hotplug_service.cpp
