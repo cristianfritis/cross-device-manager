@@ -13,7 +13,7 @@ namespace devmgr::platform_linux {
 inline constexpr const char* kBusName = "org.devmgr.Manager1";
 inline constexpr const char* kObjectPath = "/org/devmgr/Manager1";
 inline constexpr const char* kInterfaceName = "org.devmgr.Manager1";
-inline constexpr std::uint32_t kApiVersion = 1;
+inline constexpr std::uint32_t kApiVersion = 2;
 
 inline constexpr const char* kErrCritical = "org.devmgr.Error.CriticalDevice";
 inline constexpr const char* kErrNotAuthorized = "org.devmgr.Error.NotAuthorized";

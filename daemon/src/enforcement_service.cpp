@@ -1,11 +1,18 @@
 #include "devmgr/daemon/enforcement_service.hpp"
 
+#include <algorithm>
+#include <filesystem>
+#include <system_error>
+#include <vector>
+
 #include <spdlog/spdlog.h>
 
+#include "devmgr/daemon/sysfs_device_probe.hpp"
 #include "devmgr/services/critical_device_guard.hpp"
 #include "devmgr/services/device_key.hpp"
 
 namespace devmgr::daemon {
+namespace fs = std::filesystem;
 
 EnforcementService::EnforcementService(pal::IDeviceEnumerator& enumerator,
                                        pal::IDeviceController& controller,
@@ -18,19 +25,27 @@ EnforcementService::EnforcementService(pal::IDeviceEnumerator& enumerator,
       applyMutex_(applyMutex) {}
 
 void EnforcementService::sweep() {
-    auto devices = enumerator_.enumerate();
-    if (!devices) {
-        spdlog::warn("enforcement sweep: enumeration failed: {}", devices.error().message);
-        return;
+    auto enumerated = enumerator_.enumerate();
+    if (!enumerated) {
+        spdlog::warn("enforcement sweep: enumeration failed: {}", enumerated.error().message);
+        enumerated = std::vector<core::Device>{};  // every entry takes the sysfs fallback below
     }
     for (const auto& entry : store_.entries()) {
-        for (const auto& device : *devices) {
-            if (services::matchesDevice(entry.key, device) ||
-                entry.lastSysfsPath == device.sysfsPath) {
-                maybeReapply(entry, device);
-                break;
-            }
+        const auto match = std::ranges::find_if(*enumerated, [&](const core::Device& device) {
+            return services::matchesDevice(entry.key, device) ||
+                   entry.lastSysfsPath == device.sysfsPath;
+        });
+        if (match != enumerated->end()) {
+            maybeReapply(entry, *match);
+            continue;
         }
+        // The live enumerator does not list this device: a fake --sysfs-root
+        // tree, or udev has not settled yet at startup. Re-apply straight from
+        // the persisted path when it is still present on disk — the same
+        // fallback RequestProcessor uses to key a device udev misses.
+        std::error_code ec;
+        if (entry.lastSysfsPath.empty() || !fs::is_directory(entry.lastSysfsPath, ec)) continue;
+        maybeReapply(entry, deviceFromSysfs(entry.lastSysfsPath));
     }
 }
 

@@ -13,6 +13,7 @@
 #include "daemon/src/manager_adaptor.hpp"
 #include "daemon/src/polkit_authority.hpp"
 #include "devmgr/daemon/authority.hpp"
+#include "devmgr/daemon/enforcement_service.hpp"
 #include "devmgr/daemon/request_processor.hpp"
 #include "devmgr/daemon/state_store.hpp"
 #include "devmgr/platform/linux/dbus_contract.hpp"
@@ -20,6 +21,7 @@
 #include "devmgr/platform/linux/linux_criticality_prober.hpp"
 #include "devmgr/platform/linux/sysfs_device_controller.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
+#include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
 #include "devmgr/runtime/logging.hpp"
 
 namespace {
@@ -88,19 +90,28 @@ int main(int argc, char** argv) {
                 : sdbus::createSystemBusConnection(sdbus::ServiceName{platform_linux::kBusName});
         platform_linux::SysfsDeviceController controller(opts.sysfsRoot);
         platform_linux::LinuxCriticalityProber prober(opts.sysfsRoot, opts.mountsPath);
-        platform_linux::KmodDriverManager drivers;
+        platform_linux::KmodDriverManager drivers({.sysfsRoot = opts.sysfsRoot});
         platform_linux::UdevDeviceEnumerator enumerator;
         daemon::StateStore store(opts.stateDir);
-        if (auto loaded = store.load(); !loaded) {
-            spdlog::warn("failed to load state store: {}", loaded.error().message);
-        }
+        if (auto loaded = store.load(); !loaded)
+            spdlog::warn("state store load failed: {}", loaded.error().message);
         std::mutex applyMutex;
         auto authority = makeAuthority(opts.authority);
         daemon::RequestProcessor processor(controller, prober, *authority, drivers, enumerator,
                                            store, applyMutex, opts.sysfsRoot);
+        daemon::EnforcementService enforcement(enumerator, controller, prober, store, applyMutex);
+        enforcement.sweep();  // startup re-apply (spec §5.3)
+        platform_linux::UdevHotplugMonitor monitor;
+        if (auto started = monitor.start(
+                [&enforcement](const pal::HotplugEvent& e) { enforcement.onHotplug(e); });
+            !started)
+            spdlog::warn("hotplug watch unavailable ({}): enforcement is sweep-only",
+                         started.error().message);
         daemon::ManagerAdaptor adaptor(*connection, processor);
-        spdlog::info("devmgrd serving {} on the {} bus", platform_linux::kBusName, opts.bus);
+        spdlog::info("devmgrd serving {} (api {}) on the {} bus", platform_linux::kBusName,
+                     platform_linux::kApiVersion, opts.bus);
         connection->enterEventLoop();
+        monitor.stop();
     } catch (const std::exception& e) {
         spdlog::error("devmgrd failed: {}", e.what());
         return 1;

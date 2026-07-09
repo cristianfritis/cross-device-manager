@@ -49,6 +49,11 @@ class IpcRoundTripTest : public ::testing::Test {
         device_ = root_ / "devices/pci0000:00/usb1/1-4";
         fs::create_directories(device_);
         std::ofstream(device_ / "authorized") << "1";
+        fs::create_directories(root_ / "bus/usb");
+        fs::create_directory_symlink(root_ / "bus/usb", device_ / "subsystem");
+        std::ofstream(device_ / "idVendor") << "0x1234";
+        std::ofstream(device_ / "idProduct") << "0x5678";
+        std::ofstream(device_ / "serial") << "IPCSER";
         std::ofstream(root_ / "mounts") << "";  // no storage facts by default
     }
 
@@ -72,12 +77,17 @@ class IpcRoundTripTest : public ::testing::Test {
         FAIL() << "devmgrd did not come up on the session bus";
     }
 
-    void TearDown() override {
+    void stopDaemon() {
         if (daemonPid_ > 0) {
             ::kill(daemonPid_, SIGTERM);
             int status = 0;
             ::waitpid(daemonPid_, &status, 0);
+            daemonPid_ = -1;
         }
+    }
+
+    void TearDown() override {
+        stopDaemon();
         std::error_code ec;
         fs::remove_all(root_, ec);
     }
@@ -147,4 +157,64 @@ TEST_F(IpcRoundTripTest, AbsentDaemonIsHelperUnavailableIo) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, Error::Code::Io);
     EXPECT_EQ(r.error().message, "helper devmgrd is not available");
+}
+
+TEST_F(IpcRoundTripTest, DisabledDeviceAppearsInBulkListAndClearsOnEnable) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+    auto list = channel.listDisabledDevices();
+    ASSERT_TRUE(list.has_value()) << list.error().message;
+    ASSERT_EQ(list->size(), 1U);
+    EXPECT_EQ((*list)[0].mechanism, "authorized");
+    EXPECT_EQ((*list)[0].key.serial, "IPCSER");
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), true).has_value());
+    auto after = channel.listDisabledDevices();
+    ASSERT_TRUE(after.has_value());
+    EXPECT_TRUE(after->empty());
+}
+
+TEST_F(IpcRoundTripTest, DesiredStateSurvivesDaemonRestartAndSweepReapplies) {
+    startDaemon("allow-all");
+    {
+        DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+        ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+    }
+    stopDaemon();
+    std::ofstream(device_ / "authorized") << "1";  // "replug": kernel re-enables
+    startDaemon("allow-all");                      // sweep must re-disable
+    for (int i = 0; i < 100 && readFile(device_ / "authorized") != "0"; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(readFile(device_ / "authorized"), "0");
+}
+
+TEST_F(IpcRoundTripTest, SurgicalUnbindGoesThroughTheBusAndSkipsTheStore) {
+    // PCI device bound to a driver in the fake tree (Task 3 layout).
+    const fs::path pci = root_ / "devices/pci0000:00/0000:00:03.0";
+    const fs::path drv = root_ / "bus/pci/drivers/virtio-pci";
+    fs::create_directories(pci);
+    fs::create_directories(drv);
+    std::ofstream(drv / "unbind") << "";
+    std::ofstream(drv / "bind") << "";
+    std::ofstream(root_ / "bus/pci/drivers_probe") << "";
+    fs::create_directory_symlink(drv, pci / "driver");
+    fs::create_directory_symlink(root_ / "bus/pci", pci / "subsystem");
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    ASSERT_TRUE(channel.unbindDriver(deviceAt(pci.string())).has_value());
+    EXPECT_EQ(readFile(drv / "unbind"), "0000:00:03.0");
+    auto list = channel.listDisabledDevices();
+    ASSERT_TRUE(list.has_value());
+    EXPECT_TRUE(list->empty());  // surgical: never persisted
+    ASSERT_TRUE(channel.bindDriver(deviceAt(pci.string()), "virtio-pci").has_value());
+    EXPECT_EQ(readFile(drv / "bind"), "0000:00:03.0");
+}
+
+TEST_F(IpcRoundTripTest, InvalidModuleNameRefusedAsNotFound) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    auto r = channel.loadModule("../evil");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::NotFound);
+    EXPECT_EQ(r.error().message, "invalid module name");
 }

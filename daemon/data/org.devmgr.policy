@@ -12,4 +12,22 @@
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
   </action>
+  <action id="org.devmgr.manage-modules">
+    <description>Load or unload a kernel module</description>
+    <message>Authentication is required to load or unload a kernel module</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+  <action id="org.devmgr.manage-drivers">
+    <description>Bind or unbind a device driver</description>
+    <message>Authentication is required to bind or unbind a device driver</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

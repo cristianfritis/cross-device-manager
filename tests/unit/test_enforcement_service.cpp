@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 
@@ -57,6 +58,19 @@ class EnforcementServiceTest : public ::testing::Test {
                                    .lastSysfsPath = d.sysfsPath,
                                    .disabledAtUtc = 1,
                                    .guardSuspended = false};
+    }
+
+    // A real on-disk sysfs-ish device dir: `authorized` + a `subsystem` link to
+    // a usb bus dir. Returns its path.
+    std::string makeSysfsDevice(const std::string& rel, const std::string& authorized) {
+        const fs::path bus = dir_ / "bus/usb";
+        fs::create_directories(bus);
+        const fs::path dev = dir_ / "devices" / rel;
+        fs::create_directories(dev);
+        std::ofstream(dev / "authorized") << authorized;
+        std::error_code ec;
+        fs::create_directory_symlink(bus, dev / "subsystem", ec);
+        return dev.string();
     }
 };
 
@@ -128,4 +142,51 @@ TEST_F(EnforcementServiceTest, RemovalEventsAreIgnored) {
     auto svc = service();
     svc.onHotplug({devmgr::pal::HotplugEvent::Action::Removed, d});
     EXPECT_TRUE(pal_.setEnabledCalls.empty());
+}
+
+namespace {
+struct EmptyEnumerator final : devmgr::pal::IDeviceEnumerator {
+    devmgr::core::Result<std::vector<devmgr::core::Device>> enumerate() override {
+        return std::vector<devmgr::core::Device>{};
+    }
+};
+}  // namespace
+
+TEST_F(EnforcementServiceTest, SweepFallsBackToSysfsWhenEnumeratorMissesDevice) {
+    const std::string path = makeSysfsDevice("usb2/2-1", "1");  // kernel re-enabled it
+    Device seeded;
+    seeded.sysfsPath = path;
+    pal_.seedDevice(seeded);  // controller side only — the enumerator below sees nothing
+    auto e = entryFor(usbDevice(path, "AB12"));
+    ASSERT_TRUE(store_->upsert(e).has_value());
+    EmptyEnumerator empty;
+    EnforcementService svc(empty, pal_, prober_, *store_, mutex_);
+    svc.sweep();
+    ASSERT_EQ(pal_.setEnabledCalls.size(), 1U);
+    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, path);
+    EXPECT_FALSE(pal_.setEnabledCalls[0].enabled);
+}
+
+TEST_F(EnforcementServiceTest, SweepFallbackSkipsDeviceAlreadyDisabledOnDisk) {
+    // authorized == "0" => deviceFromSysfs reports Disabled => nothing to re-apply.
+    const std::string path = makeSysfsDevice("usb2/2-1", "0");
+    Device seeded;
+    seeded.sysfsPath = path;
+    pal_.seedDevice(seeded);
+    ASSERT_TRUE(store_->upsert(entryFor(usbDevice(path, "AB12"))).has_value());
+    EmptyEnumerator empty;
+    EnforcementService svc(empty, pal_, prober_, *store_, mutex_);
+    svc.sweep();
+    EXPECT_TRUE(pal_.setEnabledCalls.empty());
+}
+
+TEST_F(EnforcementServiceTest, SweepFallbackIgnoresVanishedPath) {
+    // Entry survives, but the device is physically gone: no re-apply, no throw.
+    ASSERT_TRUE(
+        store_->upsert(entryFor(usbDevice((dir_ / "devices/gone").string(), "AB12"))).has_value());
+    EmptyEnumerator empty;
+    EnforcementService svc(empty, pal_, prober_, *store_, mutex_);
+    EXPECT_NO_THROW(svc.sweep());
+    EXPECT_TRUE(pal_.setEnabledCalls.empty());
+    EXPECT_EQ(store_->entries().size(), 1U);
 }

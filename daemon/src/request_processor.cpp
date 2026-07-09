@@ -4,9 +4,9 @@
 #include <cctype>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <utility>
 
+#include "devmgr/daemon/sysfs_device_probe.hpp"
 #include "devmgr/services/critical_device_guard.hpp"
 #include "devmgr/services/device_key.hpp"
 
@@ -23,35 +23,6 @@ std::int64_t nowUtc() {
     return std::chrono::duration_cast<std::chrono::seconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
-}
-
-// Device the live enumerator lacks (fake --sysfs-root trees in the IPC E2E
-// suite, udev races) still needs a DeviceKey — build one straight from sysfs
-// attributes (Phase 5 Task 9 Step 1, pulled forward for T7 fix round 1).
-core::Device deviceFromSysfs(const std::string& canonical) {
-    const fs::path dir(canonical);
-    auto attr = [&](const char* name) -> std::string {
-        std::ifstream in(dir / name);
-        std::string v;
-        std::getline(in, v);
-        if (v.starts_with("0x")) v = v.substr(2);
-        return v;
-    };
-    core::Device d;
-    d.sysfsPath = canonical;
-    std::error_code ec;
-    const std::string bus = fs::weakly_canonical(dir / "subsystem", ec).filename().string();
-    d.bus = bus == "usb"        ? core::BusType::Usb
-            : bus == "pci"      ? core::BusType::Pci
-            : bus == "platform" ? core::BusType::Platform
-            : bus == "virtio"   ? core::BusType::Virtio
-                                : core::BusType::Other;
-    const std::string vendor = attr("idVendor");
-    d.vendorId = vendor.empty() ? attr("vendor") : vendor;
-    const std::string product = attr("idProduct");
-    d.productId = product.empty() ? attr("device") : product;
-    d.serial = attr("serial");
-    return d;
 }
 }  // namespace
 

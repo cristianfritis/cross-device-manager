@@ -1,21 +1,21 @@
 #pragma once
+#include <cstdint>
+#include <mutex>
+#include <optional>
+
 #include "devmgr/pal/interfaces.hpp"
 
 namespace devmgr::platform_linux {
 
-// IPrivilegedChannel over the D-Bus system bus → devmgrd. sdbus-c++ LEAF
-// FILE #2 (the .cpp; this header is sdbus-free). Each call opens a fresh
-// short-lived connection+proxy (sdbus-c++ v2 sync calls block their
-// connection; mutations are rare). Blocking with a 120 s timeout — the
-// interactive-polkit budget — so callers must run it on a worker thread.
-// Bus::Session exists for the private-bus integration tests only.
+// System-bus client of devmgrd (spec §6.1). Every call opens a fresh
+// connection (Phase 4 pattern). v2 verbs check ApiVersion >= 2 once and cache
+// it; Phase 4 SetDeviceEnabled keeps working against an old daemon.
 class DbusPrivilegedChannel final : public pal::IPrivilegedChannel {
    public:
     enum class Bus { System, Session };
     explicit DbusPrivilegedChannel(Bus bus = Bus::System);
+
     core::Result<void> setDeviceEnabled(const core::Device& device, bool enabled) override;
-    // Module/driver verbs arrive in Task 9 (IPC v2); stubs keep the tree
-    // compiling against the v2 IPrivilegedChannel interface until then.
     core::Result<void> loadModule(const std::string& name) override;
     core::Result<void> unloadModule(const std::string& name) override;
     core::Result<void> bindDriver(const core::Device& device,
@@ -24,7 +24,10 @@ class DbusPrivilegedChannel final : public pal::IPrivilegedChannel {
     core::Result<std::vector<core::DisabledDeviceEntry>> listDisabledDevices() override;
 
    private:
+    core::Result<void> ensureApi2();
     Bus bus_;
+    std::mutex cacheMutex_;
+    std::optional<std::uint32_t> cachedApi_;
 };
 
 }  // namespace devmgr::platform_linux
