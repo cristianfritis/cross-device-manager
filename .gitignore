@@ -39,6 +39,8 @@ Thumbs.db
 # lives in docs/superpowers/PHASE0-EXECUTION-GUIDE.md (committed).
 /.superpowers/
 .claude/
+.codegraph/
+.mcp.json
 
 # ---- Vagrant & VM Test Artifacts ----
 # Vagrant stores machine state, SSH keys, and synced folder metadata here
