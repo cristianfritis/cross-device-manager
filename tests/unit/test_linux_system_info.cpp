@@ -13,9 +13,8 @@ class LinuxSystemInfoTest : public ::testing::Test {
     fs::path dir_;
     void SetUp() override {
         dir_ = fs::temp_directory_path() /
-               ("devmgr-sysinfo-" + std::string(::testing::UnitTest::GetInstance()
-                                                    ->current_test_info()
-                                                    ->name()));
+               ("devmgr-sysinfo-" +
+                std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()));
         fs::create_directories(dir_ / "efivars");
         fs::create_directories(dir_ / "security");
     }

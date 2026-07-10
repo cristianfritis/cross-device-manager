@@ -15,8 +15,8 @@ TEST(KmodErrorTaxonomy, SignatureRejectionNamesLockdownMode) {
 }
 
 TEST(KmodErrorTaxonomy, UnloadedDependencyIsNamedAsCulprit) {
-    const auto e = pl::describeLoadFailure(
-        EKEYREJECTED, "parent", {{"dep_ok", true}, {"dep_bad", false}}, "none");
+    const auto e = pl::describeLoadFailure(EKEYREJECTED, "parent",
+                                           {{"dep_ok", true}, {"dep_bad", false}}, "none");
     EXPECT_NE(e.message.find("dependency 'dep_bad'"), std::string::npos) << e.message;
 }
 

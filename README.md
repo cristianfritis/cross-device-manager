@@ -5,6 +5,31 @@ It toggles the kernel's per-device `authorized` sysfs attribute only — no othe
 bus is mutated this phase. The mutation always travels through a polkit-gated
 root helper (`devmgrd`); the UIs never write sysfs directly.
 
+## Driver & Module Management (Phase 5)
+
+Phase 5 extends enable/disable to every bus and adds kernel-module management:
+
+- **Universal, persistent enable/disable with active enforcement.** Non-USB
+  devices (PCI, virtio, …) are disabled by unbinding their driver; USB keeps
+  the `authorized` mechanism. Re-enable performs a targeted `driver_override`
+  rebind. A disable now *sticks*: the daemon records the device identity in
+  its state store, re-applies it when the device reappears (replug/hotplug),
+  and sweeps on startup — so a disabled device stays disabled across replugs
+  and daemon restarts.
+- **Module load/unload with Secure Boot/lockdown awareness.** A **Modules**
+  view in both UIs lists loaded kernel modules (the SIGNED column fills
+  asynchronously) under a banner showing the machine's Secure Boot and kernel
+  lockdown state. Load/unload travel through the same polkit-gated helper;
+  unloading a module that backs a critical device is refused with a reason,
+  and modules blacklisted in `modprobe.d` refuse to load.
+- **Surgical bind/unbind.** Advanced per-device driver bind/unbind verbs that
+  deliberately leave no persistent state — a replug returns the kernel
+  default binding.
+
+New runtime dependency: **libkmod** (module enumeration and load/unload). The
+daemon persists its state under `/var/lib/devmgrd`; override the directory
+with `--state-dir PATH` for testing (never in production).
+
 ### Running it on a real host
 
 The helper is not installed by a service manager yet — run it in the

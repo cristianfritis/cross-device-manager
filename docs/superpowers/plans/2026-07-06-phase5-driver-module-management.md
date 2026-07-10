@@ -232,7 +232,7 @@ class IPrivilegedChannel {
 
 `ISystemInfo::Info` gains after `rebootPending`: `std::string lockdownMode = "none";`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_device_key.cpp`:
 
@@ -308,16 +308,16 @@ TEST(DeviceKey, BusStringsAreStable) {
 
 Register in `tests/CMakeLists.txt` (add `unit/test_device_key.cpp` to the `add_executable(devmgr_tests ...)` list, after `test_critical_device_guard.cpp`).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build --preset linux-debug 2>&1 | tail -5`
 Expected: FAIL — `devmgr/services/device_key.hpp: No such file or directory`.
 
-- [ ] **Step 3: Add the model types**
+- [x] **Step 3: Add the model types**
 
 Apply the `models.hpp` additions from the Interfaces block above verbatim: `LoadedModule`, `ModprobeInfo`, `DeviceKey`, `DisabledDeviceEntry` after the `Driver` struct; `std::optional<std::string> signer;` inside `Driver` after `isSigned`; `#include <cstdint>` is already present. Add `struct ModulesChangedEvent {};` at the end of `events.hpp` (before the closing namespace).
 
-- [ ] **Step 4: Implement device_key**
+- [x] **Step 4: Implement device_key**
 
 Create `core/include/devmgr/services/device_key.hpp` exactly as in the Interfaces block. Create `core/src/device_key.cpp`:
 
@@ -392,7 +392,7 @@ bool matchesDevice(const core::DeviceKey& key, const core::Device& device) {
 
 Add `src/device_key.cpp` to `core/CMakeLists.txt`'s source list.
 
-- [ ] **Step 5: Apply the PAL interface v2 + mechanical ripple (tree must stay green)**
+- [x] **Step 5: Apply the PAL interface v2 + mechanical ripple (tree must stay green)**
 
 1. Replace the three interfaces in `pal/interfaces.hpp` with the v2 bodies from the Interfaces block; add `lockdownMode` to `ISystemInfo::Info`.
 2. `SysfsDeviceController` — change signature only for now (full v2 behavior is Task 3): header `setEnabled(const std::string&, bool, const std::string& rebindDriverHint)` returning `core::Result<std::optional<std::string>>`; declare `bindDriver`/`unbindDriver`. In the .cpp: adapt the existing body to `return std::optional<std::string>{};` on success (ignore the hint), and add stubs:
@@ -562,17 +562,17 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
 
 6. Fix `tests/unit/test_sysfs_device_controller.cpp` call sites: `setEnabled(path, v)` → `setEnabled(path, v, "")` and result checks — `EXPECT_TRUE(r.has_value())` still compiles. Fix any `FakePal::query()` brace-init in `tests/unit/test_fake_pal.cpp` if it asserts Info fields.
 
-- [ ] **Step 6: Build + full test suite**
+- [x] **Step 6: Build + full test suite**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Expected: all existing tests + 6 new DeviceKey tests PASS.
 
-- [ ] **Step 7: Format + tidy touched files**
+- [x] **Step 7: Format + tidy touched files**
 
 Run: `clang-format -i core/src/device_key.cpp core/include/devmgr/services/device_key.hpp core/include/devmgr/core/models.hpp core/include/devmgr/core/events.hpp core/include/devmgr/pal/interfaces.hpp tests/fakes/fake_pal.hpp tests/fakes/fake_privileged_channel.hpp tests/unit/test_device_key.cpp platform/linux/src/sysfs_device_controller.cpp platform/linux/include/devmgr/platform/linux/sysfs_device_controller.hpp daemon/src/request_processor.cpp && clang-format --dry-run --Werror $(git diff --name-only | grep -E '\.(hpp|cpp)$')`
 Expected: no output (clean). Then clang-tidy on the two changed .cpp translation units if the host toolchain allows (container is authoritative).
 
-- [ ] **Step 8: Commit (USER runs)**
+- [x] **Step 8: Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(core): Phase 5 T1 — DeviceKey tiered identity, LoadedModule/ModprobeInfo/DisabledDeviceEntry models, PAL interface v2"
@@ -607,7 +607,7 @@ GuardVerdict evaluateModuleUnload(const pal::CriticalityFacts& facts,
 
 (Add `#include <vector>` to the header's includes.)
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/unit/test_critical_device_guard.cpp`:
+- [x] **Step 1: Write the failing tests** — append to `tests/unit/test_critical_device_guard.cpp`:
 
 ```cpp
 TEST(EvaluateModuleUnload, CleanModuleIsAllowed) {
@@ -652,12 +652,12 @@ TEST(EvaluateModuleUnload, HarmlessBoundDevicesAllowed) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build --preset linux-debug 2>&1 | tail -3`
 Expected: FAIL — `evaluateModuleUnload` not declared.
 
-- [ ] **Step 3: Implement** — append to `core/src/critical_device_guard.cpp`:
+- [x] **Step 3: Implement** — append to `core/src/critical_device_guard.cpp`:
 
 ```cpp
 GuardVerdict evaluateModuleUnload(const pal::CriticalityFacts& facts,
@@ -684,12 +684,12 @@ GuardVerdict evaluateModuleUnload(const pal::CriticalityFacts& facts,
 
 (Add `#include <string>` if not present.) Header addition per the Interfaces block.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `ctest --test-dir build/linux-debug -R CriticalDeviceGuard --output-on-failure` (after build)
 Expected: PASS including the 5 new tests. Also full `ctest` green.
 
-- [ ] **Step 5: Format + Commit (USER runs)**
+- [x] **Step 5: Format + Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(core): Phase 5 T2 — evaluateModuleUnload guard (holders -> refcount -> per-device criticality)"
@@ -710,7 +710,7 @@ git add -A && git commit -m "feat(core): Phase 5 T2 — evaluateModuleUnload gua
   - device dir: `<dev>/driver` (symlink to `<root>/bus/<bus>/drivers/<name>`), `<dev>/driver_override` (optional attr), `<dev>/subsystem` (symlink to `<root>/bus/<bus>`)
   - bus dir: `<root>/bus/<bus>/drivers_probe`, `<root>/bus/<bus>/drivers/<name>/{bind,unbind}`
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/unit/test_sysfs_device_controller.cpp` (the file already builds a tmp fake sysfs tree; follow its existing fixture conventions; the helpers below are self-contained):
+- [x] **Step 1: Write the failing tests** — append to `tests/unit/test_sysfs_device_controller.cpp` (the file already builds a tmp fake sysfs tree; follow its existing fixture conventions; the helpers below are self-contained):
 
 ```cpp
 namespace {
@@ -821,12 +821,12 @@ TEST_F(SysfsDeviceControllerTest, SurgicalBindToUnknownDriverIsNotFound) {
 
 (Adjust fixture member names — `root_` / `device_` — to the file's actual ones; keep assertions identical.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R SysfsDeviceController --output-on-failure`
 Expected: new tests FAIL (unbind path missing / Task 1 stubs return Unsupported).
 
-- [ ] **Step 3: Implement the v2 controller** — replace `sysfs_device_controller.cpp` body with:
+- [x] **Step 3: Implement the v2 controller** — replace `sysfs_device_controller.cpp` body with:
 
 ```cpp
 #include "devmgr/platform/linux/sysfs_device_controller.hpp"
@@ -1001,12 +1001,12 @@ class SysfsDeviceController final : public pal::IDeviceController {
 }  // namespace devmgr::platform_linux
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Expected: all PASS (Phase 4 authorized cases + 9 new).
 
-- [ ] **Step 5: Format, tidy, Commit (USER runs)**
+- [x] **Step 5: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(platform): Phase 5 T3 — SysfsDeviceController v2: unbind disable, driver_override targeted rebind, surgical bind/unbind"
@@ -1072,7 +1072,7 @@ JSON schema (versioned):
   "last_sysfs_path": "/sys/...", "disabled_at_utc": 1780000000, "guard_suspended": false}]}
 ```
 
-- [ ] **Step 1: Write the failing tests** — create `tests/unit/test_state_store.cpp`:
+- [x] **Step 1: Write the failing tests** — create `tests/unit/test_state_store.cpp`:
 
 ```cpp
 #include <gtest/gtest.h>
@@ -1182,12 +1182,12 @@ TEST_F(StateStoreTest, FindForMatchesBySerialTupleOrLastPath) {
 
 Register `unit/test_state_store.cpp` in `tests/CMakeLists.txt` inside the `if(UNIX AND NOT APPLE)` block (it links `devmgrd_lib`).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build --preset linux-debug 2>&1 | tail -3`
 Expected: FAIL — `devmgr/daemon/state_store.hpp` missing.
 
-- [ ] **Step 3: Implement** — create `daemon/src/state_store.cpp`:
+- [x] **Step 3: Implement** — create `daemon/src/state_store.cpp`:
 
 ```cpp
 #include "devmgr/daemon/state_store.hpp"
@@ -1343,12 +1343,12 @@ target_link_libraries(devmgrd_lib PUBLIC devmgr_core PRIVATE nlohmann_json::nloh
 target_compile_features(devmgrd_lib PUBLIC cxx_std_20)
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R StateStore --output-on-failure`
 Expected: 5 PASS; full suite green.
 
-- [ ] **Step 5: Format, tidy, Commit (USER runs)**
+- [x] **Step 5: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(daemon): Phase 5 T4 — StateStore: atomic persisted desired state, corruption sidecar, tiered-key lookup"
@@ -1415,7 +1415,7 @@ class KmodDriverManager final : public pal::IDriverManager {
 }  // namespace devmgr::platform_linux
 ```
 
-- [ ] **Step 1: Write the failing tests** — create `tests/unit/test_kmod_driver_manager.cpp`. Fixtures are PLAIN TEXT: libkmod falls back to text `modules.dep`/`modules.alias` when no `.bin` indexes exist, and `configPaths` accepts fixture modprobe.d dirs — no real `.ko` needed for lookup/dep/config behavior.
+- [x] **Step 1: Write the failing tests** — create `tests/unit/test_kmod_driver_manager.cpp`. Fixtures are PLAIN TEXT: libkmod falls back to text `modules.dep`/`modules.alias` when no `.bin` indexes exist, and `configPaths` accepts fixture modprobe.d dirs — no real `.ko` needed for lookup/dep/config behavior.
 
 ```cpp
 #include <gtest/gtest.h>
@@ -1559,12 +1559,12 @@ TEST_F(KmodDriverManagerTest, ModuleInfoUnknownNameIsNotFound) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build --preset linux-debug 2>&1 | tail -3`
 Expected: FAIL — header missing.
 
-- [ ] **Step 3: CMake for libkmod** — in `platform/linux/CMakeLists.txt` after the UDEV pkg check:
+- [x] **Step 3: CMake for libkmod** — in `platform/linux/CMakeLists.txt` after the UDEV pkg check:
 
 ```cmake
 pkg_check_modules(KMOD REQUIRED IMPORTED_TARGET libkmod)   # -> PkgConfig::KMOD
@@ -1572,7 +1572,7 @@ pkg_check_modules(KMOD REQUIRED IMPORTED_TARGET libkmod)   # -> PkgConfig::KMOD
 
 add `src/kmod_driver_manager.cpp` to `devmgr_pal_linux`'s sources and `PkgConfig::KMOD` to its PRIVATE link libraries.
 
-- [ ] **Step 4: Implement the read side** — create `platform/linux/src/kmod_driver_manager.cpp`:
+- [x] **Step 4: Implement the read side** — create `platform/linux/src/kmod_driver_manager.cpp`:
 
 ```cpp
 #include "devmgr/platform/linux/kmod_driver_manager.hpp"
@@ -1815,12 +1815,12 @@ core::Result<void> KmodDriverManager::unloadModule(const std::string&) {
 }  // namespace devmgr::platform_linux
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R KmodDriverManager --output-on-failure`
 Expected: 6 PASS. NOTE: if `ModaliasLookupYieldsCandidateWithDependencies` fails because libkmod insists on binary indexes on your kmod version, run `depmod -b <fixture-base> <ver>`-style generation is NOT available for fixtures — instead check `kmod --version` ≥ 28 (text fallback is long-standing); investigate before proceeding, do not skip the test.
 
-- [ ] **Step 6: Format, tidy, Commit (USER runs)**
+- [x] **Step 6: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(platform): Phase 5 T5 — KmodDriverManager read side: modalias candidates, bound/builtin resolution, modprobe.d read-only, module->devices walk"
@@ -1933,7 +1933,7 @@ class LinuxSystemInfo final : public pal::ISystemInfo {
 }  // namespace devmgr::platform_linux
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_kmod_error_taxonomy.cpp`:
 
@@ -2040,9 +2040,9 @@ TEST_F(LinuxSystemInfoTest, QueryFillsKernelVersionAndDefaults) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure** — build fails on missing headers.
+- [x] **Step 2: Run to verify failure** — build fails on missing headers.
 
-- [ ] **Step 3: Implement LinuxSystemInfo** — `platform/linux/src/linux_system_info.cpp`:
+- [x] **Step 3: Implement LinuxSystemInfo** — `platform/linux/src/linux_system_info.cpp`:
 
 ```cpp
 #include "devmgr/platform/linux/linux_system_info.hpp"
@@ -2109,7 +2109,7 @@ core::Result<LinuxSystemInfo::Info> LinuxSystemInfo::query() {
 }  // namespace devmgr::platform_linux
 ```
 
-- [ ] **Step 4: Implement the kmod write side** — in `kmod_driver_manager.cpp`, replace the two Task 5 stubs (add `#include "devmgr/platform/linux/kmod_error_taxonomy.hpp"` and `#include "devmgr/platform/linux/linux_system_info.hpp"`):
+- [x] **Step 4: Implement the kmod write side** — in `kmod_driver_manager.cpp`, replace the two Task 5 stubs (add `#include "devmgr/platform/linux/kmod_error_taxonomy.hpp"` and `#include "devmgr/platform/linux/linux_system_info.hpp"`):
 
 ```cpp
 core::Result<void> KmodDriverManager::loadModule(const std::string& name) {
@@ -2197,12 +2197,12 @@ core::Result<void> KmodDriverManager::unloadModule(const std::string& name) {
 
 (`describeLoadFailure`'s `<cerrno>`/`<system_error>` needs are satisfied inside the header via `<string>` + the existing includes — add `#include <cerrno>` and `#include <system_error>` to `kmod_error_taxonomy.hpp`.)
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Expected: taxonomy 4 + sysinfo 6 PASS; kmod write paths compile (their kernel-facing behavior is VM-tested, Task 13).
 
-- [ ] **Step 6: Format, tidy, Commit (USER runs)**
+- [x] **Step 6: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(platform): Phase 5 T6 — kmod write side with install-rule refusal + load taxonomy, LinuxSystemInfo (Secure Boot, lockdown)"
@@ -2275,7 +2275,7 @@ class RequestProcessor {
 }  // namespace devmgr::daemon
 ```
 
-- [ ] **Step 1: Write the failing tests** — adapt the existing `test_request_processor.cpp` fixture to the new ctor (FakePal doubles as controller+drivers+enumerator; add a `StateStore` on a tmp dir and a `std::mutex`), then append. A tiny recording authority proves ordering:
+- [x] **Step 1: Write the failing tests** — adapt the existing `test_request_processor.cpp` fixture to the new ctor (FakePal doubles as controller+drivers+enumerator; add a `StateStore` on a tmp dir and a `std::mutex`), then append. A tiny recording authority proves ordering:
 
 ```cpp
 namespace {
@@ -2395,9 +2395,9 @@ TEST_F(RequestProcessorTest, ListDisabledDevicesExposesStoreEntries) {
 
 Fixture requirements: `devicePath_` is a real tmp dir (canonical-containment passes), the FakePal seeds a Device whose `sysfsPath == devicePath_` (so the enumerator find succeeds), `store_` is a `std::unique_ptr<StateStore>` on a tmp dir with `load()` called, `processor()` builds `RequestProcessor(pal_, prober_, authority_, pal_, pal_, *store_, mutex_, root_)`.
 
-- [ ] **Step 2: Run to verify failure** — build fails (ctor/verbs missing).
+- [x] **Step 2: Run to verify failure** — build fails (ctor/verbs missing).
 
-- [ ] **Step 3: Implement** — `daemon/src/request_processor.cpp` (full replacement):
+- [x] **Step 3: Implement** — `daemon/src/request_processor.cpp` (full replacement):
 
 ```cpp
 #include "devmgr/daemon/request_processor.hpp"
@@ -2582,14 +2582,14 @@ std::vector<core::DisabledDeviceEntry> RequestProcessor::listDisabledDevices() c
 }  // namespace devmgr::daemon
 ```
 
-- [ ] **Step 4: Fix ripple + run tests**
+- [x] **Step 4: Fix ripple + run tests**
 
 `daemon/src/main.cpp` no longer compiles (ctor changed) — it is rewired properly in Task 9; for now pass the new deps minimally: construct `KmodDriverManager`, `UdevDeviceEnumerator`, `StateStore("/var/lib/devmgrd")` + `load()`, and a file-scope `std::mutex applyMutex;`. (Task 9 replaces this wiring with `--state-dir` and enforcement.)
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Expected: all PASS (Phase 4 processor tests updated + 12 new).
 
-- [ ] **Step 5: Format, tidy, Commit (USER runs)**
+- [x] **Step 5: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(daemon): Phase 5 T7 — RequestProcessor v2: module load/unload with guard, surgical bind/unbind, persistent setDeviceEnabled via StateStore"
@@ -2645,7 +2645,7 @@ class EnforcementService {
 }  // namespace devmgr::daemon
 ```
 
-- [ ] **Step 1: Write the failing tests** — create `tests/unit/test_enforcement_service.cpp`:
+- [x] **Step 1: Write the failing tests** — create `tests/unit/test_enforcement_service.cpp`:
 
 ```cpp
 #include <gtest/gtest.h>
@@ -2781,9 +2781,9 @@ TEST_F(EnforcementServiceTest, RemovalEventsAreIgnored) {
 
 (Add `#include "devmgr/services/device_key.hpp"` to the test.)
 
-- [ ] **Step 2: Run to verify failure** — header missing.
+- [x] **Step 2: Run to verify failure** — header missing.
 
-- [ ] **Step 3: Implement** — `daemon/src/enforcement_service.cpp`:
+- [x] **Step 3: Implement** — `daemon/src/enforcement_service.cpp`:
 
 ```cpp
 #include "devmgr/daemon/enforcement_service.hpp"
@@ -2876,12 +2876,12 @@ void EnforcementService::maybeReapply(const core::DisabledDeviceEntry& entry,
 
 (devmgrd_lib already links spdlog transitively via devmgr_core; if the link fails, add `spdlog::spdlog` PRIVATE.)
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R Enforcement --output-on-failure`
 Expected: 7 PASS; full suite green.
 
-- [ ] **Step 5: Format, tidy, Commit (USER runs)**
+- [x] **Step 5: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(daemon): Phase 5 T8 — EnforcementService: startup sweep, hotplug re-apply, guard suspension, log-and-continue"
@@ -2903,7 +2903,7 @@ git add -A && git commit -m "feat(daemon): Phase 5 T8 — EnforcementService: st
 - Consumes: T7 verbs, T8 service, T5/T6 KmodDriverManager, `UdevHotplugMonitor`/`UdevDeviceEnumerator` (existing).
 - Produces: `org.devmgr.Manager1` v2 (spec §6.1 table) and the channel methods T10's facade calls. Wire schema for `ListDisabledDevices` → `aa{sv}` with keys: `bus`, `vendor_id`, `product_id`, `serial`, `position`, `mechanism`, `last_driver`, `last_sysfs_path` (strings), `disabled_at_utc` (int64), `guard_suspended` (bool).
 
-- [ ] **Step 1: Enumerator fallback in setDeviceEnabled (with test)**
+- [x] **Step 1: Enumerator fallback in setDeviceEnabled (with test)**
 
 The private-bus ipc tests (and any device udev misses) disable devices under a fake `--sysfs-root`, which the real `UdevDeviceEnumerator` never lists. Relax T7's "device not enumerable → NotFound": when the enumerated set lacks the device, build the key from sysfs attributes directly. In `request_processor.cpp` replace the `device == all->end()` error with:
 
@@ -2983,7 +2983,7 @@ TEST_F(RequestProcessorTest, DisableOfUnenumeratedDeviceFallsBackToSysfsKey) {
 
 Run: processor tests all green before moving on.
 
-- [ ] **Step 2: Contract + policy**
+- [x] **Step 2: Contract + policy**
 
 `dbus_contract.hpp`: `inline constexpr std::uint32_t kApiVersion = 2;` — nothing else changes (error names cover the new verbs).
 `daemon/data/org.devmgr.policy` — add before `</policyconfig>`:
@@ -3009,7 +3009,7 @@ Run: processor tests all green before moving on.
   </action>
 ```
 
-- [ ] **Step 3: ManagerAdaptor v2** — replace the vTable registration in `manager_adaptor.cpp`:
+- [x] **Step 3: ManagerAdaptor v2** — replace the vTable registration in `manager_adaptor.cpp`:
 
 ```cpp
 #include "daemon/src/manager_adaptor.hpp"
@@ -3090,7 +3090,7 @@ ManagerAdaptor::ManagerAdaptor(sdbus::IConnection& connection, RequestProcessor&
 }  // namespace devmgr::daemon
 ```
 
-- [ ] **Step 4: DbusPrivilegedChannel v2** — header becomes:
+- [x] **Step 4: DbusPrivilegedChannel v2** — header becomes:
 
 ```cpp
 #pragma once
@@ -3223,7 +3223,7 @@ core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::list
 }
 ```
 
-- [ ] **Step 5: Daemon wiring** — `daemon/src/main.cpp`: add `--state-dir` (default `/var/lib/devmgrd`) to the flag table + usage line; non-default triggers the test-mode warning. Composition (replacing the Task 7 interim wiring):
+- [x] **Step 5: Daemon wiring** — `daemon/src/main.cpp`: add `--state-dir` (default `/var/lib/devmgrd`) to the flag table + usage line; non-default triggers the test-mode warning. Composition (replacing the Task 7 interim wiring):
 
 ```cpp
         platform_linux::SysfsDeviceController controller(opts.sysfsRoot);
@@ -3254,7 +3254,7 @@ core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::list
 
 Add the includes: `kmod_driver_manager.hpp`, `udev_device_enumerator.hpp`, `udev_hotplug_monitor.hpp`, `state_store.hpp`, `enforcement_service.hpp`, `<mutex>`.
 
-- [ ] **Step 6: Round-trip tests** — extend `tests/ipc/test_ipc_round_trip.cpp`. Fixture changes: `startDaemon` gains the state dir: `::execl(DEVMGRD_BIN, "devmgrd", "--bus", "session", "--sysfs-root", root_.c_str(), "--mounts-path", (root_/"mounts").c_str(), "--state-dir", (root_/"state").c_str(), "--authority", authority, nullptr)`. Add a `stopDaemon()` helper (the TearDown kill/wait body, callable mid-test). Add USB identity attrs + subsystem to SetUp's device (`idVendor` `0x1234`, `idProduct` `0x5678`, `serial` `IPCSER`, symlink `subsystem` → `root_/bus/usb` after `fs::create_directories(root_/"bus/usb")`). New tests:
+- [x] **Step 6: Round-trip tests** — extend `tests/ipc/test_ipc_round_trip.cpp`. Fixture changes: `startDaemon` gains the state dir: `::execl(DEVMGRD_BIN, "devmgrd", "--bus", "session", "--sysfs-root", root_.c_str(), "--mounts-path", (root_/"mounts").c_str(), "--state-dir", (root_/"state").c_str(), "--authority", authority, nullptr)`. Add a `stopDaemon()` helper (the TearDown kill/wait body, callable mid-test). Add USB identity attrs + subsystem to SetUp's device (`idVendor` `0x1234`, `idProduct` `0x5678`, `serial` `IPCSER`, symlink `subsystem` → `root_/bus/usb` after `fs::create_directories(root_/"bus/usb")`). New tests:
 
 ```cpp
 TEST_F(IpcRoundTripTest, DisabledDeviceAppearsInBulkListAndClearsOnEnable) {
@@ -3320,12 +3320,12 @@ TEST_F(IpcRoundTripTest, InvalidModuleNameRefusedAsNotFound) {
 
 NOTE: `GuardRefusalArrivesAsConflictWithReason` (Phase 4) still passes — its device now also matches the enumerator fallback path harmlessly.
 
-- [ ] **Step 7: Run everything**
+- [x] **Step 7: Run everything**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Expected: unit suite + `devmgr_ipc` all PASS (ipc runs under dbus-run-session; requires sdbus-c++ present — on the host this is portage 2.3.1; otherwise defer to the container run).
 
-- [ ] **Step 8: Format, tidy, Commit (USER runs)**
+- [x] **Step 8: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(ipc): Phase 5 T9 — org.devmgr.Manager1 ApiVersion 2: module/driver verbs, bulk ListDisabledDevices, enforcement wiring, polkit actions"
@@ -3447,7 +3447,7 @@ class ModulesVM {
 Row format (fixed columns, shared by both UIs):
 `printf("%-28s %9s %4ld  %-24s %s", name, sizeKb, refCount, holdersJoined, signatureCell)` where `sizeKb` = `std::to_string(sizeBytes / 1024) + "K"`, holders joined with `,` truncated to 24 chars, signature cell defaults to `"…"` until the fill completes.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_disabled_overlay.cpp`:
 
@@ -3675,9 +3675,9 @@ TEST_F(DeviceDetailVMTest, DriverSectionListsBoundFirstWithSignature) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure** — build fails on the new headers/methods.
+- [x] **Step 2: Run to verify failure** — build fails on the new headers/methods.
 
-- [ ] **Step 3: Implement `disabled_overlay.cpp`**
+- [x] **Step 3: Implement `disabled_overlay.cpp`**
 
 ```cpp
 #include "devmgr/app/disabled_overlay.hpp"
@@ -3704,7 +3704,7 @@ void applyDisabledOverlay(std::vector<core::Device>& devices,
 }  // namespace devmgr::app
 ```
 
-- [ ] **Step 4: Facade v2** — in `application_facade.cpp`:
+- [x] **Step 4: Facade v2** — in `application_facade.cpp`:
 
 `refresh()` becomes:
 
@@ -3855,7 +3855,7 @@ std::future<void> ApplicationFacade::unbindDriver(const core::DeviceId& id) {
 
 (Add includes: `disabled_overlay.hpp`; `setDeviceEnabled` and `canDisable` stay unchanged.)
 
-- [ ] **Step 5: Implement `modules_vm.cpp`**
+- [x] **Step 5: Implement `modules_vm.cpp`**
 
 ```cpp
 #include "devmgr/app/modules_vm.hpp"
@@ -4016,7 +4016,7 @@ std::vector<std::string> ModulesVM::detailLines() const {
 
 NOTE on `fillSignatures()`: the `.share()` form is deliberate — one worker does the reads, every caller (tests, dtor) can wait on the same handle, and it is safe regardless of `TaskScheduler`'s pool size.
 
-- [ ] **Step 6: DeviceDetailVM driver section** — append in `lines(...)` before `return out;`:
+- [x] **Step 6: DeviceDetailVM driver section** — append in `lines(...)` before `return out;`:
 
 ```cpp
     const auto drivers = facade_.driverInfo(d.id);
@@ -4046,12 +4046,12 @@ NOTE on `fillSignatures()`: the `.share()` form is deliberate — one worker doe
 
 (Adjust the T10 detail test's expected substrings to exactly these formats: `"* usbhid"`, `"— signed: Build key"`.)
 
-- [ ] **Step 7: Run tests**
+- [x] **Step 7: Run tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Expected: all PASS (3 overlay + 5 ModulesVM + 4 facade + 1 detail new).
 
-- [ ] **Step 8: Format, tidy, Commit (USER runs)**
+- [x] **Step 8: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(app): Phase 5 T10 — facade v2 (module/driver ops, disabled overlay merge), ModulesVM with async signature fill, detail driver section"
@@ -4068,7 +4068,7 @@ git add -A && git commit -m "feat(app): Phase 5 T10 — facade v2 (module/driver
 - Consumes: T10 facade/ModulesVM, T5/T6 `KmodDriverManager`/`LinuxSystemInfo`.
 - Produces: keys `m` (Devices ⇄ Modules), Modules: `l` load / `u` unload, Devices detail: `U` unbind / `B` bind. All prompts render on the status line (Phase 4 confirm pattern). TUI has no unit-test target — verification is the offscreen regression + manual smoke.
 
-- [ ] **Step 1: Composition root** — in `runTuiApp()` after `prober`:
+- [x] **Step 1: Composition root** — in `runTuiApp()` after `prober`:
 
 ```cpp
     platform_linux::KmodDriverManager kmod;   // system defaults: /sys, real modules
@@ -4085,7 +4085,7 @@ and change the two facade constructions to append `, &kmod, &sysinfo`:
 
 After `statusVm`: `app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);`
 
-- [ ] **Step 2: Modules layout + tab switch** — after the existing `layout`:
+- [x] **Step 2: Modules layout + tab switch** — after the existing `layout`:
 
 ```cpp
     auto modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), MenuOption::Vertical());
@@ -4134,7 +4134,7 @@ Replace `auto ui = Renderer(layout, [&] {` with `auto ui = Renderer(tabs, [&] {`
 
 where `statusLine()` is a small lambda consolidating the pending-prompt-or-status text (see Step 3).
 
-- [ ] **Step 3: Modal states + keys** — replace the single `confirmToggle` block with a superset. Above the renderers:
+- [x] **Step 3: Modal states + keys** — replace the single `confirmToggle` block with a superset. Above the renderers:
 
 ```cpp
     struct PendingConfirm {  // y/n: device toggle, unbind, module unload
@@ -4299,7 +4299,7 @@ where `statusLine()` is a small lambda consolidating the pending-prompt-or-statu
 
 Notes: delete the old `PendingToggle` struct; update the devices header line to `" Devices (r=refresh  e=enable/disable  U=unbind  B=bind  m=modules  q=quit) "`; `modulesVm` is declared alongside the other VMs so the existing teardown (`hotplug.stop(); delayed.shutdown(); drainPending(pending);`) already precedes its destruction — its dtor then waits on any in-flight signature fill. Requires `#include <cctype>`, `devmgr/app/modules_vm.hpp`, `devmgr/platform/linux/kmod_driver_manager.hpp`, `devmgr/platform/linux/linux_system_info.hpp`.
 
-- [ ] **Step 4: Build + offscreen regression**
+- [x] **Step 4: Build + offscreen regression**
 
 Run: `cmake --build --preset linux-debug`
 Run: `printf 'q' | timeout 10 ./build/linux-debug/tui/devmgr-tui; echo "exit=$?"`
@@ -4307,7 +4307,7 @@ Expected: `exit=0` (the Phase 4 quit regression still holds).
 Run: `printf 'mq' | timeout 10 ./build/linux-debug/tui/devmgr-tui; echo "exit=$?"`
 Expected: `exit=0` (modules screen opens, signature fill starts, teardown clean).
 
-- [ ] **Step 5: Format, tidy, Commit (USER runs)**
+- [x] **Step 5: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(tui): Phase 5 T11 — Modules screen (banner/list/detail/load/unload) + device unbind/bind keys"
@@ -4326,7 +4326,7 @@ git add -A && git commit -m "feat(tui): Phase 5 T11 — Modules screen (banner/l
 - Consumes: T10 ModulesVM/facade; existing `QtUiDispatcher`, `DeviceListModel` patterns.
 - Produces: `MainWindow` grows a QTabWidget central (Devices | Modules) and an `Actions` callback struct so the composition root keeps owning future custody (Phase 3/4 pattern).
 
-- [ ] **Step 1: ModuleListModel**
+- [x] **Step 1: ModuleListModel**
 
 `gui/src/module_list_model.hpp`:
 
@@ -4385,7 +4385,7 @@ QVariant ModuleListModel::data(const QModelIndex& index, int role) const {
 }  // namespace devmgr::gui
 ```
 
-- [ ] **Step 2: MainWindow — Actions struct + Modules tab**
+- [x] **Step 2: MainWindow — Actions struct + Modules tab**
 
 `main_window.hpp` — replace the two `std::function` ctor params (`onRefresh`, `onSetEnabled`) and `confirm` with one struct (update members accordingly; existing `confirm_` behavior folds in):
 
@@ -4544,7 +4544,7 @@ Central widget: build the Modules page and wrap both in tabs (replacing `setCent
 
 New includes in `main_window.cpp`: `<QInputDialog>`, `<QLabel>`, `<QRegularExpression>`, `<QTabWidget>`, `<QFontDatabase>`, `"gui/src/module_list_model.hpp"`.
 
-- [ ] **Step 3: gui_app.cpp wiring** — mirror the TUI root: construct `KmodDriverManager kmod;`, `LinuxSystemInfo sysinfo;`, pass `&kmod, &sysinfo` to the facade ctor, construct `app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);` next to the other VMs, and build `MainWindow::Actions`:
+- [x] **Step 3: gui_app.cpp wiring** — mirror the TUI root: construct `KmodDriverManager kmod;`, `LinuxSystemInfo sysinfo;`, pass `&kmod, &sysinfo` to the facade ctor, construct `app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);` next to the other VMs, and build `MainWindow::Actions`:
 
 ```cpp
     gui::MainWindow::Actions actions;
@@ -4573,7 +4573,7 @@ New includes in `main_window.cpp`: `<QInputDialog>`, `<QLabel>`, `<QRegularExpre
 
 (adapt names to gui_app.cpp's existing pending/prune infrastructure — it mirrors the TUI's; keep its teardown drain intact). Add `src/module_list_model.cpp` + header to `gui/CMakeLists.txt` (AUTOMOC picks up the Q_OBJECT).
 
-- [ ] **Step 4: Offscreen tests**
+- [x] **Step 4: Offscreen tests**
 
 `gui/tests/test_module_list_model.cpp`:
 
@@ -4632,12 +4632,12 @@ Append to `gui/tests/test_main_window.cpp` (adapt its fixture to the `Actions` s
     QCOMPARE(captured, QStringLiteral("dummy"));
 ```
 
-- [ ] **Step 5: Run GUI tests**
+- [x] **Step 5: Run GUI tests**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug -R gui --output-on-failure` (or the gui test target names used by Phase 3, e.g. `-R MainWindow|ModuleListModel`)
 Expected: PASS offscreen.
 
-- [ ] **Step 6: Format, tidy, Commit (USER runs)**
+- [x] **Step 6: Format, tidy, Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "feat(gui): Phase 5 T12 — Modules tab (banner/list/detail/load/unload) + bind/unbind driver actions, Actions struct"
@@ -4654,7 +4654,7 @@ git add -A && git commit -m "feat(gui): Phase 5 T12 — Modules tab (banner/list
 
 **Interfaces:** consumes the whole phase; produces the automated dangerous-op evidence (`PHASE5 VM SMOKE OK`) and the close-out state.
 
-- [ ] **Step 1: `test/vm/phase5-smoke.sh`**
+- [x] **Step 1: `test/vm/phase5-smoke.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -4739,7 +4739,7 @@ echo "==> Running Phase 5 Smoke Test..."
 (cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase5-smoke.sh /sys/bus/usb/devices/3-1 "$(ls -d /sys/bus/virtio/devices/virtio* 2>/dev/null | head -1)"')
 ```
 
-- [ ] **Step 2: README** — extend the feature list: universal persistent enable/disable with active enforcement, module load/unload with Secure Boot/lockdown awareness, Modules view in both UIs, surgical bind/unbind; note the new runtime deps (libkmod) and the daemon state dir (`/var/lib/devmgrd`, override with `--state-dir`).
+- [x] **Step 2: README** — extend the feature list: universal persistent enable/disable with active enforcement, module load/unload with Secure Boot/lockdown awareness, Modules view in both UIs, surgical bind/unbind; note the new runtime deps (libkmod) and the daemon state dir (`/var/lib/devmgrd`, override with `--state-dir`).
 
 - [ ] **Step 3: Full gates**
 
@@ -4748,7 +4748,7 @@ Run: `clang-format --dry-run --Werror $(git diff feature/phase4 --name-only | gr
 USER runs (agent has no Docker daemon): `docker compose -f test/docker-compose.yml run --rm unit` and the tidy line from CI, plus `./test-vm.sh`.
 Expected: unit suite green host+container, `PHASE4 VM SMOKE OK` **and** `PHASE5 VM SMOKE OK`.
 
-- [ ] **Step 4: Close-out** — mark all task checkboxes in this plan; update project memory (`phase5-execution-status`, `roadmap-and-active-phase`) with commits + exit-gate state.
+- [x] **Step 4: Close-out** — mark all task checkboxes in this plan; update project memory (`phase5-execution-status`, `roadmap-and-active-phase`) with commits + exit-gate state.
 
 - [ ] **Step 5: Commit (USER runs)**
 
