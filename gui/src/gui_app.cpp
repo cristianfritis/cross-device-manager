@@ -3,6 +3,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -14,11 +15,14 @@
 #include "devmgr/app/device_list_vm.hpp"
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/hotplug_service.hpp"
+#include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
 #include "devmgr/core/events.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
 #include "devmgr/platform/linux/linux_criticality_prober.hpp"
+#include "devmgr/platform/linux/kmod_driver_manager.hpp"
+#include "devmgr/platform/linux/linux_system_info.hpp"
 #ifdef DEVMGR_HAS_SDBUS
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
 #endif
@@ -56,11 +60,15 @@ int runGuiApp(int argc, char** argv) {
     platform_linux::UdevHotplugMonitor monitor;
     app::DeviceService service(bus);
     platform_linux::LinuxCriticalityProber prober;  // advisory guard facts
+    platform_linux::KmodDriverManager kmod;         // system defaults: /sys, real modules
+    platform_linux::LinuxSystemInfo sysinfo;
 #ifdef DEVMGR_HAS_SDBUS
     platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober);
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober, &kmod,
+                                  &sysinfo);
 #else
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober);
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober, &kmod,
+                                  &sysinfo);
 #endif
     app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
 
@@ -68,6 +76,7 @@ int runGuiApp(int argc, char** argv) {
     app::DeviceListVM listVm(facade, bus, dispatcher);
     app::DeviceDetailVM detailVm(facade);
     app::StatusLineVM statusVm(bus, delayed, dispatcher);
+    app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);
 
     // Keep every refresh future alive so we can wait on them before teardown —
     // ApplicationFacade::refresh()'s documented lifetime contract.
@@ -93,11 +102,26 @@ int runGuiApp(int argc, char** argv) {
             dispatcher.post([&] { pruneAndPush(facade.refresh()); });
         });
 
-    MainWindow window(
-        facade, listVm, detailVm, statusVm, dispatcher, [&] { pruneAndPush(facade.refresh()); },
-        [&](const core::DeviceId& id, bool enable) {
-            pruneAndPush(facade.setDeviceEnabled(id, enable));
-        });
+    // Every mutation callback keeps future custody here (prune + push), the
+    // same contract the TUI's key handlers honor; confirm/textInput stay empty
+    // so MainWindow falls back to the real QMessageBox / QInputDialog.
+    MainWindow::Actions actions;
+    actions.onRefresh = [&] { pruneAndPush(facade.refresh()); };
+    actions.onSetEnabled = [&](const core::DeviceId& id, bool enable) {
+        pruneAndPush(facade.setDeviceEnabled(id, enable));
+    };
+    actions.onLoadModule = [&](const std::string& name) { pruneAndPush(facade.loadModule(name)); };
+    actions.onUnloadModule = [&](const std::string& name) {
+        pruneAndPush(facade.unloadModule(name));
+    };
+    actions.onBindDriver = [&](const core::DeviceId& id, const std::string& driver) {
+        pruneAndPush(facade.bindDriver(id, driver));
+    };
+    actions.onUnbindDriver = [&](const core::DeviceId& id) {
+        pruneAndPush(facade.unbindDriver(id));
+    };
+    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, dispatcher,
+                      std::move(actions));
 
     int rc = 0;
     // The try widens over hotplug.start()/publish for the same reason as
