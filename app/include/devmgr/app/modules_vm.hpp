@@ -23,7 +23,11 @@ class ModulesVM {
    public:
     ModulesVM(ApplicationFacade& facade, runtime::EventBus& bus, runtime::TaskScheduler& scheduler,
               IUiDispatcher& dispatcher);
-    ~ModulesVM();  // waits on the in-flight signature fill (future custody)
+    // Waits on the in-flight signature fill (future custody). Contract:
+    // destroy on the UI thread — the same thread that drains dispatcher
+    // posts; the dtor's unlocked alive_-token handshake relies on that
+    // serialization (see the dtor note in the .cpp).
+    ~ModulesVM();
 
     std::vector<std::string>& rowsRef() { return rows_; }
     int& selectedRef() { return selected_; }

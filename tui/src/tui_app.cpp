@@ -1,6 +1,8 @@
 #include "tui/src/tui_app.hpp"
 
+#include <cctype>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <optional>
 #include <string>
@@ -17,11 +19,14 @@
 #include "devmgr/app/device_list_vm.hpp"
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/hotplug_service.hpp"
+#include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
 #include "devmgr/core/events.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
 #include "devmgr/platform/linux/linux_criticality_prober.hpp"
+#include "devmgr/platform/linux/kmod_driver_manager.hpp"
+#include "devmgr/platform/linux/linux_system_info.hpp"
 #ifdef DEVMGR_HAS_SDBUS
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
 #endif
@@ -53,11 +58,15 @@ int runTuiApp() {
     platform_linux::UdevHotplugMonitor monitor;
     app::DeviceService service(bus);
     platform_linux::LinuxCriticalityProber prober;  // advisory guard facts
+    platform_linux::KmodDriverManager kmod;         // system defaults: /sys, real modules
+    platform_linux::LinuxSystemInfo sysinfo;
 #ifdef DEVMGR_HAS_SDBUS
     platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober);
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober, &kmod,
+                                  &sysinfo);
 #else
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober);
+    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober, &kmod,
+                                  &sysinfo);
 #endif
     app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
 
@@ -66,18 +75,28 @@ int runTuiApp() {
     app::DeviceListVM listVm(facade, bus, dispatcher);
     app::DeviceDetailVM detailVm(facade);
     app::StatusLineVM statusVm(bus, delayed, dispatcher);
+    app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);
 
     // Keep every refresh future alive so we can wait on them before teardown
     // (see the note after screen.Loop()).
     std::vector<std::future<void>> pending;
 
-    // Pending enable/disable confirmation ('e' arms it; y/n resolves it).
-    struct PendingToggle {
-        core::DeviceId id;
-        bool enable;
+    struct PendingConfirm {  // y/n: device toggle, unbind, module unload
+        std::function<void()> onYes;
         std::string prompt;
     };
-    std::optional<PendingToggle> confirmToggle;
+    std::optional<PendingConfirm> confirm;
+    struct PendingText {  // typed input: load module / bind driver
+        std::function<void(const std::string&)> onSubmit;
+        std::string prompt;
+        std::string buffer;
+    };
+    std::optional<PendingText> textPrompt;
+    auto statusLine = [&]() -> std::string {
+        if (textPrompt) return textPrompt->prompt + textPrompt->buffer + "_";
+        if (confirm) return confirm->prompt;
+        return statusVm.text();
+    };
 
     auto prunePending = [&] {
         std::erase_if(pending, [](const std::future<void>& f) {
@@ -133,11 +152,67 @@ int runTuiApp() {
     });
 
     auto layout = Container::Horizontal({leftPane, detailRenderer});
-    auto ui = Renderer(layout, [&] {
+
+    auto modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), MenuOption::Vertical());
+    std::string bannerText;  // computed on tab entry — banner() reads sysfs, never per frame
+    std::string moduleFilter;
+    InputOption modFilterOpt;
+    modFilterOpt.content = &moduleFilter;
+    modFilterOpt.placeholder = "filter modules…";
+    modFilterOpt.on_change = [&] { modulesVm.setFilter(moduleFilter); };
+    auto moduleFilterInput = Input(modFilterOpt);
+
+    // CONTROLLER AMENDMENT A-1 (user-approved 2026-07-09): detailLines() does
+    // libkmod disk I/O per call (facade moduleDetail + modprobeDetail,
+    // app/src/modules_vm.cpp:225-231), and FTXUI re-renders on every event —
+    // cache exactly like the devices detail pane above (tui_app.cpp:113-133).
+    std::optional<std::string> modDetailForName;
+    std::vector<std::string> modDetailLines;
+    bool modDetailDirty = true;
+
+    auto moduleDetail = Renderer([&] {
+        const auto name = modulesVm.selectedModule();
+        if (modDetailDirty || name != modDetailForName) {
+            modDetailLines = modulesVm.detailLines();
+            modDetailForName = name;
+            modDetailDirty = false;
+        }
+        Elements els;
+        els.reserve(modDetailLines.size());
+        for (const auto& line : modDetailLines) els.push_back(text(line));
+        return vbox(std::move(els)) | flex;
+    });
+    auto modulesPane = Container::Vertical({moduleFilterInput, modulesMenu});
+    auto modulesLayout = Container::Horizontal({modulesPane, moduleDetail});
+
+    int activeTab = 0;  // 0 = devices, 1 = modules
+    auto tabs = Container::Tab({layout, modulesLayout}, &activeTab);
+
+    auto ui = Renderer(tabs, [&] {
+        if (activeTab == 1) {
+            return vbox({
+                       text(" Modules (m=devices  l=load  u=unload  q=quit) ") | bold,
+                       text(" " + bannerText + " "),
+                       separator(),
+                       hbox({
+                           vbox({
+                               moduleFilterInput->Render(),
+                               separator(),
+                               modulesMenu->Render() | vscroll_indicator | yframe | flex,
+                           }) | size(WIDTH, EQUAL, 72) |
+                               border,
+                           moduleDetail->Render() | border | flex,
+                       }) | flex,
+                       text(" " + statusLine() + " ") | inverted,
+                   }) |
+                   flex;
+        }
         return vbox({
                    hbox({
                        vbox({
-                           text(" Devices (r=refresh  e=enable/disable  q=quit) ") | bold,
+                           text(" Devices (r=refresh  e=enable/disable  U=unbind  B=bind  "
+                                "m=modules  q=quit) ") |
+                               bold,
                            separator(),
                            searchInput->Render(),
                            separator(),
@@ -146,29 +221,92 @@ int runTuiApp() {
                            border,
                        detailRenderer->Render() | border | flex,
                    }) | flex,
-                   text(" " + (confirmToggle ? confirmToggle->prompt : statusVm.text()) + " ") |
-                       inverted,
+                   text(" " + statusLine() + " ") | inverted,
                }) |
                flex;
     });
 
     auto root = CatchEvent(ui, [&](const Event& event) {
-        if (event == Event::Custom) {  // worker posted a UI update
-            detailDirty = true;        // the model may have changed under the detail pane
+        if (event == Event::Custom) {
+            detailDirty = true;
+            modDetailDirty = true;  // A-1: drained posts may rebuild the modules model
             dispatcher.drain();
             return true;
         }
-        if (confirmToggle) {  // modal y/n — swallow everything else
-            if (event == Event::Character('y')) {
-                prunePending();
-                pending.push_back(
-                    facade.setDeviceEnabled(confirmToggle->id, confirmToggle->enable));
-                confirmToggle.reset();
-            } else if (event == Event::Character('n') || event == Event::Escape) {
-                confirmToggle.reset();
+        if (textPrompt) {  // modal typed input
+            if (event == Event::Return) {
+                auto submit = std::move(textPrompt->onSubmit);
+                const std::string value = textPrompt->buffer;
+                textPrompt.reset();
+                if (!value.empty()) submit(value);
+            } else if (event == Event::Escape) {
+                textPrompt.reset();
+            } else if (event == Event::Backspace && !textPrompt->buffer.empty()) {
+                textPrompt->buffer.pop_back();
+            } else if (event.is_character()) {
+                const char c = event.character()[0];
+                if ((std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_' || c == '-')
+                    textPrompt->buffer += c;
             }
             return true;
         }
+        if (confirm) {  // modal y/n — swallow everything else
+            if (event == Event::Character('y')) {
+                auto go = std::move(confirm->onYes);
+                confirm.reset();
+                go();
+            } else if (event == Event::Character('n') || event == Event::Escape) {
+                confirm.reset();
+            }
+            return true;
+        }
+        if (event == Event::Character('m')) {
+            activeTab = activeTab == 0 ? 1 : 0;
+            if (activeTab == 1) {
+                bannerText = modulesVm.banner();
+                modulesVm.rebuild();
+                modDetailDirty = true;       // A-1: fresh snapshot under the cache
+                modulesVm.fillSignatures();  // cached names are skipped
+            }
+            return true;
+        }
+        if (event == Event::Character('q')) {
+            screen.Exit();
+            return true;
+        }
+        if (activeTab == 1) {  // ----- modules keys -----
+            if (event == Event::Character('l')) {
+                textPrompt = PendingText{.onSubmit =
+                                             [&](const std::string& name) {
+                                                 prunePending();
+                                                 pending.push_back(facade.loadModule(name));
+                                             },
+                                         .prompt = "load module: ",
+                                         .buffer = ""};
+                return true;
+            }
+            if (event == Event::Character('u')) {
+                const auto name = modulesVm.selectedModule();
+                if (!name) return true;
+                const auto verdict = facade.canUnloadModule(*name);
+                if (!verdict.allowed) {
+                    bus.publish(
+                        core::TaskCompletedEvent{.taskId = "guard",
+                                                 .ok = false,
+                                                 .message = "cannot unload: " + verdict.reason});
+                    return true;
+                }
+                confirm = PendingConfirm{.onYes =
+                                             [&, name = *name] {
+                                                 prunePending();
+                                                 pending.push_back(facade.unloadModule(name));
+                                             },
+                                         .prompt = "unload module " + *name + "? (y/n)"};
+                return true;
+            }
+            return false;  // filter input / menu / mouse
+        }
+        // ----- devices keys (activeTab == 0) -----
         if (event == Event::Character('e')) {  // global like 'r' (not typable in filter)
             const auto id = listVm.selectedDeviceId();
             if (!id) return true;
@@ -186,14 +324,50 @@ int runTuiApp() {
                     return true;
                 }
             }
-            confirmToggle = PendingToggle{
-                .id = *id,
-                .enable = enable,
+            confirm = PendingConfirm{
+                .onYes =
+                    [&, id = *id, enable] {
+                        prunePending();
+                        pending.push_back(facade.setDeviceEnabled(id, enable));
+                    },
                 .prompt = std::string(enable ? "enable " : "disable ") + device->name + "? (y/n)"};
             return true;
         }
-        if (event == Event::Character('q') || event == Event::Escape) {
-            screen.Exit();
+        if (event == Event::Character('U')) {  // surgical unbind (advanced)
+            const auto id = listVm.selectedDeviceId();
+            const auto device = id ? facade.findById(*id) : std::nullopt;
+            if (!device) return true;
+            const auto verdict = facade.canDisable(*id);
+            if (!verdict.allowed) {
+                bus.publish(core::TaskCompletedEvent{
+                    .taskId = "guard", .ok = false, .message = "cannot unbind: " + verdict.reason});
+                return true;
+            }
+            confirm = PendingConfirm{.onYes =
+                                         [&, id = *id] {
+                                             prunePending();
+                                             pending.push_back(facade.unbindDriver(id));
+                                         },
+                                     .prompt = "unbind driver from " + device->name +
+                                               "? (advanced, not persistent) (y/n)"};
+            return true;
+        }
+        if (event == Event::Character('B')) {  // surgical bind (advanced)
+            const auto id = listVm.selectedDeviceId();
+            const auto device = id ? facade.findById(*id) : std::nullopt;
+            if (!device) return true;
+            std::string prefill = device->boundDriver.value_or("");
+            if (prefill.empty()) {
+                const auto candidates = facade.driverInfo(*id);
+                if (!candidates.empty()) prefill = candidates.front().name;
+            }
+            textPrompt = PendingText{.onSubmit =
+                                         [&, id = *id](const std::string& driver) {
+                                             prunePending();
+                                             pending.push_back(facade.bindDriver(id, driver));
+                                         },
+                                     .prompt = "bind driver to " + device->name + ": ",
+                                     .buffer = prefill};
             return true;
         }
         if (event == Event::Character('r')) {
@@ -201,6 +375,10 @@ int runTuiApp() {
             // a long session instead of growing by one future per keypress.
             prunePending();
             pending.push_back(facade.refresh());  // fire; results arrive via the dispatcher
+            return true;
+        }
+        if (event == Event::Escape) {
+            screen.Exit();
             return true;
         }
         return false;  // let Input / Menu handle the rest (incl. mouse)
