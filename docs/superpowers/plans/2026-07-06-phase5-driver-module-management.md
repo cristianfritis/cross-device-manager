@@ -4741,7 +4741,7 @@ echo "==> Running Phase 5 Smoke Test..."
 
 - [x] **Step 2: README** — extend the feature list: universal persistent enable/disable with active enforcement, module load/unload with Secure Boot/lockdown awareness, Modules view in both UIs, surgical bind/unbind; note the new runtime deps (libkmod) and the daemon state dir (`/var/lib/devmgrd`, override with `--state-dir`).
 
-- [ ] **Step 3: Full gates**
+- [x] **Step 3: Full gates**
 
 Run: `cmake --build --preset linux-debug && ctest --test-dir build/linux-debug --output-on-failure`
 Run: `clang-format --dry-run --Werror $(git diff feature/phase4 --name-only | grep -E '\.(hpp|cpp)$')`
@@ -4750,7 +4750,7 @@ Expected: unit suite green host+container, `PHASE4 VM SMOKE OK` **and** `PHASE5 
 
 - [x] **Step 4: Close-out** — mark all task checkboxes in this plan; update project memory (`phase5-execution-status`, `roadmap-and-active-phase`) with commits + exit-gate state.
 
-- [ ] **Step 5: Commit (USER runs)**
+- [x] **Step 5: Commit (USER runs)**
 
 ```bash
 git add -A && git commit -m "test+docs: Phase 5 T13 — VM smoke (modules, persistence, surgical verbs), README, close-out"
