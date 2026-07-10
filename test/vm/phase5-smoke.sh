@@ -8,6 +8,20 @@ USBDEV=${1:?usage: phase5-smoke.sh <usb device> [pci/virtio device]}
 PCIDEV=${2:-}
 [ -f "$USBDEV/authorized" ] || { echo "no authorized attr at $USBDEV"; exit 1; }
 
+if [ -z "$PCIDEV" ]; then
+    # Auto-pick a SAFE virtio device: balloon or rng only. Never virtio-blk
+    # (the VM's root disk — the guard rightly refuses "backs the root
+    # filesystem") and never virtio-net (unbinding it drops the SSH session
+    # running this script).
+    for d in /sys/bus/virtio/devices/virtio*; do
+        [ -e "$d/driver" ] || continue
+        case "$(basename "$(readlink -f "$d/driver")")" in
+            virtio_balloon|virtio_rng) PCIDEV=$d; break ;;
+        esac
+    done
+    [ -n "$PCIDEV" ] || echo "note: no safe virtio device found — surgical-verb section will be skipped"
+fi
+
 install -m644 daemon/data/org.devmgr.Manager1.conf /etc/dbus-1/system.d/
 install -m644 daemon/data/org.devmgr.policy /usr/share/polkit-1/actions/
 rm -rf /var/lib/devmgrd   # clean slate for the persistence checks

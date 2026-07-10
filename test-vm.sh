@@ -20,4 +20,4 @@ echo "==> Running Phase 4 Smoke Test..."
 (cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase4-smoke.sh /sys/bus/usb/devices/3-1')
 
 echo "==> Running Phase 5 Smoke Test..."
-(cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase5-smoke.sh /sys/bus/usb/devices/3-1 "$(ls -d /sys/bus/virtio/devices/virtio* 2>/dev/null | head -1)"')
+(cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase5-smoke.sh /sys/bus/usb/devices/3-1')
