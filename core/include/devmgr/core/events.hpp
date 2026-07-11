@@ -28,5 +28,13 @@ struct ErrorEvent {
     std::string message;
 };
 struct ModulesChangedEvent {};
+struct UpdatesChangedEvent {};    // provider-side change (fwupd signals) → coalesced refresh
+struct UpdatesRefreshedEvent {};  // facade snapshot replaced → VMs rebuild via dispatcher
+struct UpdateRequestEvent {       // fwupd DeviceRequest: durable until dismissed/resolved (spec §9)
+    std::string providerId;
+    std::string deviceId;
+    std::string kind;  // "immediate" | "post" | raw fwupd request-kind number
+    std::string message;
+};
 
 }  // namespace devmgr::core
