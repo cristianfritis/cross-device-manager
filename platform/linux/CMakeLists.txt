@@ -19,7 +19,7 @@ target_link_libraries(devmgr_pal_linux
 target_compile_features(devmgr_pal_linux PUBLIC cxx_std_20)
 
 if(DEVMGR_WITH_SDBUS)
-    target_sources(devmgr_pal_linux PRIVATE src/dbus_privileged_channel.cpp)
+    target_sources(devmgr_pal_linux PRIVATE src/dbus_privileged_channel.cpp src/fwupd_contract.cpp)
     target_link_libraries(devmgr_pal_linux PRIVATE SDBusCpp::sdbus-c++)
     # Lets composition roots (tui/gui) wire the channel only when it exists.
     target_compile_definitions(devmgr_pal_linux PUBLIC DEVMGR_HAS_SDBUS)

@@ -19,11 +19,15 @@ jobs:
           ! grep -rn --include='*.hpp' --include='*.cpp' -E '#include\s*[<"]Q[A-Za-z]' core app platform daemon
       - name: sdbus purity guard (sdbus-c++ only in daemon/ + the channel leaf)
         # The Phase 4 quarantine: sdbus types must never leak into the shared
-        # layers. Allowed: daemon/src/* and the one client leaf file.
+        # layers. Allowed: daemon/src/*, the one client leaf file, and the
+        # Phase 6 frontend-direct fwupd client (fwupd-named, DEVMGR_WITH_SDBUS
+        # gated) — the parse layer's public API exposes sdbus::Variant by design.
+        # The fwupd exemption is anchored to platform/ and tests/ ONLY: a
+        # fwupd-named file under core/app/gui/tui must still trip the guard.
         run: |
           ! grep -rn --include='*.hpp' --include='*.cpp' -E '#include\s*[<"]sdbus' \
               core app gui tui tests platform \
-              | grep -v '^platform/linux/src/dbus_privileged_channel.cpp:'
+              | grep -vE '^(platform/linux/src/dbus_privileged_channel\.cpp|(platform|tests)/.*fwupd.*\.(cpp|hpp)):'
       - name: Build and unit-test (Docker)
         run: docker compose -f test/docker-compose.yml run --rm unit
       - name: Static analysis (clang-tidy)

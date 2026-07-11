@@ -70,4 +70,10 @@ if(UNIX AND NOT APPLE)
     target_compile_definitions(devmgr_tests PRIVATE
         DEVMGR_KMOD_FIXTURE_DIR="${DEVMGR_KMOD_FIXTURE_DIR}")
 endif()
+
+if(DEVMGR_WITH_SDBUS)
+    target_sources(devmgr_tests PRIVATE unit/test_fwupd_contract.cpp)
+    target_link_libraries(devmgr_tests PRIVATE SDBusCpp::sdbus-c++)  # sdbus::Variant in test bodies
+endif()
+
 gtest_discover_tests(devmgr_tests)
