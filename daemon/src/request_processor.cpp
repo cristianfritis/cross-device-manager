@@ -89,9 +89,20 @@ core::Result<void> RequestProcessor::applyDisable(const std::string& canonical) 
 core::Result<void> RequestProcessor::applyEnable(const std::string& canonical) {
     // Enable: delete the entry FIRST, then rebind — a rebind failure must
     // leave "enabled-but-unbound" with a clear error, never a lying store.
+    // Match by lastSysfsPath OR by device key: after a daemon-down replug the
+    // stored path is stale while the key still identifies the device
+    // (Phase 5 review F-3). Guard the sysfs probe on directory existence,
+    // same as EnforcementService::maybeReapply's fallback (enforcement_
+    // service.cpp) — canonical is already validated by canonicalContained()
+    // for every real caller, but applyEnable must not assume that here.
+    std::error_code dirEc;
+    const bool probable = fs::is_directory(canonical, dirEc);
+    const core::Device probed = probable ? deviceFromSysfs(canonical) : core::Device{};
     std::string hint;
     for (const auto& e : store_.entries()) {
-        if (e.lastSysfsPath == canonical) {
+        const bool pathMatch = e.lastSysfsPath == canonical;
+        const bool keyMatch = probable && services::matchesDevice(e.key, probed);
+        if (pathMatch || keyMatch) {
             hint = e.lastDriver;
             auto removed = store_.remove(e.key);
             if (!removed) return removed;

@@ -31,3 +31,31 @@ TEST(KmodErrorTaxonomy, UnloadBusyListsHolders) {
     EXPECT_EQ(e.code, Error::Code::Busy);
     EXPECT_EQ(e.message, "module 'usbcore' is in use by usbhid, xhci_hcd");
 }
+
+TEST(KmodErrorTaxonomy, UnloadPermissionDenied) {
+    const auto e = pl::describeUnloadFailure(EPERM, "dummy", {});
+    EXPECT_EQ(e.code, Error::Code::Permission);
+    EXPECT_NE(e.message.find("dummy"), std::string::npos) << e.message;
+}
+
+TEST(KmodErrorTaxonomy, LoadBusyIsBusy) {
+    const auto e = pl::describeLoadFailure(EBUSY, "dummy", {}, "none");
+    EXPECT_EQ(e.code, Error::Code::Busy);
+}
+
+TEST(KmodErrorTaxonomy, LoadUnknownErrnoFallsBackToIo) {
+    const auto e = pl::describeLoadFailure(EIO, "dummy", {}, "none");
+    EXPECT_EQ(e.code, Error::Code::Io);
+    EXPECT_NE(e.message.find("dummy"), std::string::npos) << e.message;
+}
+
+TEST(KmodErrorTaxonomy, UnloadEnoentIsNotFound) {
+    const auto e = pl::describeUnloadFailure(ENOENT, "ghost", {});
+    EXPECT_EQ(e.code, Error::Code::NotFound);
+}
+
+TEST(KmodErrorTaxonomy, UnloadBusyWithNoHoldersStillReadable) {
+    const auto e = pl::describeUnloadFailure(EBUSY, "usbcore", {});
+    EXPECT_EQ(e.code, Error::Code::Busy);
+    EXPECT_NE(e.message.find("usbcore"), std::string::npos) << e.message;
+}

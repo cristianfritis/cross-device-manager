@@ -9,6 +9,7 @@
 #include "devmgr/app/device_list_vm.hpp"
 #include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
+#include "devmgr/runtime/event_bus.hpp"
 #include "gui/src/device_list_model.hpp"
 #include "gui/src/module_list_model.hpp"
 #include "gui/src/qt_ui_dispatcher.hpp"
@@ -49,8 +50,8 @@ class MainWindow final : public QMainWindow {
 
     MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm,
                app::DeviceDetailVM& detailVm, app::StatusLineVM& statusVm,
-               app::ModulesVM& modulesVm, QtUiDispatcher& dispatcher, Actions actions,
-               QWidget* parent = nullptr);
+               app::ModulesVM& modulesVm, QtUiDispatcher& dispatcher, runtime::EventBus& bus,
+               Actions actions, QWidget* parent = nullptr);
 
     // Test accessors (offscreen tests drive/inspect the real widgets).
     QListView* listView() const { return listView_; }
@@ -80,6 +81,7 @@ class MainWindow final : public QMainWindow {
     app::DeviceDetailVM& detailVm_;
     app::StatusLineVM& statusVm_;
     app::ModulesVM& modulesVm_;
+    runtime::EventBus& bus_;
     Actions actions_;
     DeviceListModel* model_ = nullptr;  // Qt-parented to this window
     QListView* listView_ = nullptr;

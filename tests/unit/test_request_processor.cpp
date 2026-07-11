@@ -296,6 +296,30 @@ struct EmptyEnumerator final : devmgr::pal::IDeviceEnumerator {
 };
 }  // namespace
 
+TEST_F(RequestProcessorTest, EnableMatchesReplugAtNewSysfsPathByDeviceKey) {
+    // Disable at path A — persists an entry keyed by (bus, vendor, product,
+    // serial).
+    ASSERT_TRUE(processor().setDeviceEnabled(":1.7", devicePath_, false).has_value());
+    ASSERT_EQ(store_->entries().size(), 1U);
+
+    // Simulate a daemon-down replug: the SAME device identity reappears at a
+    // NEW sysfs path B. The store's lastSysfsPath still says A — applyEnable
+    // must still find (and remove) the entry via the device key, not just the
+    // stale path (Phase 5 review F-3).
+    const std::string pathB = makeDeviceDir(
+        "usb1/1-9", {{"idVendor", "1d6b"}, {"idProduct", "0002"}, {"serial", "abc123"}});
+    core::Device moved;
+    moved.sysfsPath = pathB;
+    moved.bus = core::BusType::Usb;
+    moved.vendorId = "1d6b";
+    moved.productId = "0002";
+    moved.serial = "abc123";
+    pal_.seedDevice(moved);  // controller must accept setEnabled at path B too
+
+    ASSERT_TRUE(processor().setDeviceEnabled(":1.7", pathB, true).has_value());
+    EXPECT_TRUE(store_->entries().empty());
+}
+
 TEST_F(RequestProcessorTest, DisableOfUnenumeratedDeviceFallsBackToSysfsKey) {
     // Device dir exists on disk (validation passes, FakePal-as-controller is
     // seeded) but the enumerator sees NOTHING — the key must come from attrs.

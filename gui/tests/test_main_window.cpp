@@ -94,7 +94,7 @@ struct Fixture {
             lastTextPrefill = prefill;
             return textAnswer;
         };
-        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, dispatcher,
+        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, dispatcher, bus,
                                std::move(actions));
     }
     void refreshAndPump() {
@@ -400,6 +400,10 @@ TEST(MainWindowTest, UnloadGuardRefusalShowsReasonWithoutConfirm) {
     Fixture f;
     f.seedModule("dummy", 0, {"holder_mod"});  // held module → guard refuses first
     auto window = f.makeWindow();
+    // The refusal now flows through StatusLineVM (Phase 5 review F-1), which
+    // ignores events until armed — same as the composition root arms it right
+    // after the initial refresh.
+    f.statusVm.arm();
     window.tabs()->setCurrentIndex(1);
     window.modulesView()->setCurrentIndex(window.modulesView()->model()->index(0, 0));
 
@@ -431,6 +435,10 @@ TEST(MainWindowTest, UnbindGuardRefusalShowsReasonWithoutConfirm) {
     auto window = f.makeWindow();
     f.refreshAndPump();
     f.selectFirstDevice(window);
+    // The refusal now flows through StatusLineVM (Phase 5 review F-1), which
+    // ignores events until armed — same as the composition root arms it right
+    // after the initial refresh.
+    f.statusVm.arm();
 
     window.unbindAction()->trigger();
     EXPECT_TRUE(f.unbindDriverCalls.empty());

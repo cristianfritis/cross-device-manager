@@ -270,7 +270,7 @@ int runTuiApp() {
             }
             return true;
         }
-        if (event == Event::Character('q')) {
+        if (event == Event::Character('q') || event == Event::Escape) {
             screen.Exit();
             return true;
         }
@@ -375,10 +375,6 @@ int runTuiApp() {
             // a long session instead of growing by one future per keypress.
             prunePending();
             pending.push_back(facade.refresh());  // fire; results arrive via the dispatcher
-            return true;
-        }
-        if (event == Event::Escape) {
-            screen.Exit();
             return true;
         }
         return false;  // let Input / Menu handle the rest (incl. mouse)

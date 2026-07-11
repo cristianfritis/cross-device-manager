@@ -120,7 +120,7 @@ int runGuiApp(int argc, char** argv) {
     actions.onUnbindDriver = [&](const core::DeviceId& id) {
         pruneAndPush(facade.unbindDriver(id));
     };
-    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, dispatcher,
+    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, dispatcher, bus,
                       std::move(actions));
 
     int rc = 0;

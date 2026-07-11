@@ -21,6 +21,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "devmgr/core/events.hpp"
 #include "devmgr/core/models.hpp"
 
 namespace devmgr::gui {
@@ -40,14 +41,15 @@ namespace devmgr::gui {
 // NOLINTBEGIN(readability-function-cognitive-complexity)
 MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm,
                        app::DeviceDetailVM& detailVm, app::StatusLineVM& statusVm,
-                       app::ModulesVM& modulesVm, QtUiDispatcher& dispatcher, Actions actions,
-                       QWidget* parent)
+                       app::ModulesVM& modulesVm, QtUiDispatcher& dispatcher,
+                       runtime::EventBus& bus, Actions actions, QWidget* parent)
     : QMainWindow(parent),
       facade_(facade),
       listVm_(listVm),
       detailVm_(detailVm),
       statusVm_(statusVm),
       modulesVm_(modulesVm),
+      bus_(bus),
       actions_(std::move(actions)) {
     setWindowTitle(QStringLiteral("Device Manager"));
 
@@ -86,7 +88,10 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (!name) return;
         const auto verdict = facade_.canUnloadModule(*name);
         if (!verdict.allowed) {
-            statusBar()->showMessage(QString::fromStdString("cannot unload: " + verdict.reason));
+            // StatusLineVM owns the status line (TTL + no wipe-by-wake) — see
+            // the identical TUI pattern (tui/src/tui_app.cpp) (Phase 5 review F-1).
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard", .ok = false, .message = "cannot unload: " + verdict.reason});
             return;
         }
         const QString prompt =
@@ -101,7 +106,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (!device) return;
         const auto verdict = facade_.canDisable(*id);
         if (!verdict.allowed) {
-            statusBar()->showMessage(QString::fromStdString("cannot unbind: " + verdict.reason));
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard", .ok = false, .message = "cannot unbind: " + verdict.reason});
             return;
         }
         if (askConfirm(QStringLiteral("Unbind driver from %1? (not persistent)")
@@ -230,7 +236,9 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             });
     connect(moduleModel_, &QAbstractItemModel::modelReset, this, [this] {
         updateModuleDetailPane();
-        updateActionEnablement();
+        // Module-side resets must not re-run the Devices-tab criticality probe
+        // (reads /proc/self/mounts + sysfs) — Phase 5 review F-1.
+        if (tabs_->currentIndex() == 1) updateActionEnablement();
     });
 
     // The Qt analogue of the TUI re-rendering on Event::Custom: StatusLineVM

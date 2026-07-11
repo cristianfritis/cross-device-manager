@@ -51,8 +51,10 @@ class IDriverManager {
     virtual ~IDriverManager() = default;
     // Takes the full Device: modalias lookup + driver-symlink resolution need
     // modalias and sysfsPath (spec §4.2 refinement; same rationale as
-    // IPrivilegedChannel taking Device). Returns the modalias candidate list;
-    // the bound one is identified by the caller via Device::boundDriver.
+    // IPrivilegedChannel taking Device). Returns the modalias candidate list
+    // ordered per the pinned contract (kmod_driver_manager.hpp): the FIRST
+    // element is the currently-bound (or builtin) driver when one exists —
+    // both frontends' bind-prefill depends on that ordering.
     virtual core::Result<std::vector<core::Driver>> driversFor(const core::Device& device) = 0;
     virtual core::Result<void> loadModule(const std::string& name) = 0;
     virtual core::Result<void> unloadModule(const std::string& name) = 0;
