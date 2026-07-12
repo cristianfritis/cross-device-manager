@@ -39,7 +39,8 @@ if(UNIX AND NOT APPLE)
         unit/test_kmod_error_taxonomy.cpp
         unit/test_linux_system_info.cpp
         unit/test_enforcement_service.cpp
-        unit/test_cab_resolver.cpp)
+        unit/test_cab_resolver.cpp
+        unit/test_dkms_status_provider.cpp)
     target_link_libraries(devmgr_tests PRIVATE devmgr_pal_linux devmgrd_lib)
 
     # KmodDriverManagerTest needs real depmod-processed .ko files: libkmod's

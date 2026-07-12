@@ -10,7 +10,8 @@ add_library(devmgr_pal_linux STATIC
     src/udev_hotplug_monitor.cpp
     src/kmod_driver_manager.cpp
     src/linux_system_info.cpp
-    src/cab_resolver.cpp)
+    src/cab_resolver.cpp
+    src/dkms_status_provider.cpp)
 target_include_directories(devmgr_pal_linux
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
