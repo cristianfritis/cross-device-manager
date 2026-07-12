@@ -68,6 +68,11 @@ class IDriverManager {
 
 enum class UpdateProviderCaps : unsigned { Query = 1U << 0U, Install = 1U << 1U };
 constexpr UpdateProviderCaps operator|(UpdateProviderCaps a, UpdateProviderCaps b) {
+    // Flag-enum combination: the result is deliberately a value with no
+    // single matching enumerator (e.g. Query|Install). clang-analyzer's
+    // enum-range check doesn't model bitmask enums and flags every OR'd
+    // result as "out of range" — false positive, not a real bug.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     return static_cast<UpdateProviderCaps>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
 }
 constexpr bool hasCap(UpdateProviderCaps caps, UpdateProviderCaps bit) {

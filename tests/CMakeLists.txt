@@ -74,7 +74,9 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(DEVMGR_WITH_SDBUS)
-    target_sources(devmgr_tests PRIVATE unit/test_fwupd_contract.cpp)
+    target_sources(devmgr_tests PRIVATE
+        unit/test_fwupd_contract.cpp
+        unit/test_fwupd_provider_nodaemon.cpp)
     target_link_libraries(devmgr_tests PRIVATE SDBusCpp::sdbus-c++)  # sdbus::Variant in test bodies
 endif()
 

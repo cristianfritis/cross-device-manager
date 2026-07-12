@@ -86,4 +86,16 @@ core::InstallDisposition dispositionFromUpdateState(std::uint32_t state) {
     }
 }
 
+std::optional<core::PendingAction> parseHistoryEntry(const Dict& dict) {
+    const auto state = get<std::uint32_t>(dict, "UpdateState").value_or(0);
+    if (state != kUpdateStatePending && state != kUpdateStateNeedsReboot) return std::nullopt;
+    return core::PendingAction{
+        .providerId = "fwupd",
+        .deviceId = get<std::string>(dict, "DeviceId").value_or(""),
+        .deviceName = get<std::string>(dict, "Name").value_or(""),
+        .disposition = dispositionFromUpdateState(state),
+        .version = get<std::string>(dict, "Version").value_or(""),
+    };
+}
+
 }  // namespace devmgr::platform_linux::fwupd

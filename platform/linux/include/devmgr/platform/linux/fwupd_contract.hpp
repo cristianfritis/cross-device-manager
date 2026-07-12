@@ -43,5 +43,8 @@ std::optional<core::ReleaseInfo> parseRelease(const Dict& dict);
 core::Error mapError(const std::string& name, const std::string& message);
 bool isNothingToDo(const std::string& name);
 core::InstallDisposition dispositionFromUpdateState(std::uint32_t state);
+// nullopt unless UpdateState ∈ {Pending, NeedsReboot} — completed/failed history
+// rows are not pending actions (failed rows surface via availability() notices).
+std::optional<core::PendingAction> parseHistoryEntry(const Dict& dict);
 
 }  // namespace devmgr::platform_linux::fwupd

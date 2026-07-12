@@ -99,3 +99,19 @@ TEST(FwupdContract, UpdateStateToDisposition) {
     EXPECT_EQ(fw::dispositionFromUpdateState(fw::kUpdateStatePending),
               devmgr::core::InstallDisposition::Scheduled);
 }
+TEST(FwupdContract, HistoryEntryToPendingAction) {
+    fw::Dict d;
+    d["DeviceId"] = sdbus::Variant{std::string{"aabb"}};
+    d["Name"] = sdbus::Variant{std::string{"Webcam"}};
+    d["UpdateState"] = sdbus::Variant{std::uint32_t{fw::kUpdateStateNeedsReboot}};
+    d["Version"] = sdbus::Variant{std::string{"1.2.4"}};
+    const auto p = fw::parseHistoryEntry(d);
+    ASSERT_TRUE(p.has_value());
+    EXPECT_EQ(p->disposition, devmgr::core::InstallDisposition::NeedsReboot);
+    EXPECT_EQ(p->deviceId, "aabb");
+    d["UpdateState"] = sdbus::Variant{std::uint32_t{fw::kUpdateStateSuccess}};
+    EXPECT_FALSE(fw::parseHistoryEntry(d).has_value());  // completed = not pending
+    d["UpdateState"] = sdbus::Variant{std::uint32_t{fw::kUpdateStateFailed}};
+    EXPECT_FALSE(
+        fw::parseHistoryEntry(d).has_value());  // failed → availability notice, not pending
+}
