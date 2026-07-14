@@ -4,8 +4,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -26,6 +28,7 @@ using Dict = fwupd::Dict;
 constexpr const char* kDbusBusName = "org.freedesktop.DBus";
 constexpr const char* kDbusObjectPath = "/org/freedesktop/DBus";
 constexpr const char* kDbusInterface = "org.freedesktop.DBus";
+constexpr const char* kPropertiesInterface = "org.freedesktop.DBus.Properties";
 
 // FwupdRemoteKind (libfwupd/fwupd-remote.h, fwupd-2.0.20 source — matches the
 // running daemon): UNKNOWN=0, DOWNLOAD=1, LOCAL=2, DIRECTORY=3. Confirmed
@@ -181,6 +184,12 @@ std::string requestKindToString(std::uint32_t kind) {
 }  // namespace
 
 class FwupdUpdateProvider::Impl {
+    // install() (T8, M3 state machine) lives on the outer class so the RAII
+    // Gate can close over the by-value `progress` parameter directly; it
+    // manipulates proxy_/installing_/progressSink_ as `impl->member` and
+    // therefore needs access to them without widening this class's public API.
+    friend class FwupdUpdateProvider;
+
    public:
     Impl(runtime::EventBus& bus, Config cfg) : bus_(bus) {
         try {
@@ -314,6 +323,15 @@ class FwupdUpdateProvider::Impl {
         proxy_->uponSignal("DeviceRequest").onInterface(fwupdIface).call([this](const Dict& d) {
             onDeviceRequestSignal(d);
         });
+        // V5 progress gating (T8, spec §5.4): registered here alongside every
+        // other signal, BEFORE enterEventLoopAsync — same discipline as above.
+        const sdbus::InterfaceName propsIface{kPropertiesInterface};
+        proxy_->uponSignal("PropertiesChanged")
+            .onInterface(propsIface)
+            .call([this](const std::string& interfaceName, const Dict& changedProps,
+                         const std::vector<std::string>& /*invalidatedProps*/) {
+                onPropertiesChanged(interfaceName, changedProps);
+            });
 
         const sdbus::InterfaceName dbusIface{kDbusInterface};
         nameOwnerProxy_->uponSignal("NameOwnerChanged")
@@ -340,6 +358,28 @@ class FwupdUpdateProvider::Impl {
     void onNameOwnerChanged(const std::string& name) {
         if (!accepting_.load()) return;
         if (name == fwupd::kBusName) publishChanged();
+    }
+
+    // V5 (spec §5.4): forwarded to our own install()'s progress sink ⇔ one of
+    // our installs is active — never while idle, never after teardown, never
+    // for another interface's properties (defense in depth: only our object
+    // path is watched, but the interface name is still worth checking).
+    void onPropertiesChanged(const std::string& interfaceName, const Dict& changed) {
+        if (!accepting_.load()) return;
+        if (interfaceName != fwupd::kInterface) return;
+        std::scoped_lock lk(progressMutex_);
+        // Null pointer = no install of ours in flight; empty std::function = a
+        // caller that opted out of progress. Both ⇒ ignore (V5).
+        if (progressSink_ == nullptr || !*progressSink_) return;
+        const auto percentage = get<std::uint32_t>(changed, "Percentage");
+        const int percent = (!percentage || *percentage > 100) ? -1 : static_cast<int>(*percentage);
+        const auto status = get<std::uint32_t>(changed, "Status").value_or(0U);
+        // Invoked while holding progressMutex_ — that is what lets install()'s
+        // Gate safely block until an in-flight callback finishes before clearing
+        // the sink. Contract: a caller's ProgressReporter must not block or
+        // re-enter anything that takes progressMutex_ (nothing else does).
+        (*progressSink_)(
+            runtime::ProgressUpdate{.percent = percent, .stage = fwupd::statusName(status)});
     }
 
     void publishChanged() {
@@ -388,13 +428,105 @@ class FwupdUpdateProvider::Impl {
         }
     }
 
+    // ---- T8 install lifecycle (spec §5.5) helpers ----
+    // Preflight: fresh GetDevices scan for one device — ⊥ trust the caller's
+    // snapshot. "Not found" is a normal (non-throwing) outcome; a transport
+    // failure propagates to install()'s outer catch (→ Io via mapError), it
+    // is deliberately NOT folded into nullopt here.
+    std::optional<fwupd::ParsedDevice> fetchDevice(const std::string& deviceId) {
+        std::vector<Dict> deviceDicts;
+        proxy_->callMethod("GetDevices")
+            .onInterface(sdbus::InterfaceName{fwupd::kInterface})
+            .storeResultsTo(deviceDicts);
+        for (const auto& d : deviceDicts) {
+            auto parsed = fwupd::parseDevice(d);
+            if (parsed && parsed->deviceId == deviceId) return parsed;
+        }
+        return std::nullopt;
+    }
+
+    // Preflight: fresh GetUpgrades(deviceId), matched by (remoteId, checksum)
+    // — never by version (spec §2). Reuses the same tolerant fetchUpgrades()
+    // enumerate() relies on; a query failure fails closed as "not found" (⇒
+    // caller's Conflict), consistent with "trust nothing from before this call".
+    std::optional<core::ReleaseInfo> fetchRelease(const std::string& deviceId,
+                                                  const core::ReleaseRef& ref) {
+        const auto outcome = fetchUpgrades(*proxy_, deviceId, {});
+        if (outcome.queryError) {
+            // Fails closed to "not found" (⇒ caller's Conflict). The Conflict
+            // message says "release changed", so log the real cause here — a
+            // transport fault and a genuinely-vanished release look identical
+            // to the caller otherwise.
+            spdlog::debug("fwupd: preflight GetUpgrades for {} failed ({}) — treating as vanished",
+                          deviceId, *outcome.queryError);
+            return std::nullopt;
+        }
+        for (const auto& r : outcome.releases)
+            if (r.remoteId == ref.remoteId && r.checksum == ref.checksum) return r;
+        return std::nullopt;
+    }
+
+    std::vector<RemoteRef> fetchRemotes() {
+        std::vector<Dict> remoteDicts;
+        proxy_->callMethod("GetRemotes")
+            .onInterface(sdbus::InterfaceName{fwupd::kInterface})
+            .storeResultsTo(remoteDicts);
+        std::vector<RemoteRef> remotes;
+        remotes.reserve(remoteDicts.size());
+        for (const auto& rd : remoteDicts) remotes.push_back(parseRemoteRef(rd));
+        return remotes;
+    }
+
+    // Finalizing (spec §5.5): the Install() reply is not proof of anything —
+    // GetResults is authoritative. `NothingToDo` (daemon recorded no result
+    // for this device) keeps the reply-based Completed disposition rather
+    // than failing the whole install(); any other GetResults error rethrows
+    // to install()'s outer catch (→ mapped Result).
+    core::Result<core::InstallOutcome> finalize(const std::string& deviceId,
+                                                const fwupd::ParsedDevice& preDevice) {
+        std::uint32_t state = fwupd::kUpdateStateSuccess;
+        try {
+            Dict results;
+            proxy_->callMethod("GetResults")
+                .onInterface(sdbus::InterfaceName{fwupd::kInterface})
+                .withArguments(deviceId)
+                .storeResultsTo(results);
+            state = get<std::uint32_t>(results, "UpdateState").value_or(fwupd::kUpdateStateSuccess);
+        } catch (const sdbus::Error& e) {
+            if (!fwupd::isNothingToDo(std::string{e.getName()})) throw;
+        }
+        const auto disposition = fwupd::dispositionFromUpdateState(state);
+        const auto freshDevice = fetchDevice(deviceId);
+        const std::string& newVersion = freshDevice ? freshDevice->version : preDevice.version;
+        std::optional<std::string> observedVersion;
+        if (newVersion != preDevice.version) observedVersion = newVersion;
+        const bool needsReboot = disposition == core::InstallDisposition::NeedsReboot ||
+                                 (freshDevice ? freshDevice->facts.needsRebootAfterUpdate
+                                              : preDevice.facts.needsRebootAfterUpdate);
+        std::string message;
+        if (needsReboot)
+            message = "reboot required to apply " + observedVersion.value_or(newVersion);
+        else if (disposition == core::InstallDisposition::Scheduled)
+            message = "scheduled for next boot";
+        else
+            message = "installed " + observedVersion.value_or(newVersion);
+        return core::InstallOutcome{
+            .disposition = disposition,
+            .needsReboot = needsReboot,
+            .observedVersion = observedVersion,
+            .message = message,
+        };
+    }
+
     runtime::EventBus& bus_;
     std::unique_ptr<sdbus::IConnection> connection_;
     std::unique_ptr<sdbus::IProxy> proxy_;
     std::unique_ptr<sdbus::IProxy> nameOwnerProxy_;
     std::string initError_;
     std::atomic<bool> accepting_{true};
-    std::atomic<bool> installing_{false};  // V5 gate — wired by T8
+    std::atomic<bool> installing_{false};                // V5 gate — wired by T8
+    std::mutex progressMutex_;                           // guards progressSink_ (T8)
+    runtime::ProgressReporter* progressSink_ = nullptr;  // non-null ⇔ our install is active
 };
 
 FwupdUpdateProvider::FwupdUpdateProvider(runtime::EventBus& bus, Config cfg)
@@ -423,9 +555,73 @@ core::Result<std::vector<core::PendingAction>> FwupdUpdateProvider::pendingActio
 }
 
 core::Result<core::InstallOutcome> FwupdUpdateProvider::install(
-    const std::string& /*candidateId*/, const core::ReleaseRef& /*release*/,
-    runtime::ProgressReporter /*progress*/) {
-    return core::makeError(core::Error::Code::Unsupported, "install wired in T8");
+    const std::string& candidateId, const core::ReleaseRef& release,
+    runtime::ProgressReporter progress) {
+    auto* impl = impl_.get();
+    if (!impl || !impl->proxy_) return core::makeError(core::Error::Code::Io, "fwupd unavailable");
+    bool expected = false;
+    if (!impl->installing_.compare_exchange_strong(expected, true))
+        return core::makeError(core::Error::Code::Busy, "another update is in progress");
+    // RAII: clear installing_ + progress sink on every exit path.
+    struct Gate {
+        Impl* i;
+        explicit Gate(Impl* impl) : i(impl) {}
+        Gate(const Gate&) = delete;
+        Gate& operator=(const Gate&) = delete;
+        Gate(Gate&&) = delete;
+        Gate& operator=(Gate&&) = delete;
+        ~Gate() {
+            {
+                std::scoped_lock lk(i->progressMutex_);
+                i->progressSink_ = nullptr;
+            }
+            i->installing_.store(false);
+        }
+    } gate{impl};
+
+    try {
+        // ---- Preflight (spec §5.5): fresh queries, ⊥ trust the UI snapshot ----
+        const auto device = impl->fetchDevice(candidateId);  // fresh GetDevices scan
+        if (!device || !device->facts.updatable)
+            return core::makeError(core::Error::Code::Conflict,
+                                   "device changed since refresh — refresh & retry");
+        const auto fresh = impl->fetchRelease(candidateId, release);  // fresh GetUpgrades,
+        if (!fresh)                                                   // match (remoteId,checksum)
+            return core::makeError(core::Error::Code::Conflict,
+                                   "release changed since refresh — refresh & retry");
+        // ---- Resolving (M2, T4 contract) ----
+        const auto remotes = impl->fetchRemotes();
+        auto cab = resolveAndOpenCab(fresh->locations, remotes, fresh->remoteId, fresh->sizeBytes);
+        if (!cab) return tl::unexpected(cab.error());
+        // ---- Installing: async call, gated progress (V5) ----
+        {
+            std::scoped_lock lk(impl->progressMutex_);
+            impl->progressSink_ = &progress;  // PropertiesChanged handler forwards
+        }  // Status/Percentage ⇔ sink non-null
+        const auto timeout = std::chrono::seconds(
+            std::max<std::uint32_t>(fresh->installDurationSec.value_or(0) * 2, 600));
+        std::map<std::string, sdbus::Variant> options;
+        options["reason"] = sdbus::Variant{std::string{"device-manager update"}};
+        // sdbus::UnixFd(int) dups the fd on construction (verified:
+        // sdbus-c++/Types.h — "explicit UnixFd(int fd) : fd_(checkedDup(fd))")
+        // — cab stays alive (owns the original) until this scope ends either way
+        // (M2 fd-ownership rule).
+        auto call = impl->proxy_->callMethodAsync("Install")
+                        .onInterface(sdbus::InterfaceName{fwupd::kInterface})
+                        .withArguments(candidateId, sdbus::UnixFd{cab->fd.get()}, options)
+                        .getResultAsFuture<>();
+        if (call.wait_for(timeout) != std::future_status::ready)
+            return core::makeError(core::Error::Code::Io,
+                                   "install timed out — state reconciled on next refresh");
+        call.get();  // throws sdbus::Error on daemon-reported failure
+        // ---- Finalizing: reply ≠ proof; GetResults is authoritative (§5.4) ----
+        return impl->finalize(candidateId, *device);
+    } catch (const sdbus::Error& e) {
+        return tl::unexpected(
+            fwupd::mapError(std::string{e.getName()}, std::string{e.getMessage()}));
+    } catch (const std::exception& e) {
+        return core::makeError(core::Error::Code::Io, std::string{"install failed: "} + e.what());
+    }
 }
 
 }  // namespace devmgr::platform_linux

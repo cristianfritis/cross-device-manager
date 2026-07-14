@@ -115,3 +115,8 @@ TEST(FwupdContract, HistoryEntryToPendingAction) {
     EXPECT_FALSE(
         fw::parseHistoryEntry(d).has_value());  // failed → availability notice, not pending
 }
+TEST(FwupdContract, StatusNamePinnedAndTolerant) {
+    EXPECT_STREQ(fw::statusName(1), "idle");
+    EXPECT_STREQ(fw::statusName(5), "device-write");
+    EXPECT_STREQ(fw::statusName(999), "unknown");  // out-of-range ⇒ safe fallback, never throws
+}

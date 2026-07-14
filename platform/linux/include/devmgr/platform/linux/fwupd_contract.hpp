@@ -46,5 +46,9 @@ core::InstallDisposition dispositionFromUpdateState(std::uint32_t state);
 // nullopt unless UpdateState ∈ {Pending, NeedsReboot} — completed/failed history
 // rows are not pending actions (failed rows surface via availability() notices).
 std::optional<core::PendingAction> parseHistoryEntry(const Dict& dict);
+// FwupdStatus (fwupd-enums.h) → fwupd's own kebab-case string form (T8 §5.4
+// progress attribution). Unknown/out-of-range values fall back to "unknown"
+// rather than throwing — tolerant like every other parse-layer helper here.
+const char* statusName(std::uint32_t status);
 
 }  // namespace devmgr::platform_linux::fwupd

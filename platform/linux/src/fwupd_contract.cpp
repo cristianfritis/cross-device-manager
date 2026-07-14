@@ -1,5 +1,7 @@
 #include "devmgr/platform/linux/fwupd_contract.hpp"
 
+#include <array>
+
 #include <spdlog/spdlog.h>
 
 namespace devmgr::platform_linux::fwupd {
@@ -96,6 +98,20 @@ std::optional<core::PendingAction> parseHistoryEntry(const Dict& dict) {
         .disposition = dispositionFromUpdateState(state),
         .version = get<std::string>(dict, "Version").value_or(""),
     };
+}
+
+// Indexed by FwupdStatus ordinal, pinned from
+// /usr/include/fwupd-3/libfwupd/fwupd-enums.h (0-based enum, order verified by
+// grep — T3 Step-1 style); names are fwupd's own kebab-case convention
+// (fwupd_status_to_string in libfwupd, also the fwupdmgr CLI's vocabulary).
+const char* statusName(std::uint32_t status) {
+    static constexpr std::array<const char*, 15> kNames{
+        "unknown",        "idle",         "loading",         "decompressing",
+        "device-restart", "device-write", "device-verify",   "scheduling",
+        "downloading",    "device-read",  "device-erase",    "waiting-for-auth",
+        "device-busy",    "shutdown",     "waiting-for-user"};
+    // Unknown/out-of-range ⇒ "unknown" (front), never out-of-bounds/throw.
+    return status < kNames.size() ? kNames.at(status) : kNames.front();
 }
 
 }  // namespace devmgr::platform_linux::fwupd
