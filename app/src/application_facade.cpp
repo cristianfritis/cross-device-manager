@@ -1,11 +1,26 @@
 #include "devmgr/app/application_facade.hpp"
 
+#include <atomic>
+#include <set>
 #include <utility>
 
 #include "devmgr/app/disabled_overlay.hpp"
 #include "devmgr/core/events.hpp"
 
 namespace devmgr::app {
+
+namespace {
+// Releases the serialization gate on EVERY worker exit path (spec §5.4).
+struct InstallActiveGuard {
+    std::atomic<bool>& flag;
+    explicit InstallActiveGuard(std::atomic<bool>& f) : flag(f) {}
+    InstallActiveGuard(const InstallActiveGuard&) = delete;
+    InstallActiveGuard& operator=(const InstallActiveGuard&) = delete;
+    InstallActiveGuard(InstallActiveGuard&&) = delete;
+    InstallActiveGuard& operator=(InstallActiveGuard&&) = delete;
+    ~InstallActiveGuard() { flag.store(false); }
+};
+}  // namespace
 
 std::future<void> ApplicationFacade::refresh() {
     return scheduler_.submit([this] {
@@ -175,6 +190,186 @@ std::future<void> ApplicationFacade::unbindDriver(const core::DeviceId& id) {
     return runChannelTask(
         "unbind-driver:" + id.value, "Unbound driver from " + device->name, false,
         [device = *device](pal::IPrivilegedChannel& c) { return c.unbindDriver(device); });
+}
+
+// ---- Phase 6: firmware/driver updates ----
+
+core::UpdateProviderState ApplicationFacade::buildProviderState(pal::IUpdateProvider& provider) {
+    core::UpdateProviderState st;
+    st.providerId = provider.providerId();
+    st.availability = provider.availability();
+    if (!st.availability.available) {
+        st.candidates = lastGoodCandidates(st.providerId);
+        return st;
+    }
+    if (auto candidates = provider.enumerate()) {
+        st.candidates = std::move(*candidates);
+    } else {
+        st.refreshError = candidates.error();
+        st.candidates = lastGoodCandidates(st.providerId);  // §8.1 deliberate retain
+    }
+    reconcilePending(provider, st.providerId, !st.refreshError.has_value());
+    return st;
+}
+
+void ApplicationFacade::reconcilePending(pal::IUpdateProvider& provider,
+                                         const std::string& providerId, bool enumerateSucceeded) {
+    // M1 reconcile (§8.2): the provider's durable history (fwupd
+    // GetHistory/GetResults) is authoritative. Upsert every reported action,
+    // then clear an entry ONLY on positive evidence — the pending query
+    // succeeded, enumerate succeeded, AND the key is absent from the report. A
+    // failed pending query or a failed enumerate is NO evidence, so the sticky
+    // entry is retained. Never derived from the candidate list (V4).
+    auto pending = provider.pendingActions();
+    if (!pending) return;
+    std::set<std::pair<std::string, std::string>> reported;
+    for (const auto& action : *pending) {
+        // Key under the reconciling provider's id so the positive-evidence
+        // clear (erasePendingNotIn, same id) can always reach these entries —
+        // defense-in-depth against a provider reporting a foreign providerId.
+        core::PendingAction owned = action;
+        owned.providerId = providerId;
+        reported.insert({owned.providerId, owned.deviceId});
+        upsertPending(owned);
+    }
+    if (enumerateSucceeded) erasePendingNotIn(providerId, reported);
+}
+
+std::future<void> ApplicationFacade::refreshUpdates() {
+    return scheduler_.submit([this] {
+        std::vector<core::UpdateProviderState> next;
+        next.reserve(updateProviders_.size());
+        for (auto* provider : updateProviders_) next.push_back(buildProviderState(*provider));
+        {
+            std::scoped_lock lock(updatesMutex_);
+            updatesSnapshot_ = std::move(next);
+        }
+        bus_.publish(core::UpdatesRefreshedEvent{});
+    });
+}
+
+std::future<void> ApplicationFacade::installUpdate(std::string providerId, std::string candidateId,
+                                                   core::ReleaseRef release) {
+    const std::string taskId = "install-update:" + candidateId;
+    // Serialize in-process (spec §5.4): claim the slot synchronously, before
+    // scheduling, so a racing second caller observes it taken and the provider
+    // never sees a concurrent install.
+    if (installActive_.exchange(true)) {
+        bus_.publish(core::TaskCompletedEvent{
+            .taskId = taskId, .ok = false, .message = "another update is already in progress"});
+        std::promise<void> done;
+        done.set_value();
+        return done.get_future();
+    }
+    try {
+        return scheduler_.submit([this, providerId = std::move(providerId),
+                                  candidateId = std::move(candidateId),
+                                  release = std::move(release), taskId] {
+            InstallActiveGuard guard{installActive_};  // release the slot on every exit
+            auto* provider = findProvider(providerId);
+            if (provider == nullptr) {
+                bus_.publish(core::TaskCompletedEvent{
+                    .taskId = taskId,
+                    .ok = false,
+                    .message = "update provider not found: " + providerId});
+                return;
+            }
+            // V1 defense-in-depth: refuse a status-only provider even though the UI
+            // pre-gates the install verb.
+            if (!pal::hasCap(provider->capabilities(), pal::UpdateProviderCaps::Install)) {
+                bus_.publish(
+                    core::TaskCompletedEvent{.taskId = taskId,
+                                             .ok = false,
+                                             .message = "provider is status-only: " + providerId});
+                return;
+            }
+            auto outcome = provider->install(
+                candidateId, release, [this, taskId](const runtime::ProgressUpdate& update) {
+                    bus_.publish(core::TaskProgressEvent{
+                        .taskId = taskId, .percent = update.percent, .stage = update.stage});
+                });
+            if (outcome) {
+                if (outcome->disposition != core::InstallDisposition::Completed) {
+                    // Seed the durable record immediately (§8.2 (a)); the next
+                    // refresh reconciles it against provider history. deviceName is
+                    // the candidate id here — provider-reported entries carry the
+                    // human name; this session seed keys and surfaces by id.
+                    upsertPending(
+                        core::PendingAction{.providerId = providerId,
+                                            .deviceId = candidateId,
+                                            .deviceName = candidateId,
+                                            .disposition = outcome->disposition,
+                                            .version = outcome->observedVersion.value_or("")});
+                }
+                bus_.publish(core::TaskCompletedEvent{
+                    .taskId = taskId, .ok = true, .message = outcome->message});
+            } else {
+                bus_.publish(core::TaskCompletedEvent{
+                    .taskId = taskId, .ok = false, .message = outcome.error().message});
+            }
+            bus_.publish(core::UpdatesChangedEvent{});
+        });
+    } catch (...) {
+        installActive_.store(false);  // scheduler stopping: release the slot we claimed
+        throw;
+    }
+}
+
+std::vector<core::UpdateProviderState> ApplicationFacade::updatesSnapshot() const {
+    std::scoped_lock lock(updatesMutex_);
+    return updatesSnapshot_;
+}
+
+std::vector<core::PendingAction> ApplicationFacade::pendingUpdateActions() const {
+    std::scoped_lock lock(updatesMutex_);
+    std::vector<core::PendingAction> actions;
+    actions.reserve(pending_.size());
+    for (const auto& [key, action] : pending_) actions.push_back(action);
+    return actions;
+}
+
+bool ApplicationFacade::rebootPendingEffective() const {
+    {
+        std::scoped_lock lock(updatesMutex_);
+        for (const auto& [key, action] : pending_)
+            if (action.disposition == core::InstallDisposition::NeedsReboot) return true;
+    }
+    const auto info = systemInfo();  // outside the lock: may query the PAL
+    return info.has_value() && info->rebootPending;
+}
+
+bool ApplicationFacade::installActive() const {
+    return installActive_.load();
+}
+
+pal::IUpdateProvider* ApplicationFacade::findProvider(const std::string& providerId) const {
+    for (auto* provider : updateProviders_)
+        if (provider->providerId() == providerId) return provider;
+    return nullptr;
+}
+
+std::vector<core::UpdateCandidate> ApplicationFacade::lastGoodCandidates(
+    const std::string& providerId) const {
+    std::scoped_lock lock(updatesMutex_);
+    for (const auto& st : updatesSnapshot_)
+        if (st.providerId == providerId) return st.candidates;
+    return {};
+}
+
+void ApplicationFacade::upsertPending(const core::PendingAction& action) {
+    std::scoped_lock lock(updatesMutex_);
+    pending_[{action.providerId, action.deviceId}] = action;
+}
+
+void ApplicationFacade::erasePendingNotIn(
+    const std::string& providerId, const std::set<std::pair<std::string, std::string>>& reported) {
+    std::scoped_lock lock(updatesMutex_);
+    for (auto it = pending_.begin(); it != pending_.end();) {
+        if (it->first.first == providerId && !reported.contains(it->first))
+            it = pending_.erase(it);
+        else
+            ++it;
+    }
 }
 
 }  // namespace devmgr::app

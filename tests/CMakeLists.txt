@@ -13,6 +13,7 @@ add_executable(devmgr_tests
     unit/test_udev_field_mapping.cpp
     unit/test_device_service.cpp
     unit/test_application_facade.cpp
+    unit/test_application_facade_updates.cpp
     unit/test_device_list_vm.cpp
     unit/test_device_detail_vm.cpp
     unit/test_hotplug_service.cpp
