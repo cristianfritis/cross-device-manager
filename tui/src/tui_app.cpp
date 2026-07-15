@@ -21,14 +21,18 @@
 #include "devmgr/app/hotplug_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
+#include "devmgr/app/updates_vm.hpp"
 #include "devmgr/core/events.hpp"
+#include "devmgr/pal/interfaces.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
 #include "devmgr/platform/linux/linux_criticality_prober.hpp"
 #include "devmgr/platform/linux/kmod_driver_manager.hpp"
 #include "devmgr/platform/linux/linux_system_info.hpp"
+#include "devmgr/platform/linux/dkms_status_provider.hpp"
 #ifdef DEVMGR_HAS_SDBUS
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
+#include "devmgr/platform/linux/fwupd_update_provider.hpp"
 #endif
 #include "devmgr/runtime/delayed_scheduler.hpp"
 #include "devmgr/runtime/event_bus.hpp"
@@ -62,11 +66,22 @@ int runTuiApp() {
     platform_linux::LinuxSystemInfo sysinfo;
 #ifdef DEVMGR_HAS_SDBUS
     platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
+    platform_linux::FwupdUpdateProvider fwupdProvider(bus);
+#endif
+    platform_linux::DkmsStatusProvider dkmsProvider;
+    // Declaration order = teardown contract: providers outlive the facade (T9
+    // param), which outlives the VMs below.
+    std::vector<pal::IUpdateProvider*> updateProviders;
+#ifdef DEVMGR_HAS_SDBUS
+    updateProviders.push_back(&fwupdProvider);
+#endif
+    updateProviders.push_back(&dkmsProvider);
+#ifdef DEVMGR_HAS_SDBUS
     app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober, &kmod,
-                                  &sysinfo);
+                                  &sysinfo, updateProviders);
 #else
     app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober, &kmod,
-                                  &sysinfo);
+                                  &sysinfo, updateProviders);
 #endif
     app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
 
@@ -76,6 +91,7 @@ int runTuiApp() {
     app::DeviceDetailVM detailVm(facade);
     app::StatusLineVM statusVm(bus, delayed, dispatcher);
     app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);
+    app::UpdatesVM updatesVm(facade, bus, dispatcher);
 
     // Keep every refresh future alive so we can wait on them before teardown
     // (see the note after screen.Loop()).
@@ -185,12 +201,65 @@ int runTuiApp() {
     auto modulesPane = Container::Vertical({moduleFilterInput, modulesMenu});
     auto modulesLayout = Container::Horizontal({modulesPane, moduleDetail});
 
-    int activeTab = 0;  // 0 = devices, 1 = modules
-    auto tabs = Container::Tab({layout, modulesLayout}, &activeTab);
+    // No filter on the updates list (UpdatesVM exposes none) — mirrors modules
+    // shape minus the filter input.
+    auto updatesMenu = Menu(&updatesVm.rowsRef(), &updatesVm.selectedRef(), MenuOption::Vertical());
+
+    // detailLines() is cheap (no disk/D-Bus I/O — it reads the last snapshot_,
+    // T10), but still cache like the devices/modules panes above: cheap or
+    // not, no work belongs in Render() that a stale cache could avoid, and it
+    // keeps this pane consistent with the other two. Identity is the row
+    // index (UpdatesVM exposes no stable selected-candidate accessor); a
+    // rebuild that moves the same candidate to a new index just recomputes
+    // once, which is harmless.
+    int updDetailForIndex = -1;
+    std::vector<std::string> updDetailLines;
+    bool updDetailDirty = true;
+
+    auto updatesDetail = Renderer([&] {
+        const int idx = updatesVm.selectedRef();
+        if (updDetailDirty || idx != updDetailForIndex) {
+            updDetailLines = updatesVm.detailLines();
+            updDetailForIndex = idx;
+            updDetailDirty = false;
+        }
+        Elements els;
+        els.reserve(updDetailLines.size());
+        for (const auto& line : updDetailLines) els.push_back(text(line));
+        return vbox(std::move(els)) | flex;
+    });
+    auto updatesLayout = Container::Horizontal({updatesMenu, updatesDetail});
+
+    // Status/prompt line for the updates tab (DESIGN.md §3.2: one row, stable
+    // edge): modal text wins, then the durable install-progress text (spec
+    // §5.5), else the shared transient status line.
+    auto updatesStatusLine = [&]() -> std::string {
+        if (textPrompt) return textPrompt->prompt + textPrompt->buffer + "_";
+        if (confirm) return confirm->prompt;
+        const auto progress = updatesVm.installProgressText();
+        return progress.empty() ? statusVm.text() : progress;
+    };
+
+    int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates
+    auto tabs = Container::Tab({layout, modulesLayout, updatesLayout}, &activeTab);
+
+    // Tab titles line: names all three m-cycle views (parity with the GUI's
+    // persistent tab bar, DESIGN.md §9 Primary navigation); only the active
+    // one is bold — the rest of each header keeps the existing per-tab
+    // bold-legend convention below it.
+    auto tabTitles = [&] {
+        auto name = [&](const char* label, int tab) {
+            Element e = text(label);
+            return activeTab == tab ? e | bold : e;
+        };
+        return hbox({text(" "), name("Devices", 0), text(" | "), name("Modules", 1), text(" | "),
+                     name("Updates", 2), text(" ")});
+    };
 
     auto ui = Renderer(tabs, [&] {
         if (activeTab == 1) {
             return vbox({
+                       tabTitles(),
                        text(" Modules (m=devices  l=load  u=unload  q=quit) ") | bold,
                        text(" " + bannerText + " "),
                        separator(),
@@ -207,7 +276,28 @@ int runTuiApp() {
                    }) |
                    flex;
         }
+        if (activeTab == 2) {
+            Elements top = {
+                tabTitles(),
+                text(" Updates (u=install  r=refresh  d=dismiss  m=devices  q=quit) ") | bold,
+                text(" " + bannerText + " "),
+            };
+            const auto reqBanner = updatesVm.requestBanner();
+            if (!reqBanner.empty()) top.push_back(text(" " + reqBanner + " ") | bold);
+            top.push_back(separator());
+            top.push_back(hbox({
+                              vbox({
+                                  updatesMenu->Render() | vscroll_indicator | yframe | flex,
+                              }) | size(WIDTH, EQUAL, 72) |
+                                  border,
+                              updatesDetail->Render() | border | flex,
+                          }) |
+                          flex);
+            top.push_back(text(" " + updatesStatusLine() + " ") | inverted);
+            return vbox(std::move(top)) | flex;
+        }
         return vbox({
+                   tabTitles(),
                    hbox({
                        vbox({
                            text(" Devices (r=refresh  e=enable/disable  U=unbind  B=bind  "
@@ -230,7 +320,15 @@ int runTuiApp() {
         if (event == Event::Custom) {
             detailDirty = true;
             modDetailDirty = true;  // A-1: drained posts may rebuild the modules model
+            updDetailDirty = true;  // A-1 idiom: drained posts may rebuild the updates model
             dispatcher.drain();
+            // Review finding I-1: banner() queries the PAL (systemInfo()) and must
+            // never run in Render() (DESIGN.md §8) — recompute it here, the same
+            // drain point that just applied a queued rebuild()/refresh completion,
+            // so availability/version/"reboot required" don't go stale between tab
+            // entries. Gated to the active tab only — same reasoning as the other
+            // two A-1 dirty flags above.
+            if (activeTab == 2) bannerText = updatesVm.banner();
             return true;
         }
         if (textPrompt) {  // modal typed input
@@ -261,16 +359,30 @@ int runTuiApp() {
             return true;
         }
         if (event == Event::Character('m')) {
-            activeTab = activeTab == 0 ? 1 : 0;
+            activeTab = (activeTab + 1) % 3;  // Devices → Modules → Updates → …
             if (activeTab == 1) {
                 bannerText = modulesVm.banner();
                 modulesVm.rebuild();
                 modDetailDirty = true;       // A-1: fresh snapshot under the cache
                 modulesVm.fillSignatures();  // cached names are skipped
+            } else if (activeTab == 2) {
+                bannerText = updatesVm.banner();
+                updatesVm.rebuild();
+                updDetailDirty = true;  // A-1 idiom: fresh snapshot under the cache
+                prunePending();
+                pending.push_back(facade.refreshUpdates());  // fresh data on entry
             }
             return true;
         }
         if (event == Event::Character('q') || event == Event::Escape) {
+            if (facade.installActive()) {
+                confirm =
+                    PendingConfirm{.onYes = [&] { screen.Exit(); },
+                                   .prompt =
+                                       "firmware flash continues in the fwupd daemon; closing does "
+                                       "NOT cancel it. quit? (y/n)"};
+                return true;
+            }
             screen.Exit();
             return true;
         }
@@ -302,6 +414,37 @@ int runTuiApp() {
                                                  pending.push_back(facade.unloadModule(name));
                                              },
                                          .prompt = "unload module " + *name + "? (y/n)"};
+                return true;
+            }
+            return false;  // filter input / menu / mouse
+        }
+        if (activeTab == 2) {  // ----- updates keys -----
+            if (event == Event::Character('u')) {
+                const auto args = updatesVm.selectedInstall();
+                if (!args) {
+                    bus.publish(core::TaskCompletedEvent{
+                        .taskId = "guard",
+                        .ok = false,
+                        .message = "not installable from here (status-only or external "
+                                   "download — run `fwupdmgr update`)"});
+                    return true;
+                }
+                confirm = PendingConfirm{.onYes =
+                                             [&, a = *args] {
+                                                 prunePending();
+                                                 pending.push_back(facade.installUpdate(
+                                                     a.providerId, a.candidateId, a.release));
+                                             },
+                                         .prompt = args->confirmText + " (y/n)"};
+                return true;
+            }
+            if (event == Event::Character('r')) {
+                prunePending();
+                pending.push_back(facade.refreshUpdates());
+                return true;
+            }
+            if (event == Event::Character('d')) {
+                updatesVm.dismissRequest();
                 return true;
             }
             return false;  // filter input / menu / mouse
