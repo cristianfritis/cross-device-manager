@@ -152,7 +152,8 @@ app-local progress ∈ facade lifecycle state.
 ### 4.2 `pal/interfaces.hpp`
 
 ```cpp
-using UpdateProgressFn = std::function<void(int percent /*-1=indeterminate*/, std::string_view stage)>;
+// progress type = runtime::ProgressReporter = std::function<void(const ProgressUpdate&)>,
+// passed BY VALUE (locked T2 decision; reconciled rev 2.1); ProgressUpdate.percent -1 = indeterminate.
 class IUpdateProvider {
   virtual std::string providerId() const = 0;
   virtual UpdateProviderCaps capabilities() const = 0;   // Query | Install
@@ -161,7 +162,7 @@ class IUpdateProvider {
   virtual core::Result<std::vector<core::PendingAction>> pendingActions() = 0;  // fwupd: GetHistory/GetResults; dkms: empty
   virtual core::Result<core::InstallOutcome> install(
       const std::string& candidateId, const core::ReleaseRef& release,  // ReleaseRef = {remoteId, checksum}
-      const UpdateProgressFn& progress) = 0;
+      runtime::ProgressReporter progress) = 0;
 };
 ```
 
@@ -202,7 +203,8 @@ NOT used: UpdateMetadata, Verify/Activate/Unlock, BIOS/security methods.
 - `GetUpgrades` error `NothingToDo` → empty list ≠ failure; per-device
   `GetUpgrades` failure → device row kept, upgrade list empty + notice
   (⊥ whole-enumerate fail).
-- Skew: host 2.0.20, VM ~1.7.x; `DaemonVersion` display-only; no version floor.
+- Skew: host 2.0.20, VM 2.0.20 (Ubuntu 22.04 apt resolves 2.0.x, ⊥ the ~1.7 assumed
+  at planning); `DaemonVersion` display-only; no version floor.
 
 ### 5.2 Connection & threading
 
@@ -252,7 +254,7 @@ manual checklist).
 
 ### 5.4 Progress attribution (M3 part)
 
-- V5: `Status`/`Percentage` PropertiesChanged forwarded to `UpdateProgressFn`
+- V5: `Status`/`Percentage` PropertiesChanged forwarded to `ProgressReporter`
   ⇔ facade lifecycle == Installing (own request active). Else ignored (external
   fwupdmgr / other client ops ⊥ contaminate our UI).
 - Installs serialized in-process (one at a time; queue ⊥ — second request while
@@ -325,7 +327,8 @@ D-Bus error **name + message kept separately** in mapping input (⊥ flattened e
 `core::Error` message = `"<name>: <message>"` (name preserved for tests/diagnosis):
 
 ```
-org.freedesktop.fwupd.NothingToDo    → enumerate: empty list; install: Conflict + msg
+org.freedesktop.fwupd.NothingToDo    → enumerate: empty list; pendingActions (GetHistory
+                                       on empty history db): empty list; install: Conflict + msg
 org.freedesktop.fwupd.AuthFailed     → Permission (auth-cancel vs deny: fwupd
                                        reports both as AuthFailed; msg text passed through)
 org.freedesktop.fwupd.NeedsUserAction → Busy + msg (+ durable request banner §9)

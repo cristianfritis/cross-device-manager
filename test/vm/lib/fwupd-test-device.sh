@@ -64,6 +64,23 @@ fwupd_test_device_ensure_enabled() {
         sudo sed -i 's/^Enabled=false/Enabled=true/' /etc/fwupd/remotes.d/fwupd-tests.conf
     fi
 
+    # Directory-kind remote over the fake-device cab fixtures. The stock
+    # fwupd-tests remote is LOCAL-kind: its prebuilt metadata lists
+    # https://fwupd.org/... release locations, which our local-cab-only
+    # resolver (correctly) refuses — localcab stays 0 and the install-side
+    # smoke can never run. A directory remote makes fwupd generate metadata
+    # from the cabs on disk, so release locations resolve locally.
+    local cabpath cabdir=""
+    cabpath="$(dpkg -L fwupd-tests 2>/dev/null | grep -m1 '/fakedevice124\.cab$')" || true
+    [ -n "$cabpath" ] && cabdir="$(dirname "$cabpath")"
+    if [ -n "$cabdir" ] && [ -d "$cabdir" ]; then
+        printf '[fwupd Remote]\nEnabled=true\nTitle=devmgr test cab directory\nMetadataURI=file://%s\n' \
+            "$cabdir" | sudo tee /etc/fwupd/remotes.d/devmgr-cabdir.conf >/dev/null
+        echo "-- directory-kind remote devmgr-cabdir -> $cabdir" >&2
+    else
+        echo "-- WARNING: fakedevice cab dir not found (dpkg -L fwupd-tests); install-side smoke will lack a local cab" >&2
+    fi
+
     sudo systemctl restart fwupd
     local i
     for i in $(seq 1 50); do
@@ -92,12 +109,14 @@ fwupd_test_device_discover() {
     fi
 
     if command -v jq >/dev/null 2>&1; then
+        # `|| true`: keep the graceful return-1 path below even when the
+        # caller runs under `set -e -o pipefail` and jq chokes on the input.
         FWUPD_TEST_DEVICE_ID="$(echo "$json" | jq -r \
-            '.Devices[] | select(.Plugin=="test") | .DeviceId' 2>/dev/null | head -1)"
+            '.Devices[] | select(.Plugin=="test") | .DeviceId' 2>/dev/null | head -1)" || true
         FWUPD_TEST_DEVICE_GUID="$(echo "$json" | jq -r \
-            '.Devices[] | select(.Plugin=="test") | .Guid[0]' 2>/dev/null | head -1)"
+            '.Devices[] | select(.Plugin=="test") | .Guid[0]' 2>/dev/null | head -1)" || true
         FWUPD_TEST_DEVICE_NAME="$(echo "$json" | jq -r \
-            '.Devices[] | select(.Plugin=="test") | .Name' 2>/dev/null | head -1)"
+            '.Devices[] | select(.Plugin=="test") | .Name' 2>/dev/null | head -1)" || true
     else
         echo "-- jq not found; falling back to crude text parsing (install jq for reliability)" >&2
         local text

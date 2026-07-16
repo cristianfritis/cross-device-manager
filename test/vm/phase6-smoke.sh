@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Phase 6 VM smoke: fwupd fakedevice update + dkms status through OUR stack.
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 # shellcheck source=test/vm/lib/fwupd-test-device.sh
@@ -26,9 +26,8 @@ if [ ! -x "$SMOKE" ]; then
     exit 1
 fi
 
-# We don't yet know which selector format devmgr_fwupd_smoke's --device
-# matcher actually expects (its own source hasn't been reviewed for this
-# fix — see note below). Try the discovered identifiers in order of
+# The smoke tool's --device matcher accepts a substring of either the fwupd
+# Device ID or the display name. Try the discovered identifiers in order of
 # specificity, falling back to the historical literal "fakedevice".
 DEVICE_SELECTOR=""
 for candidate in "$FWUPD_TEST_DEVICE_ID" "$FWUPD_TEST_DEVICE_NAME" "fakedevice"; do
@@ -38,10 +37,12 @@ for candidate in "$FWUPD_TEST_DEVICE_ID" "$FWUPD_TEST_DEVICE_NAME" "fakedevice";
         break
     fi
     if ! grep -qi "no matching device" /tmp/p6-read.log /tmp/p6-read.err 2>/dev/null; then
-        # Failed for a reason OTHER than selector mismatch — stop retrying,
-        # this is a real failure, not a naming issue.
-        DEVICE_SELECTOR="$candidate"
-        break
+        # Failed for a reason OTHER than selector mismatch — fail fast, this
+        # is a real failure, not a naming issue.
+        cat /tmp/p6-read.log
+        cat /tmp/p6-read.err >&2
+        echo "PHASE6 VM SMOKE FAILED: smoke tool failed for a reason other than device selection" >&2
+        exit 1
     fi
     echo "-- selector '$candidate' not accepted by smoke tool, trying next" >&2
 done
@@ -49,13 +50,18 @@ done
 cat /tmp/p6-read.log
 [ -s /tmp/p6-read.err ] && cat /tmp/p6-read.err >&2
 
-if [ -z "$DEVICE_SELECTOR" ] || grep -qi "no matching device" /tmp/p6-read.log /tmp/p6-read.err 2>/dev/null; then
+if [ -z "$DEVICE_SELECTOR" ]; then
     echo "PHASE6 VM SMOKE FAILED: smoke tool could not match discovered device" >&2
     echo "-- discovered: id=$FWUPD_TEST_DEVICE_ID guid=$FWUPD_TEST_DEVICE_GUID name=$FWUPD_TEST_DEVICE_NAME" >&2
     exit 1
 fi
 
-grep -q "localcab=1" /tmp/p6-read.log
+if ! grep -q "localcab=1" /tmp/p6-read.log; then
+    echo "PHASE6 VM SMOKE FAILED: fakedevice release not locally resolvable (localcab=0)" >&2
+    echo "-- expected the devmgr-cabdir directory-kind remote to supply a local cab;" >&2
+    echo "-- check /etc/fwupd/remotes.d/devmgr-cabdir.conf and 'fwupdmgr get-remotes'" >&2
+    exit 1
+fi
 
 echo "== install side: 1.2.2 -> 1.2.4 through our stack =="
 "$SMOKE" --device "$DEVICE_SELECTOR" --install --expect-version 1.2.4
