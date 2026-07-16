@@ -17,14 +17,18 @@
 #include "devmgr/app/hotplug_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
+#include "devmgr/app/updates_vm.hpp"
 #include "devmgr/core/events.hpp"
+#include "devmgr/pal/interfaces.hpp"
 #include "devmgr/platform/linux/udev_device_enumerator.hpp"
 #include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
 #include "devmgr/platform/linux/linux_criticality_prober.hpp"
 #include "devmgr/platform/linux/kmod_driver_manager.hpp"
 #include "devmgr/platform/linux/linux_system_info.hpp"
+#include "devmgr/platform/linux/dkms_status_provider.hpp"
 #ifdef DEVMGR_HAS_SDBUS
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
+#include "devmgr/platform/linux/fwupd_update_provider.hpp"
 #endif
 #include "devmgr/runtime/delayed_scheduler.hpp"
 #include "devmgr/runtime/event_bus.hpp"
@@ -64,11 +68,22 @@ int runGuiApp(int argc, char** argv) {
     platform_linux::LinuxSystemInfo sysinfo;
 #ifdef DEVMGR_HAS_SDBUS
     platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
+    platform_linux::FwupdUpdateProvider fwupdProvider(bus);
+#endif
+    platform_linux::DkmsStatusProvider dkmsProvider;
+    // Declaration order = teardown contract: providers outlive the facade (T9
+    // param), which outlives the VMs below — identical to runTuiApp().
+    std::vector<pal::IUpdateProvider*> updateProviders;
+#ifdef DEVMGR_HAS_SDBUS
+    updateProviders.push_back(&fwupdProvider);
+#endif
+    updateProviders.push_back(&dkmsProvider);
+#ifdef DEVMGR_HAS_SDBUS
     app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober, &kmod,
-                                  &sysinfo);
+                                  &sysinfo, updateProviders);
 #else
     app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober, &kmod,
-                                  &sysinfo);
+                                  &sysinfo, updateProviders);
 #endif
     app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
 
@@ -77,6 +92,7 @@ int runGuiApp(int argc, char** argv) {
     app::DeviceDetailVM detailVm(facade);
     app::StatusLineVM statusVm(bus, delayed, dispatcher);
     app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);
+    app::UpdatesVM updatesVm(facade, bus, dispatcher);
 
     // Keep every refresh future alive so we can wait on them before teardown —
     // ApplicationFacade::refresh()'s documented lifetime contract.
@@ -120,7 +136,7 @@ int runGuiApp(int argc, char** argv) {
     actions.onUnbindDriver = [&](const core::DeviceId& id) {
         pruneAndPush(facade.unbindDriver(id));
     };
-    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, dispatcher, bus,
+    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, updatesVm, dispatcher, bus,
                       std::move(actions));
 
     int rc = 0;

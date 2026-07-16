@@ -1,3 +1,6 @@
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +23,9 @@
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
+#include "devmgr/app/updates_vm.hpp"
+#include "devmgr/core/events.hpp"
+#include "devmgr/core/update_models.hpp"
 #include "devmgr/pal/criticality.hpp"
 #include "devmgr/pal/hotplug_event.hpp"
 #include "devmgr/runtime/delayed_scheduler.hpp"
@@ -27,6 +33,7 @@
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "fakes/fake_criticality_prober.hpp"
 #include "fakes/fake_pal.hpp"
+#include "fakes/fake_update_provider.hpp"
 #include "gui/src/main_window.hpp"
 #include "gui/src/qt_ui_dispatcher.hpp"
 
@@ -42,6 +49,27 @@ core::Device dev(std::string id, core::BusType bus, std::string name) {
     return d;
 }
 
+// One updatable candidate; `localCab` selects the review-test-4 branch: a
+// remote-only release is never installable (V1), a local one always is.
+core::UpdateCandidate updateCandidate(std::string name, std::string current, std::string next,
+                                      bool localCab) {
+    core::UpdateCandidate c;
+    c.providerId = "fake";
+    c.id = "a1";
+    c.displayName = std::move(name);
+    c.currentVersion = std::move(current);
+    c.candidateVersion = next;
+    c.facts = {.updatable = true, .supported = true, .needsRebootAfterUpdate = false};
+    core::ReleaseInfo r;
+    r.version = std::move(next);
+    r.remoteId = "vendor";
+    r.checksum = "abc123";
+    r.localCab = localCab;
+    if (!localCab) r.locations = {"https://example.org/fw.cab"};
+    c.releases.push_back(r);
+    return c;
+}
+
 struct Fixture {
     runtime::EventBus bus;
     runtime::TaskScheduler scheduler{2};
@@ -49,24 +77,29 @@ struct Fixture {
     test::FakePal pal;
     test::FakeCriticalityProber prober;
     app::DeviceService svc{bus};
+    tests::FakeUpdateProvider provider;
     gui::QtUiDispatcher dispatcher;
-    app::ApplicationFacade facade{pal, scheduler, bus, svc, nullptr, &prober, &pal, &pal};
+    app::ApplicationFacade facade{pal,     scheduler, bus,  svc,        nullptr,
+                                  &prober, &pal,      &pal, {&provider}};
     app::DeviceListVM listVm{facade, bus, dispatcher};
     app::DeviceDetailVM detailVm{facade};
     app::StatusLineVM statusVm{bus, delayed, dispatcher};
-    // Declared after the dispatcher so it is destroyed first: the ModulesVM
-    // dtor's alive_-token store and sigFill_ wait must run while dispatcher
-    // and scheduler are still alive — the composition root's declaration-
-    // order contract, reproduced at fixture scope.
+    // Declared after the dispatcher so it is destroyed first: the ModulesVM/
+    // UpdatesVM dtors' alive_-token store and future waits must run while
+    // dispatcher and scheduler are still alive — the composition root's
+    // declaration-order contract, reproduced at fixture scope.
     app::ModulesVM modulesVm{facade, bus, scheduler, dispatcher};
+    app::UpdatesVM updatesVm{facade, bus, dispatcher};
     int refreshCalls = 0;
     int confirmCalls = 0;
+    int confirmQuitCalls = 0;
     std::vector<std::pair<std::string, bool>> setEnabledCalls;
     std::vector<std::string> loadModuleCalls;
     std::vector<std::string> unloadModuleCalls;
     std::vector<std::pair<std::string, std::string>> bindDriverCalls;
     std::vector<std::string> unbindDriverCalls;
     bool confirmAnswer = true;
+    bool confirmQuitAnswer = true;
     QString textAnswer;       // returned by the injected textInput seam
     QString lastTextPrefill;  // captured prefill the dialog would have shown
 
@@ -94,8 +127,12 @@ struct Fixture {
             lastTextPrefill = prefill;
             return textAnswer;
         };
-        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, dispatcher, bus,
-                               std::move(actions));
+        actions.confirmQuit = [this](const QString&) {
+            ++confirmQuitCalls;
+            return confirmQuitAnswer;
+        };
+        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, updatesVm, dispatcher,
+                               bus, std::move(actions));
     }
     void refreshAndPump() {
         facade.refresh().wait();
@@ -117,6 +154,13 @@ struct Fixture {
         m.refCount = refs;
         m.holders = std::move(holders);
         pal.seedLoadedModule(m);
+    }
+    // Seeds one update candidate and runs refreshUpdates() to completion so
+    // the facade's snapshot reflects it before a window is built/tab-entered.
+    void seedUpdateAndRefresh(bool localCab) {
+        provider.enumerateResult_ = std::vector<core::UpdateCandidate>{
+            updateCandidate("Webcam", "1.2.2", "1.2.4", localCab)};
+        facade.refreshUpdates().wait();
     }
 };
 }  // namespace
@@ -259,7 +303,7 @@ TEST(MainWindowTest, ModulesTabGatesActionEnablement) {
     auto window = f.makeWindow();
     f.refreshAndPump();
 
-    ASSERT_EQ(window.tabs()->count(), 2);
+    ASSERT_EQ(window.tabs()->count(), 3);  // Devices | Modules | Updates
     // Devices tab: module actions off; device actions follow the selection.
     EXPECT_FALSE(window.loadModuleAction()->isEnabled());
     EXPECT_FALSE(window.unloadModuleAction()->isEnabled());
@@ -479,6 +523,169 @@ TEST(MainWindowTest, BindPrefillFallsBackToDriverCandidates) {
     window.bindAction()->trigger();
     EXPECT_EQ(f.lastTextPrefill, QStringLiteral("cdc_acm"));
     EXPECT_TRUE(f.bindDriverCalls.empty());
+}
+
+// ----- T12: Updates tab -----
+
+TEST(MainWindowTest, InstallActionDisabledForRemoteOnlyRelease) {  // review test 4, GUI half
+    Fixture f;
+    f.seedUpdateAndRefresh(/*localCab=*/false);
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(2);  // rebuild + refresh on entry
+    ASSERT_EQ(window.updatesView()->model()->rowCount(), 1);
+    EXPECT_FALSE(window.installUpdateAction()->isEnabled());
+}
+
+TEST(MainWindowTest, InstallActionEnabledOnUpdatesTabWithLocalCab) {
+    Fixture f;
+    f.seedUpdateAndRefresh(/*localCab=*/true);
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(2);
+    ASSERT_EQ(window.updatesView()->model()->rowCount(), 1);
+    EXPECT_TRUE(window.installUpdateAction()->isEnabled());
+}
+
+TEST(MainWindowTest, QuitGuardBlocksCloseDuringInstall) {
+    Fixture f;
+    f.seedUpdateAndRefresh(/*localCab=*/true);
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    // Latch-blocked install (fake install() body blocks until released) — the
+    // way to drive facade_.installActive() true for the duration of the test,
+    // per the FakeUpdateProvider reuse note.
+    std::mutex m;
+    std::condition_variable cv;
+    bool release = false;
+    f.provider.onInstall_ = [&](auto&) {
+        std::unique_lock<std::mutex> lock(m);
+        cv.wait(lock, [&] { return release; });
+    };
+
+    window.installUpdateAction()->trigger();  // confirm=true by default
+    ASSERT_TRUE(f.facade.installActive());
+
+    f.confirmQuitAnswer = false;
+    window.close();
+    EXPECT_TRUE(window.isVisible());
+    EXPECT_EQ(f.confirmQuitCalls, 1);
+
+    f.confirmQuitAnswer = true;
+    window.close();
+    EXPECT_FALSE(window.isVisible());
+    EXPECT_EQ(f.confirmQuitCalls, 2);
+
+    {
+        std::lock_guard<std::mutex> lock(m);
+        release = true;
+    }
+    cv.notify_all();
+    QCoreApplication::processEvents();  // deliver the install's completion posts
+}
+
+// Review finding I-1 (parity gap, DESIGN.md §9 Task feedback row): the GUI
+// status bar must fold in UpdatesVM::installProgressText() while the Updates
+// tab is current, exactly like tui_app.cpp's updatesStatusLine() folds it
+// into the FTXUI bottom status line — otherwise a multi-minute firmware flash
+// shows nothing until it completes.
+TEST(MainWindowTest, StatusBarShowsInstallProgressThenRevertsOnCompletion) {
+    Fixture f;
+    f.seedUpdateAndRefresh(/*localCab=*/true);
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(2);
+
+    // Latch-blocked install (the FakeUpdateProvider reuse note pinned by
+    // QuitGuardBlocksCloseDuringInstall above), extended to emit one progress
+    // update before blocking so the durable text is observably non-empty for
+    // the whole (real, cross-thread) install duration.
+    std::mutex m;
+    std::condition_variable cv;
+    std::atomic<bool> progressed{false};
+    bool release = false;
+    f.provider.onInstall_ = [&](runtime::ProgressReporter& progress) {
+        progress(runtime::ProgressUpdate{.percent = 10, .stage = "device-write"});
+        progressed.store(true);
+        std::unique_lock<std::mutex> lock(m);
+        cv.wait(lock, [&] { return release; });
+    };
+
+    window.installUpdateAction()->trigger();  // confirm=true by default
+    ASSERT_TRUE(f.facade.installActive());
+
+    // The progress post crosses threads (application_facade.cpp publishes on
+    // the scheduler worker) — spin until it lands, then drain the dispatcher
+    // (QtUiDispatcher queues cross-thread posts; same-thread posts run
+    // directly, as the comment on StatusBarShowsTransientHotplugMessage notes).
+    while (!progressed.load()) QCoreApplication::processEvents();
+    QCoreApplication::processEvents();
+
+    const std::string progressText = f.updatesVm.installProgressText();
+    ASSERT_FALSE(progressText.empty());
+    EXPECT_EQ(window.statusBar()->currentMessage().toStdString(), progressText);
+
+    {
+        std::lock_guard<std::mutex> lock(m);
+        release = true;
+    }
+    cv.notify_all();
+    // installActive() flips false only after the worker's TaskCompletedEvent
+    // (and UpdatesVM's progressText_.clear()) have already run (InstallActiveGuard
+    // releases the slot last) — so this spin is a safe completion barrier.
+    while (f.facade.installActive()) QCoreApplication::processEvents();
+    QCoreApplication::processEvents();  // drain the completion post → taskExecuted
+
+    EXPECT_TRUE(f.updatesVm.installProgressText().empty());
+    EXPECT_EQ(window.statusBar()->currentMessage().toStdString(), f.statusVm.text());
+}
+
+TEST(MainWindowTest, RequestBannerVisibleUntilDismissed) {
+    Fixture f;
+    auto window = f.makeWindow();
+    window.show();  // isVisible() reflects the whole ancestor chain — needed below
+    window.tabs()->setCurrentIndex(2);
+    EXPECT_FALSE(window.requestBannerLabel()->isVisible());
+
+    // Same-thread publish → UpdatesVM::onRequest → postWake() runs directly
+    // (dispatcher is on this thread) → taskExecuted → the window's Updates-tab
+    // wake handler refreshes the request banner (T11 lesson: not tab-entry-only).
+    f.bus.publish(core::UpdateRequestEvent{.providerId = "fake",
+                                           .deviceId = "a1",
+                                           .kind = "post",
+                                           .message = "unplug and replug the device"});
+    EXPECT_TRUE(window.requestBannerLabel()->isVisible());
+    EXPECT_TRUE(window.requestBannerLabel()->text().contains(QStringLiteral("unplug and replug")));
+
+    // Progress events must not hide it — durable until dismiss (spec §9).
+    f.bus.publish(core::TaskProgressEvent{
+        .taskId = "install-update:a1", .percent = 10, .stage = "device-write"});
+    EXPECT_TRUE(window.requestBannerLabel()->isVisible());
+
+    window.dismissRequestAction()->trigger();
+    EXPECT_FALSE(window.requestBannerLabel()->isVisible());
+}
+
+TEST(MainWindowTest, GuardRefusalGoesThroughStatusLineVM) {  // pins T1 F-1 for Updates
+    Fixture f;
+    f.seedUpdateAndRefresh(/*localCab=*/false);  // remote-only → selectedInstall() == nullopt
+    auto window = f.makeWindow();
+    f.statusVm.arm();
+    window.tabs()->setCurrentIndex(2);
+
+    // QAction::trigger() no-ops while disabled, and updateActionEnablement()
+    // already disables this action for the identical reason (selectedInstall()
+    // == nullopt). Force it enabled to reach the handler's own re-check: the
+    // guard-refusal branch is defense in depth, not merely a restatement of
+    // the enablement condition, and must publish through the bus either way.
+    window.installUpdateAction()->setEnabled(true);
+    window.installUpdateAction()->trigger();
+    EXPECT_TRUE(window.statusBar()->currentMessage().contains(QStringLiteral("not installable")));
+
+    // An unrelated wake must not wipe the refusal — StatusLineVM owns the
+    // status line (TTL + no wipe-by-wake), the same contract already pinned
+    // for the module/unbind guard refusals above.
+    f.dispatcher.post([] {});
+    EXPECT_TRUE(window.statusBar()->currentMessage().contains(QStringLiteral("not installable")));
 }
 
 // ----- T12: destruction-order / teardown stress -----
