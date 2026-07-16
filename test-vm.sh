@@ -21,3 +21,6 @@ echo "==> Running Phase 4 Smoke Test..."
 
 echo "==> Running Phase 5 Smoke Test..."
 (cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase5-smoke.sh /sys/bus/usb/devices/3-1')
+
+echo "==> Running Phase 6 Smoke Test..."
+(cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase6-smoke.sh')

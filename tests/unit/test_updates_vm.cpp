@@ -183,6 +183,21 @@ TEST_F(UpdatesVmTest, BannerShowsAvailabilityRebootAndSecureBoot) {
     EXPECT_NE(b.find("Secure Boot"), std::string::npos);
 }
 
+TEST_F(UpdatesVmTest, BannerIncludesAvailabilityNotices) {  // spec §8.3
+    fwupd_.availability_ = {.available = true,
+                            .version = "2.0.20",
+                            .error = {},
+                            .notices = {"lvfs metadata 42 days old", "1 failed update in history"}};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    const auto b = vm.banner();
+    const auto p1 = b.find("lvfs metadata 42 days old");
+    const auto p2 = b.find("1 failed update in history");
+    EXPECT_NE(p1, std::string::npos);
+    EXPECT_NE(p2, std::string::npos);
+    EXPECT_LT(p1, p2);  // notices preserve provider order within the segment
+}
+
 TEST_F(UpdatesVmTest, RefreshedEventCoalescesToOneRebuild) {  // ModulesVM discipline
     refresh();
     QueuingUiDispatcher queuing;

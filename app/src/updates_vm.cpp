@@ -245,6 +245,11 @@ std::string UpdatesVM::banner() const {
     for (const auto& s : facade_.updatesSnapshot()) {
         if (!b.empty()) b += " | ";
         b += s.providerId + " " + availabilityCell(s);
+        // Per-provider notices (spec §8.3, e.g. stale-metadata / failed-history
+        // hints) apply whether the provider is available or not — appended
+        // unconditionally, in provider order, using secureBootLine's mid-cell
+        // separator style.
+        for (const auto& notice : s.availability.notices) b += " · " + notice;
     }
     if (facade_.rebootPendingEffective()) {
         if (!b.empty()) b += " | ";

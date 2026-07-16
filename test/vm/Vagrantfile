@@ -29,7 +29,24 @@ Vagrant.configure("2") do |config|
     apt-get update
     apt-get install -y build-essential cmake ninja-build pkg-config \
       libudev-dev libkmod-dev git curl zip unzip tar \
-      libsystemd-dev libdbus-1-dev libpolkit-gobject-1-dev
+      libsystemd-dev libdbus-1-dev libpolkit-gobject-1-dev \
+      fwupd fwupd-tests jq dkms "linux-headers-$(uname -r)"
+
+    # fwupd.service is D-Bus-activated (no [Install] section) — start only.
+    # Test-device enablement (TestDevices=true) lives entirely in phase6-smoke.sh.
+    systemctl start fwupd || true
+    FWUPD_UP=0
+    for i in $(seq 1 50); do
+      if busctl status org.freedesktop.fwupd >/dev/null 2>&1; then
+        FWUPD_UP=1
+        break
+      fi
+      sleep 0.2
+    done
+    if [ "$FWUPD_UP" -ne 1 ]; then
+      echo "WARNING: fwupd did not answer on D-Bus after provisioning; phase6-smoke.sh will retry/diagnose" >&2
+    fi
+    fwupdmgr --version || true
 
     # Build and install sdbus-c++ v2 from source
     if [ ! -d /usr/local/include/sdbus-c++ ]; then

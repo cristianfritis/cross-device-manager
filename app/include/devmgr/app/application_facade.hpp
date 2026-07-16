@@ -25,7 +25,7 @@ namespace devmgr::app {
 // on the TaskScheduler so the UI thread never blocks on I/O.
 class ApplicationFacade {
    public:
-    // channel/prober/drivers/systemInfo are optional (null in sdbus-less or
+    // channel/prober/drivers/systemInfo are optional (null in D-Bus-free or
     // kmod-less builds): without a channel setDeviceEnabled reports
     // Unsupported; without a prober canDisable/canUnloadModule are
     // advisory-unavailable and answer "allowed" (devmgrd remains

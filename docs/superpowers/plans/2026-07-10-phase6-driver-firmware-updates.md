@@ -67,7 +67,7 @@ Dependency order: T1 independent; T2 → {T3..T10}; T3+T4 → T6; T6 → T7 → 
 
 **Interfaces:** no new public API. Produces: hardened StateStore semantics later tasks rely on (unchanged signatures).
 
-- [ ] **Step 1: state_store fixes (T4 m-2/m-4/m-5) — write failing tests first**
+- [x] **Step 1: state_store fixes (T4 m-2/m-4/m-5) — write failing tests first**
 
 Append to `tests/unit/test_state_store.cpp` (mirror existing fixture style in that file):
 
@@ -94,12 +94,12 @@ TEST_F(StateStoreTest, SecondCorruptionDoesNotOverwriteFirstEvidence) {
 
 If the fixture lacks `writeStateFile`/`countFilesMatching`, add them (write to `dir()/state.json`; count directory entries whose filename starts with the prefix). Note: two same-second corruptions need distinct names — implementation appends a counter (see Step 3).
 
-- [ ] **Step 2: run new tests, verify both FAIL** (`.bad` name collision / null-entries iterates empty without quarantine)
+- [x] **Step 2: run new tests, verify both FAIL** (`.bad` name collision / null-entries iterates empty without quarantine)
 
 Run: `ctest --test-dir build/linux-debug -R StateStore --output-on-failure`
 Expected: `NullEntriesArrayQuarantinesFile` FAIL (no quarantine happens — `contains("entries")` passes, iteration over null throws → caught → single `.bad`... verify actual behavior; at minimum `SecondCorruption` FAILs on name collision `countFilesMatching == 1`).
 
-- [ ] **Step 3: implement state_store fixes**
+- [x] **Step 3: implement state_store fixes**
 
 In `daemon/src/state_store.cpp`:
 
@@ -150,12 +150,12 @@ void quarantine(const fs::path& dir, const fs::path& file) {
     }
 ```
 
-- [ ] **Step 4: run StateStore tests → PASS; full ctest → no regressions**
+- [x] **Step 4: run StateStore tests → PASS; full ctest → no regressions**
 
 Run: `ctest --test-dir build/linux-debug --output-on-failure`
 Expected: all pass (215 + 2 new).
 
-- [ ] **Step 5: kmod taxonomy matrix (T6 m-2) — 5 new tests**
+- [x] **Step 5: kmod taxonomy matrix (T6 m-2) — 5 new tests**
 
 Read `platform/linux/include/devmgr/platform/linux/kmod_error_taxonomy.hpp` for exact `describeLoadFailure`/`describeUnloadFailure` signatures + branch strings, then append to `tests/unit/test_kmod_error_taxonomy.cpp` (assert on `code` + substring, ⊥ full-string where message unpinned):
 
@@ -187,7 +187,7 @@ TEST(KmodErrorTaxonomy, UnloadBusyWithNoHoldersStillReadable) {
 
 If a branch doesn't exist in the taxonomy (e.g. EBUSY-load maps elsewhere), adjust the EXPECT to the actual pinned mapping — the point is pinning ALL branches, not inventing new ones. Run → expected PASS immediately (these pin existing behavior; any FAIL = real taxonomy gap → fix taxonomy, document in report).
 
-- [ ] **Step 6: enforcement unbind-branch test (T9 m-2)**
+- [x] **Step 6: enforcement unbind-branch test (T9 m-2)**
 
 In `tests/unit/test_enforcement_service.cpp`, clone one existing sweep-fallback test (fixture helpers at `:40-74`), flip the entry to the unbind mechanism:
 
@@ -210,7 +210,7 @@ TEST_F(EnforcementServiceTest, SweepFallbackReappliesUnbindMechanism) {
 
 Adapt member names to `tests/fakes/fake_pal.hpp` actuals (read it first). Run → PASS (pins existing derivation-mirror behavior).
 
-- [ ] **Step 7: remaining code fixes (no new tests — inspection/manual-gate items)**
+- [x] **Step 7: remaining code fixes (no new tests — inspection/manual-gate items)**
 
 (a) **T5 m-1** `core/include/devmgr/pal/interfaces.hpp:52-56` — replace the stale sentence `the bound one is identified by the caller via Device::boundDriver.` with:
 
@@ -300,7 +300,7 @@ core::Result<void> RequestProcessor::applyEnable(const std::string& canonical) {
 
 `deviceFromSysfs` = the daemon-side probe the enforcement fallback already uses — check `daemon/src/sysfs_device_probe.cpp` for the exact name/signature and `enforcement_service.cpp` for its call shape; adapt (incl. header include) to actuals. Add a unit test in `tests/unit/test_request_processor.cpp`: disable via path A (store entry), simulate replug (entry's `lastSysfsPath` stays A, device now at path B with same identity attrs), `applyEnable(B)` → store empty afterward.
 
-- [ ] **Step 8: gates**
+- [x] **Step 8: gates**
 
 ```
 cmake --build --preset linux-debug -j24
@@ -310,7 +310,7 @@ clang-format -i <every touched file>; git diff --stat            # only intended
 
 Also rebuild `-DDEVMGR_WITH_SDBUS=OFF` config once (interfaces.hpp touched): `cmake -B build/nosdbus -DDEVMGR_WITH_SDBUS=OFF -G Ninja && cmake --build build/nosdbus -j24`.
 
-- [ ] **Step 9: USER commits**
+- [x] **Step 9: USER commits**
 
 ```
 fix: Phase 6 T1 — land 11 Phase 5 review carry-overs
@@ -336,7 +336,7 @@ refusals via StatusLineVM + probe gating, VM smoke poll, applyEnable key match)
 - `core::UpdatesChangedEvent{}`, `core::UpdatesRefreshedEvent{}`, `core::UpdateRequestEvent{providerId, deviceId, kind, message}`
 - `tests::FakeUpdateProvider` scripted via public members
 
-- [ ] **Step 1: write `core/include/devmgr/core/update_models.hpp`** (complete file)
+- [x] **Step 1: write `core/include/devmgr/core/update_models.hpp`** (complete file)
 
 ```cpp
 #pragma once
@@ -426,7 +426,7 @@ struct PendingAction {
 }  // namespace devmgr::core
 ```
 
-- [ ] **Step 2: append events to `core/include/devmgr/core/events.hpp`** (before closing namespace)
+- [x] **Step 2: append events to `core/include/devmgr/core/events.hpp`** (before closing namespace)
 
 ```cpp
 struct UpdatesChangedEvent {};    // provider-side change (fwupd signals) → coalesced refresh
@@ -439,7 +439,7 @@ struct UpdateRequestEvent {       // fwupd DeviceRequest: durable until dismisse
 };
 ```
 
-- [ ] **Step 3: replace the `IUpdateProvider` stub** in `core/include/devmgr/pal/interfaces.hpp:66-72` with:
+- [x] **Step 3: replace the `IUpdateProvider` stub** in `core/include/devmgr/pal/interfaces.hpp:66-72` with:
 
 ```cpp
 enum class UpdateProviderCaps : unsigned { Query = 1U << 0U, Install = 1U << 1U };
@@ -471,7 +471,7 @@ class IUpdateProvider {
 
 Add `#include "devmgr/core/update_models.hpp"` to the header's include block.
 
-- [ ] **Step 4: write `tests/fakes/fake_update_provider.hpp`** (complete file)
+- [x] **Step 4: write `tests/fakes/fake_update_provider.hpp`** (complete file)
 
 ```cpp
 #pragma once
@@ -532,7 +532,7 @@ class FakeUpdateProvider : public pal::IUpdateProvider {
 }  // namespace devmgr::tests
 ```
 
-- [ ] **Step 5: write `tests/unit/test_update_models.cpp`** — pin the contracts the UI relies on
+- [x] **Step 5: write `tests/unit/test_update_models.cpp`** — pin the contracts the UI relies on
 
 ```cpp
 #include <gtest/gtest.h>
@@ -574,7 +574,7 @@ TEST(UpdateModels, FakeProviderRoundTrip) {
 
 Register: add `unit/test_update_models.cpp` to the `add_executable(devmgr_tests ...)` list in `tests/CMakeLists.txt` (portable block, `:5-24`).
 
-- [ ] **Step 6: build both configs + run**
+- [x] **Step 6: build both configs + run**
 
 ```
 cmake --build --preset linux-debug -j24 && ctest --test-dir build/linux-debug -R UpdateModels --output-on-failure
@@ -582,7 +582,7 @@ cmake --build build/nosdbus -j24     # interfaces.hpp changed → OFF config mus
 ```
 Expected: 3 new tests PASS; both builds clean. Then full ctest → no regressions.
 
-- [ ] **Step 7: USER commits** — `feat(core): Phase 6 T2 — update models, IUpdateProvider v2 (replaces Phase 0 stub), update events, FakeUpdateProvider`
+- [x] **Step 7: USER commits** — `feat(core): Phase 6 T2 — update models, IUpdateProvider v2 (replaces Phase 0 stub), update events, FakeUpdateProvider`
 
 ---
 
@@ -610,12 +610,12 @@ endif()
 - `fwupd::dispositionFromUpdateState(std::uint32_t) → core::InstallDisposition`
 - flag constants `kDeviceFlagUpdatable/kDeviceFlagSupported/kDeviceFlagNeedsReboot`, `kReleaseFlagIsUpgrade`, update-state constants
 
-- [ ] **Step 1: pin the fwupd constants from the installed headers** (spec §12 plan-time task)
+- [x] **Step 1: pin the fwupd constants from the installed headers** (spec §12 plan-time task)
 
 Run: `grep -rn "FWUPD_DEVICE_FLAG_UPDATABLE\|FWUPD_DEVICE_FLAG_SUPPORTED\|FWUPD_DEVICE_FLAG_NEEDS_REBOOT\|FWUPD_RELEASE_FLAG_IS_UPGRADE\|FWUPD_UPDATE_STATE" /usr/include/fwupd-2/libfwupd/fwupd-enums.h`
 Expected (verify, do NOT trust memory): `UPDATABLE (1u << 1)`, `SUPPORTED (1u << 5)`, `NEEDS_REBOOT (1u << 8)`, `IS_UPGRADE (1u << 2)`, `UPDATE_STATE_PENDING 1 / SUCCESS 2 / FAILED 3 / NEEDS_REBOOT 4`. Copy the ACTUAL values into the header with a comment citing the source file. If the header path differs (Gentoo may use `/usr/include/fwupd-1`), locate via `ls /usr/include/ | grep fwupd`.
 
-- [ ] **Step 2: failing tests first** — `tests/unit/test_fwupd_contract.cpp` (table-driven; this is the review's malformed-variant matrix):
+- [x] **Step 2: failing tests first** — `tests/unit/test_fwupd_contract.cpp` (table-driven; this is the review's malformed-variant matrix):
 
 ```cpp
 #include <gtest/gtest.h>
@@ -723,7 +723,7 @@ TEST(FwupdContract, UpdateStateToDisposition) {
 
 Run: build fails (`fwupd_contract.hpp` missing) — expected RED.
 
-- [ ] **Step 3: implement header + cpp**
+- [x] **Step 3: implement header + cpp**
 
 `fwupd_contract.hpp`:
 
@@ -872,11 +872,11 @@ NOTE: `core::makeError(...)` — check `core/include/devmgr/core/result.hpp` whe
 
 CMake: `target_sources(devmgr_pal_linux PRIVATE src/fwupd_contract.cpp)` inside the sdbus block; spdlog is already linked transitively via devmgr_core (verify; else add).
 
-- [ ] **Step 4: run matrix → PASS**; full ctest + nosdbus build → green
+- [x] **Step 4: run matrix → PASS**; full ctest + nosdbus build → green
 
 Run: `ctest --test-dir build/linux-debug -R FwupdContract --output-on-failure`
 
-- [ ] **Step 5: USER commits** — `feat(platform): Phase 6 T3 — fwupd D-Bus parse layer (tolerant a{sv} mapping, error table, dispositions)`
+- [x] **Step 5: USER commits** — `feat(platform): Phase 6 T3 — fwupd D-Bus parse layer (tolerant a{sv} mapping, error table, dispositions)`
 
 ---
 
@@ -908,7 +908,7 @@ core::Result<CabFile> resolveAndOpenCab(const std::vector<std::string>& location
 }
 ```
 
-- [ ] **Step 1: failing tests** — `tests/unit/test_cab_resolver.cpp`. Fixture: `std::filesystem` temp dir per test (`testing::TempDir()`), helper `makeRemote(kind)` returning `RemoteRef{"r1", kind, <tmp>/meta...}`. Tests (write all; each is a few lines):
+- [x] **Step 1: failing tests** — `tests/unit/test_cab_resolver.cpp`. Fixture: `std::filesystem` temp dir per test (`testing::TempDir()`), helper `makeRemote(kind)` returning `RemoteRef{"r1", kind, <tmp>/meta...}`. Tests (write all; each is a few lines):
 
 ```cpp
 #include <gtest/gtest.h>
@@ -1009,7 +1009,7 @@ TEST_F(CabResolverTest, IsLocallyResolvableMirrorsRules) {
 
 Run → RED (header missing).
 
-- [ ] **Step 2: implement.** Key rules (spec §5.3, every line reviewed-mandated):
+- [x] **Step 2: implement.** Key rules (spec §5.3, every line reviewed-mandated):
 
 ```cpp
 #include "devmgr/platform/linux/cab_resolver.hpp"
@@ -1108,9 +1108,9 @@ core::Result<CabFile> resolveAndOpenCab(const std::vector<std::string>& location
 
 `UniqueFd` in the header: dtor `if (fd_ >= 0) ::close(fd_);`, move zeroes to -1, `release()` for handing ownership to sdbus. Adapt `core::makeError` usage to the project idiom (see T3 note).
 
-- [ ] **Step 3: run → all PASS; full ctest; clang-format/tidy**
+- [x] **Step 3: run → all PASS; full ctest; clang-format/tidy**
 
-- [ ] **Step 4: USER commits** — `feat(platform): Phase 6 T4 — secure local-cab resolver (M2: traversal/symlink/size/type contract, fd-once semantics)`
+- [x] **Step 4: USER commits** — `feat(platform): Phase 6 T4 — secure local-cab resolver (M2: traversal/symlink/size/type contract, fd-once semantics)`
 
 ---
 
@@ -1134,7 +1134,7 @@ class DkmsStatusProvider : public pal::IUpdateProvider {
 ```
 Candidate shape consumed by T9/T10: id `"dkms:<module>/<version>"`, `facts.updatable=false`, `releases={}`, per-kernel `details` lines.
 
-- [ ] **Step 1: failing tests.** Fixture builds real dirs under `testing::TempDir()`; states asserted via `details` text. Supported layout = spec §6 EXACTLY (fixtures ARE the layout contract):
+- [x] **Step 1: failing tests.** Fixture builds real dirs under `testing::TempDir()`; states asserted via `details` text. Supported layout = spec §6 EXACTLY (fixtures ARE the layout contract):
 
 ```cpp
 #include <gtest/gtest.h>
@@ -1250,7 +1250,7 @@ TEST_F(DkmsStatusProviderTest, SourceSymlinkSkipped) {
 
 Run → RED.
 
-- [ ] **Step 2: implement.** Walk shape (lstat semantics: `fs::directory_iterator` + `entry.is_symlink()` checks; skip symlinked dirs; only iterate fixed depth — NO recursive iterator, spec §6 "⊥ recursive follow"):
+- [x] **Step 2: implement.** Walk shape (lstat semantics: `fs::directory_iterator` + `entry.is_symlink()` checks; skip symlinked dirs; only iterate fixed depth — NO recursive iterator, spec §6 "⊥ recursive follow"):
 
 ```cpp
 // dkms_status_provider.cpp — core walk (complete the class around it):
@@ -1304,9 +1304,9 @@ core::Result<std::vector<core::UpdateCandidate>> DkmsStatusProvider::enumerate()
 
 `availability()`: `{.available = fs::is_directory(dkmsRoot_), .version = std::nullopt, .error = available ? nullopt : Error{NotFound, "no /var/lib/dkms — DKMS not present"}, .notices = {}}`. `install()` → `Unsupported` ("dkms provider is status-only"). All `directory_iterator` calls take `ec` (⊥ throw — V2).
 
-- [ ] **Step 3: run → PASS; full ctest; nosdbus build (ungated file compiles both configs)**
+- [x] **Step 3: run → PASS; full ctest; nosdbus build (ungated file compiles both configs)**
 
-- [ ] **Step 4: USER commits** — `feat(platform): Phase 6 T5 — DkmsStatusProvider (read-only tri-state+unknown, layout contract per spec §6)`
+- [x] **Step 4: USER commits** — `feat(platform): Phase 6 T5 — DkmsStatusProvider (read-only tri-state+unknown, layout contract per spec §6)`
 
 ---
 
@@ -1339,7 +1339,7 @@ namespace fwupd { std::optional<core::PendingAction> parseHistoryEntry(const Dic
 }
 ```
 
-- [ ] **Step 1: `parseHistoryEntry` — test then impl**
+- [x] **Step 1: `parseHistoryEntry` — test then impl**
 
 Test (append to `test_fwupd_contract.cpp`):
 
@@ -1363,7 +1363,7 @@ TEST(FwupdContract, HistoryEntryToPendingAction) {
 
 Impl: nullopt unless `UpdateState ∈ {Pending, NeedsReboot}`; fill `{providerId="fwupd", deviceId, deviceName=Name, disposition, version=Version}`.
 
-- [ ] **Step 2: provider skeleton + read side.** Structure (complete the .cpp around this; mirror `dbus_privileged_channel.cpp`'s session-bus seam and the hand-written vtable idiom in `daemon/src/manager_adaptor.cpp`):
+- [x] **Step 2: provider skeleton + read side.** Structure (complete the .cpp around this; mirror `dbus_privileged_channel.cpp`'s session-bus seam and the hand-written vtable idiom in `daemon/src/manager_adaptor.cpp`):
 
 ```cpp
 class FwupdUpdateProvider::Impl {  // pimpl keeps sdbus out of the header
@@ -1430,7 +1430,7 @@ catch (const std::exception& e) → Io (V2 — same both catches ∀ methods)
 
 `pendingActions()`: `GetHistory` → `parseHistoryEntry` each, collect. `install()`: `return core::makeError(core::Error::Code::Unsupported, "install wired in T8");`
 
-- [ ] **Step 3: no-daemon degradation test** — `tests/unit/test_fwupd_provider_nodaemon.cpp` (register in the sdbus-gated tests block from T3):
+- [x] **Step 3: no-daemon degradation test** — `tests/unit/test_fwupd_provider_nodaemon.cpp` (register in the sdbus-gated tests block from T3):
 
 ```cpp
 #include <gtest/gtest.h>
@@ -1454,7 +1454,7 @@ TEST(FwupdProviderNoDaemon, DegradesWithoutThrowing) {
 }
 ```
 
-- [ ] **Step 4: build both configs, run unit suite → green; USER commits** — `feat(platform): Phase 6 T6 — FwupdUpdateProvider read side (connection, enumerate, pendingActions, signals→EventBus)`
+- [x] **Step 4: build both configs, run unit suite → green; USER commits** — `feat(platform): Phase 6 T6 — FwupdUpdateProvider read side (connection, enumerate, pendingActions, signals→EventBus)`
 
 ---
 
@@ -1498,7 +1498,7 @@ class FakeFwupdDaemon {
 };
 ```
 
-- [ ] **Step 1: CMakeLists**
+- [x] **Step 1: CMakeLists**
 
 ```cmake
 find_package(GTest CONFIG REQUIRED)
@@ -1516,9 +1516,9 @@ target_compile_features(devmgr_fwupd_tests PRIVATE cxx_std_20)
 add_test(NAME devmgr_fwupd COMMAND dbus-run-session -- $<TARGET_FILE:devmgr_fwupd_tests>)
 ```
 
-- [ ] **Step 2: implement the fake.** Registration mirrors `daemon/src/manager_adaptor.cpp`'s hand-written v2 vtable idiom (read it first; same `addVTable`/`registerMethod` shapes). Methods return the scripted vectors; `GetUpgrades` looks up per-device script, throws scripted `sdbus::Error` when set, throws `org.freedesktop.fwupd.NothingToDo` when the device has an empty entry SET explicitly (distinct from unset → returns `{}`); `Install(s,h,a{sv})` runs the hook with the RECEIVED fd (so T8 can read cab bytes back). Properties `DaemonVersion/Status/Percentage` via property vtable entries; `emitProgress` sets them + emits `PropertiesChanged`. `dropName()`/`reacquireName()` = `connection_->releaseName(...)` / `requestName(...)`.
+- [x] **Step 2: implement the fake.** Registration mirrors `daemon/src/manager_adaptor.cpp`'s hand-written v2 vtable idiom (read it first; same `addVTable`/`registerMethod` shapes). Methods return the scripted vectors; `GetUpgrades` looks up per-device script, throws scripted `sdbus::Error` when set, throws `org.freedesktop.fwupd.NothingToDo` when the device has an empty entry SET explicitly (distinct from unset → returns `{}`); `Install(s,h,a{sv})` runs the hook with the RECEIVED fd (so T8 can read cab bytes back). Properties `DaemonVersion/Status/Percentage` via property vtable entries; `emitProgress` sets them + emits `PropertiesChanged`. `dropName()`/`reacquireName()` = `connection_->releaseName(...)` / `requestName(...)`.
 
-- [ ] **Step 3: read-side integration tests** (all in `test_fwupd_provider_ipc.cpp`; fixture constructs `FakeFwupdDaemon` then `FwupdUpdateProvider provider(bus_, {.useSessionBus = true})`; helper Dicts reuse T3's shapes):
+- [x] **Step 3: read-side integration tests** (all in `test_fwupd_provider_ipc.cpp`; fixture constructs `FakeFwupdDaemon` then `FwupdUpdateProvider provider(bus_, {.useSessionBus = true})`; helper Dicts reuse T3's shapes):
 
 Write these tests — names + assertions (review-required numbers in comments):
 
@@ -1542,12 +1542,12 @@ TEST_F(F, DeviceRequestPublishesUpdateRequestEvent)   // kind/message mapped
 
 Signal tests: subscribe on `bus_`, `emitX()`, wait on a `std::condition_variable` with 2 s timeout — never sleep-poll.
 
-- [ ] **Step 4: run**
+- [x] **Step 4: run**
 
 Run: `ctest --test-dir build/linux-debug -R devmgr_fwupd --output-on-failure`
 Expected: PASS. Full ctest + container parity later (T13 gates).
 
-- [ ] **Step 5: USER commits** — `test(fwupd): Phase 6 T7 — scriptable fake org.freedesktop.fwupd daemon + provider integration suite (read side)`
+- [x] **Step 5: USER commits** — `test(fwupd): Phase 6 T7 — scriptable fake org.freedesktop.fwupd daemon + provider integration suite (read side)`
 
 ---
 
@@ -1559,7 +1559,7 @@ Expected: PASS. Full ctest + container parity later (T13 gates).
 
 **Interfaces (Consumes):** T4 `resolveAndOpenCab`/`isLocallyResolvable`, T3 contract, T7 fake. **Produces:** working `install()` honoring spec §5.3–§5.5; `installing_` gate exposed to progress handler.
 
-- [ ] **Step 1: failing integration tests** (append; fixture gains a directory-remote + cab fixture file written in `SetUp`):
+- [x] **Step 1: failing integration tests** (append; fixture gains a directory-remote + cab fixture file written in `SetUp`):
 
 ```cpp
 TEST_F(F, InstallHappyPathWithProgress)
@@ -1594,7 +1594,7 @@ TEST_F(F, TeardownDuringSignalStorm)              // review test 14: thread hamm
 
 Run → RED (`install` returns Unsupported stub).
 
-- [ ] **Step 2: implement `install()`** — the M3 state machine, verbatim shape:
+- [x] **Step 2: implement `install()`** — the M3 state machine, verbatim shape:
 
 ```cpp
 core::Result<core::InstallOutcome> FwupdUpdateProvider::install(
@@ -1665,9 +1665,9 @@ core::Result<core::InstallOutcome> FwupdUpdateProvider::install(
 
 PropertiesChanged handler (registered in T6 ctor): `uponSignal("PropertiesChanged").onInterface("org.freedesktop.DBus.Properties")` → if `!accepting_` return; lock `progressMutex_`; if `progressSink_` null return (V5); extract `Percentage` (absent in the changed-props dict OR >100 ⇒ `-1` indeterminate, spec §5.4) and `Status` → `(*progressSink_)(runtime::ProgressUpdate{percent, fwupd::statusName(status)})`. Add tiny `fwupd::statusName(std::uint32_t) → const char*` table ("idle","device-write",... — pin names from `fwupd-enums.h` in T3's grep style) to the contract with a 3-line test.
 
-- [ ] **Step 3: run suite → all PASS** (`ctest -R devmgr_fwupd`); full ctest; both configs.
+- [x] **Step 3: run suite → all PASS** (`ctest -R devmgr_fwupd`); full ctest; both configs.
 
-- [ ] **Step 4: USER commits** — `feat(platform): Phase 6 T8 — fwupd install path (M3 lifecycle: preflight/resolve/install/finalize; V5 progress gating; M2 fd install)`
+- [x] **Step 4: USER commits** — `feat(platform): Phase 6 T8 — fwupd install path (M3 lifecycle: preflight/resolve/install/finalize; V5 progress gating; M2 fd install)`
 
 ---
 
@@ -1695,7 +1695,7 @@ std::future<void> installUpdate(std::string providerId, std::string candidateId,
                                 core::ReleaseRef release);
 ```
 
-- [ ] **Step 1: failing tests** — `tests/unit/test_application_facade_updates.cpp`. Fixture mirrors `test_application_facade.cpp` (real `TaskScheduler`, real `EventBus`, `FakeUpdateProvider` members, facade with `{&fakeA_, &fakeB_}`; helper `waitRefresh()` = `facade.refreshUpdates().get()`).
+- [x] **Step 1: failing tests** — `tests/unit/test_application_facade_updates.cpp`. Fixture mirrors `test_application_facade.cpp` (real `TaskScheduler`, real `EventBus`, `FakeUpdateProvider` members, facade with `{&fakeA_, &fakeB_}`; helper `waitRefresh()` = `facade.refreshUpdates().get()`).
 
 ```cpp
 TEST_F(FacadeUpdatesTest, PartialProviderFailureIsFirstClass) {   // review test 10
@@ -1765,7 +1765,7 @@ TEST_F(FacadeUpdatesTest, CapsGateRefusesStatusOnlyProvider) {    // V1 defense 
 
 (`candidate()`/`pendingNeedsReboot()` = small fixture builders. Complete every "…assert" with a real `bus_.subscribe<core::TaskCompletedEvent>` collector — copy the collector idiom from `test_application_facade.cpp`.) Run → RED.
 
-- [ ] **Step 2: implement.** Members: `std::vector<pal::IUpdateProvider*> updateProviders_;`, `mutable std::mutex updatesMutex_;`, `std::vector<core::UpdateProviderState> updatesSnapshot_;`, `std::map<std::pair<std::string,std::string>, core::PendingAction> pending_;` (key = providerId+deviceId; value provenance union), `std::set<std::pair<std::string,std::string>> sessionSticky_;`, `std::atomic<bool> installActive_{false};`.
+- [x] **Step 2: implement.** Members: `std::vector<pal::IUpdateProvider*> updateProviders_;`, `mutable std::mutex updatesMutex_;`, `std::vector<core::UpdateProviderState> updatesSnapshot_;`, `std::map<std::pair<std::string,std::string>, core::PendingAction> pending_;` (key = providerId+deviceId; value provenance union), `std::set<std::pair<std::string,std::string>> sessionSticky_;`, `std::atomic<bool> installActive_{false};`.
 
 Worker logic (inside `refreshUpdates()`'s scheduled task; comment the M1 rules):
 
@@ -1807,9 +1807,9 @@ bus_.publish(core::UpdatesRefreshedEvent{});
 
 `rebootPendingEffective()`: `∃ pending_ NeedsReboot` || `systemInfo().value_or({}).rebootPending`.
 
-- [ ] **Step 3: run → PASS; full ctest; nosdbus config (facade is portable — FakeUpdateProvider only)**
+- [x] **Step 3: run → PASS; full ctest; nosdbus config (facade is portable — FakeUpdateProvider only)**
 
-- [ ] **Step 4: USER commits** — `feat(app): Phase 6 T9 — facade update snapshots, M1 pending/reboot reconciler, serialized installUpdate`
+- [x] **Step 4: USER commits** — `feat(app): Phase 6 T9 — facade update snapshots, M1 pending/reboot reconciler, serialized installUpdate`
 
 ---
 
@@ -1844,7 +1844,7 @@ class UpdatesVM {
 };
 ```
 
-- [ ] **Step 1: failing tests.** Fixture mirrors `tests/unit/test_modules_vm.cpp` (facade + 2 FakeUpdateProviders + `InlineUiDispatcher` / queuing dispatcher for teardown tests). Tests:
+- [x] **Step 1: failing tests.** Fixture mirrors `tests/unit/test_modules_vm.cpp` (facade + 2 FakeUpdateProviders + `InlineUiDispatcher` / queuing dispatcher for teardown tests). Tests:
 
 ```cpp
 TEST_F(UpdatesVmTest, RowsAreByteFrozenFormat) {
@@ -1889,7 +1889,7 @@ TEST_F(UpdatesVmTest, TeardownStormNoPostAfterDrain) {            // review test
 
 Run → RED.
 
-- [ ] **Step 2: implement.** Copy ModulesVM's mechanics wholesale (subscription → `rebuildQueued_` atomic → dispatcher post guarded by `alive_`; dtor: `alive_->store(false)` then barrier; same comments referencing the contract). Specifics:
+- [x] **Step 2: implement.** Copy ModulesVM's mechanics wholesale (subscription → `rebuildQueued_` atomic → dispatcher post guarded by `alive_`; dtor: `alive_->store(false)` then barrier; same comments referencing the contract). Specifics:
   - Subscriptions: `UpdatesRefreshedEvent` (→ coalesced rebuild), `UpdatesChangedEvent` (→ coalesced `refreshQueued_` post that calls `facade_.refreshUpdates()`, future stored in `lastRefresh_` member — future-custody note in dtor), `UpdateRequestEvent` (→ store under mutex, post wake), `TaskProgressEvent` (filter `taskId.rfind("install-update:", 0) == 0` → progress text, post wake), `TaskCompletedEvent` (same prefix → clear progress text; ⊥ clears requestBanner — a "post"-kind DeviceRequest must outlive the operation, so request clearing is EXPLICIT-DISMISS ONLY. Sanctioned narrowing of spec §9's "dismiss | resolution" — record it in the T13 parity ledger).
   - Row format — SINGLE source (V3):
     ```cpp
@@ -1903,9 +1903,9 @@ Run → RED.
   - `banner()`: per provider `"<id> <version|unavailable: reason>"` join " | ", then `" | reboot required"` when `facade_.rebootPendingEffective()`, then Secure Boot line from `facade_.systemInfo()` (reuse ModulesVM's exact wording).
   - `selectedInstall()`: selected row → candidate; nullopt when: placeholder, provider caps ∌ Install, `!facts.updatable`, no release with `localCab`. Release = first localCab release (fwupd order).
 
-- [ ] **Step 3: run → PASS; full ctest**
+- [x] **Step 3: run → PASS; full ctest**
 
-- [ ] **Step 4: USER commits** — `feat(app): Phase 6 T10 — UpdatesVM (byte-frozen rows, durable request banner, coalesced refresh, teardown-safe)`
+- [x] **Step 4: USER commits** — `feat(app): Phase 6 T10 — UpdatesVM (byte-frozen rows, durable request banner, coalesced refresh, teardown-safe)`
 
 ---
 
@@ -1916,7 +1916,7 @@ Run → RED.
 
 **Interfaces (Consumes):** `UpdatesVM` exactly as T10; `facade.installActive()`, `facade.refreshUpdates()`, `facade.installUpdate(...)`.
 
-- [ ] **Step 1: wire composition root.** In `runTuiApp()` (`tui/src/tui_app.cpp:51`): construct providers before the facade —
+- [x] **Step 1: wire composition root.** In `runTuiApp()` (`tui/src/tui_app.cpp:51`): construct providers before the facade —
 
 ```cpp
 #ifdef DEVMGR_HAS_SDBUS
@@ -1932,7 +1932,7 @@ Run → RED.
 
 pass to the facade ctor (T9 param), construct `UpdatesVM updatesVm(facade, bus, dispatcher);` beside `modulesVm`. Declaration order = teardown contract: providers outlive facade outlive VMs (match the existing ordering comments).
 
-- [ ] **Step 2: tab cycle.** Replace the `'m'` handler (`:263-272`):
+- [x] **Step 2: tab cycle.** Replace the `'m'` handler (`:263-272`):
 
 ```cpp
         if (event == Event::Character('m')) {
@@ -1952,7 +1952,7 @@ pass to the facade ctor (T9 param), construct `UpdatesVM updatesVm(facade, bus, 
         }
 ```
 
-- [ ] **Step 3: quit guard (spec §5.5).** Extend the T1-merged quit handler:
+- [x] **Step 3: quit guard (spec §5.5).** Extend the T1-merged quit handler:
 
 ```cpp
         if (event == Event::Character('q') || event == Event::Escape) {
@@ -1968,7 +1968,7 @@ pass to the facade ctor (T9 param), construct `UpdatesVM updatesVm(facade, bus, 
         }
 ```
 
-- [ ] **Step 4: updates keys** — insert BEFORE the devices-keys section, after the modules block (`:277-308`), mirroring its shape:
+- [x] **Step 4: updates keys** — insert BEFORE the devices-keys section, after the modules block (`:277-308`), mirroring its shape:
 
 ```cpp
         if (activeTab == 2) {  // ----- updates keys -----
@@ -2003,13 +2003,13 @@ pass to the facade ctor (T9 param), construct `UpdatesVM updatesVm(facade, bus, 
         }
 ```
 
-- [ ] **Step 5: renderer.** Clone the modules-screen render branch (list + detail pane + banner) for `activeTab == 2`, substituting `updatesVm` accessors + `updatesVm.requestBanner()` as a highlighted line above the list when non-empty + `updatesVm.installProgressText()` in the status area. Rebuild on `Event::Custom` (existing dispatcher-drain path drives `UpdatesRefreshedEvent` posts already — T10). Tab titles line: `"Devices | Modules | Updates"` with the active one bold (match existing tab header rendering exactly).
+- [x] **Step 5: renderer.** Clone the modules-screen render branch (list + detail pane + banner) for `activeTab == 2`, substituting `updatesVm` accessors + `updatesVm.requestBanner()` as a highlighted line above the list when non-empty + `updatesVm.installProgressText()` in the status area. Rebuild on `Event::Custom` (existing dispatcher-drain path drives `UpdatesRefreshedEvent` posts already — T10). Tab titles line: `"Devices | Modules | Updates"` with the active one bold (match existing tab header rendering exactly).
 
-- [ ] **Step 6: manual smoke (agent-runnable part)**
+- [x] **Step 6: manual smoke (agent-runnable part)**
 
 Run: `./build/linux-debug/tui/devmgr-tui` on the host — `m` twice → Updates tab lists real fwupd devices (read-only); `q` quits; no crash on rapid `m` cycling. Document observations in the task report.
 
-- [ ] **Step 7: USER commits** — `feat(tui): Phase 6 T11 — Updates screen (3-tab cycle, install confirm, request banner, quit guard)`
+- [x] **Step 7: USER commits** — `feat(tui): Phase 6 T11 — Updates screen (3-tab cycle, install confirm, request banner, quit guard)`
 
 ---
 
@@ -2023,9 +2023,9 @@ Run: `./build/linux-debug/tui/devmgr-tui` on the host — `m` twice → Updates 
 
 **Interfaces (Consumes):** T10 `UpdatesVM`; T9 facade. **Produces:** `MainWindow::Actions` gains `std::function<bool(const QString&)> confirmQuit;` (tests inject).
 
-- [ ] **Step 1: model + tests.** Copy `module_list_model.{hpp,cpp}` structure 1:1 (rename Module→Update); copy `gui/tests/test_module_list_model.cpp` UAF/reset stress recipes for the new model (production `QtUiDispatcher`, storm + drain — keep the test comments' contract citations). RED first (files missing), then implement, then PASS.
+- [x] **Step 1: model + tests.** Copy `module_list_model.{hpp,cpp}` structure 1:1 (rename Module→Update); copy `gui/tests/test_module_list_model.cpp` UAF/reset stress recipes for the new model (production `QtUiDispatcher`, storm + drain — keep the test comments' contract citations). RED first (files missing), then implement, then PASS.
 
-- [ ] **Step 2: MainWindow wiring.**
+- [x] **Step 2: MainWindow wiring.**
   - Tab: `tabs_->addTab(updatesSplitter, tr("Updates"))` as index 2 — list view + detail `QTreeWidget` + banner `QLabel` above the list + request-banner `QLabel` (styled warning, hidden when `requestBanner().empty()`), mirroring the Modules tab construction block.
   - Actions: `installUpdateAction_` (toolbar + context menu), `refreshUpdatesAction_`, `dismissRequestAction_`. Handlers: install → `vm.selectedInstall()`; nullopt → publish guard TaskCompletedEvent (T1 F-1 pattern — NEVER direct statusBar write); else `askConfirm(QString::fromStdString(args->confirmText))` → `facade_.installUpdate(...)` (future into the window's pending set — mirror existing bind/unbind custody).
   - `updateActionEnablement()` — extend the tab logic: `const int tab = tabs_->currentIndex();` `installUpdateAction_->setEnabled(tab == 2 && updatesVm_.selectedInstall().has_value());` `refreshUpdatesAction_->setEnabled(tab == 2);` `dismissRequestAction_->setEnabled(tab == 2 && !updatesVm_.requestBanner().empty());` — keep the T1 F-1 probe gating intact (devices probe only when `tab == 0` && sender relevant).
@@ -2046,7 +2046,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 ```
 
-- [ ] **Step 3: window tests** (extend `gui/tests/test_main_window.cpp`, offscreen platform, FakeUpdateProvider wired):
+- [x] **Step 3: window tests** (extend `gui/tests/test_main_window.cpp`, offscreen platform, FakeUpdateProvider wired):
   - `InstallActionDisabledForRemoteOnlyRelease` (review test 4 GUI half)
   - `InstallActionEnabledOnUpdatesTabWithLocalCab`
   - `QuitGuardBlocksCloseDuringInstall` (inject `actions_.confirmQuit` returning false → window stays; true → closes; latch-blocked fake install drives `installActive()`)
@@ -2054,7 +2054,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
   - `GuardRefusalGoesThroughStatusLineVM` (install on non-installable → statusBar text arrives via StatusLineVM path, survives a `taskExecuted` wake — pins T1 F-1)
 - RED → implement → PASS: `ctest --test-dir build/linux-debug -R MainWindow|UpdateListModel --output-on-failure`.
 
-- [ ] **Step 4: manual smoke** — `./build/linux-debug/gui/devmgr-gui`: Updates tab lists real devices read-only; parity vs TUI rows (same strings). USER commits — `feat(gui): Phase 6 T12 — Updates tab (model, actions, request banner, close guard)`
+- [x] **Step 4: manual smoke** — `./build/linux-debug/gui/devmgr-gui`: Updates tab lists real devices read-only; parity vs TUI rows (same strings). USER commits — `feat(gui): Phase 6 T12 — Updates tab (model, actions, request banner, close guard)`
 
 ---
 
@@ -2067,7 +2067,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
 **Interfaces (Consumes):** everything. This task = spec §11.3–§11.5 + §13 gates.
 
-- [ ] **Step 1: smoke binary.** `tests/smoke/fwupd_smoke_main.cpp` — no gtest; drives OUR stack end-to-end (spec: the smoke must exercise `FwupdUpdateProvider`, not `fwupdmgr`):
+- [x] **Step 1: smoke binary.** `tests/smoke/fwupd_smoke_main.cpp` — no gtest; drives OUR stack end-to-end (spec: the smoke must exercise `FwupdUpdateProvider`, not `fwupdmgr`):
 
 ```cpp
 // Usage: devmgr_fwupd_smoke [--install] [--device <substr>] [--expect-version <v>] [--dkms <module>]
@@ -2135,7 +2135,7 @@ int main(int argc, char** argv) {
 
 CMake: link `devmgr_core devmgr_pal_linux`; target `devmgr_fwupd_smoke`.
 
-- [ ] **Step 2: `test/vm/phase6-smoke.sh`** (complete script; poll pattern from T1 F-2, ⊥ sleeps):
+- [x] **Step 2: `test/vm/phase6-smoke.sh`** (complete script; poll pattern from T1 F-2, ⊥ sleeps):
 
 ```bash
 #!/usr/bin/env bash
@@ -2199,16 +2199,16 @@ echo "PHASE6 VM SMOKE OK"
 
 (Adjust the smoke binary path to the VM build layout — `test-vm.sh` builds into `build/`, host preset into `build/linux-debug`; probe both as shown.)
 
-- [ ] **Step 3: rig updates.** Vagrantfile `apt-get install` line += ` fwupd dkms`; `test-vm.sh` append after the phase 5 block:
+- [x] **Step 3: rig updates.** Vagrantfile `apt-get install` line += ` fwupd dkms`; `test-vm.sh` append after the phase 5 block:
 
 ```bash
 echo "==> Running Phase 6 Smoke Test..."
 (cd "$VM_DIR" && vagrant ssh -c 'cd ~/cross-device-manager && sudo ./test/vm/phase6-smoke.sh')
 ```
 
-- [ ] **Step 4: README.** Add an "Firmware & driver updates (Phase 6)" section: Updates tab in both UIs, fwupd frontend-direct architecture (one paragraph), local-cab-only install boundary + `fwupdmgr update` guidance, DKMS status-only, reboot-required banner semantics, VM smoke instructions.
+- [x] **Step 4: README.** Add an "Firmware & driver updates (Phase 6)" section: Updates tab in both UIs, fwupd frontend-direct architecture (one paragraph), local-cab-only install boundary + `fwupdmgr update` guidance, DKMS status-only, reboot-required banner semantics, VM smoke instructions.
 
-- [ ] **Step 5: gates (spec §11.5 — run ALL, paste outputs in the task report)**
+- [x] **Step 5: gates (spec §11.5 — run ALL, paste outputs in the task report)**
 
 ```
 cmake --build --preset linux-debug -j24 && ctest --test-dir build/linux-debug --output-on-failure
@@ -2221,7 +2221,7 @@ docker build + container ctest          (USER runs — no docker in-agent)
 ./test-vm.sh                            (USER runs — expects PHASE4 + PHASE5 + PHASE6 VM SMOKE OK)
 ```
 
-- [ ] **Step 6: parity ledger + close-out.** Append the TUI/GUI Updates parity table (byte-frozen row source = `UpdatesVM::formatRow`, sanctioned diffs listed) + Phase 6 summary to `.superpowers/sdd/progress.md` (caveman). Mark ALL plan checkboxes. Update memory files (`phase6-execution-status`, roadmap).
+- [x] **Step 6: parity ledger + close-out.** Append the TUI/GUI Updates parity table (byte-frozen row source = `UpdatesVM::formatRow`, sanctioned diffs listed) + Phase 6 summary to `.superpowers/sdd/progress.md` (caveman). Mark ALL plan checkboxes. Update memory files (`phase6-execution-status`, roadmap).
 
 - [ ] **Step 7: USER commits** — `test+docs: Phase 6 T13 — VM smoke (fakedevice E2E + dkms), rig provisioning, README, close-out`
 
