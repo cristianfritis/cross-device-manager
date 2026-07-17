@@ -63,8 +63,8 @@ void styleAsWarning(QLabel& label) {
 MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm,
                        app::DeviceDetailVM& detailVm, app::StatusLineVM& statusVm,
                        app::ModulesVM& modulesVm, app::UpdatesVM& updatesVm,
-                       QtUiDispatcher& dispatcher, runtime::EventBus& bus, Actions actions,
-                       QWidget* parent)
+                       app::SnapshotsVM& snapshotsVm, QtUiDispatcher& dispatcher,
+                       runtime::EventBus& bus, Actions actions, QWidget* parent)
     : QMainWindow(parent),
       facade_(facade),
       listVm_(listVm),
@@ -72,6 +72,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
       statusVm_(statusVm),
       modulesVm_(modulesVm),
       updatesVm_(updatesVm),
+      snapshotsVm_(snapshotsVm),
       bus_(bus),
       actions_(std::move(actions)) {
     setWindowTitle(QStringLiteral("Device Manager"));
@@ -188,6 +189,58 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         updateActionEnablement();
     });
 
+    // Snapshots verbs (Phase 7) — the TUI s/r/x keys as toolbar actions. Like
+    // the Updates commands, they call the facade directly and keep custody in
+    // pending_ (this window's own set, drained in the destructor). The ellipsis
+    // on Create marks the label prompt (DESIGN.md §5.3).
+    createSnapshotAction_ = toolbar->addAction(QStringLiteral("Create Snapshot…"));
+    connect(createSnapshotAction_, &QAction::triggered, this, [this] {
+        // Label is optional (an unlabeled manual snapshot is valid, matching the
+        // TUI). The real QInputDialog reports Cancel through `ok` so an empty
+        // accept still creates; the injected seam always creates (tests drive
+        // the label), the same contract loadModule uses.
+        bool ok = true;
+        const QString label = actions_.textInput
+                                  ? actions_.textInput(QStringLiteral("Create snapshot"), QString{})
+                                  : QInputDialog::getText(this, QStringLiteral("Create snapshot"),
+                                                          QStringLiteral("Label (optional):"),
+                                                          QLineEdit::Normal, QString{}, &ok);
+        if (ok) pruneAndPushPending(facade_.createSnapshot(label.toStdString()));
+    });
+
+    restoreSnapshotAction_ = toolbar->addAction(QStringLiteral("Restore Snapshot"));
+    connect(restoreSnapshotAction_, &QAction::triggered, this, [this] {
+        const auto args = snapshotsVm_.selectedRestore();
+        if (!args) {
+            // Refused locally: placeholder row or corrupt/unsupported snapshot.
+            // StatusLineVM owns the status line (TTL + no wipe-by-wake); the
+            // wording is the shared VM-level string the TUI publishes verbatim
+            // (tui/src/tui_app.cpp) — safety refusals stay visible (DESIGN.md
+            // §5.3).
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard",
+                .ok = false,
+                .message = "cannot restore: no healthy snapshot selected"});
+            return;
+        }
+        if (askConfirm(QString::fromStdString(args->confirmText)))
+            pruneAndPushPending(facade_.restoreSnapshot(args->id));
+    });
+
+    deleteSnapshotAction_ = toolbar->addAction(QStringLiteral("Delete Snapshot"));
+    connect(deleteSnapshotAction_, &QAction::triggered, this, [this] {
+        const auto args = snapshotsVm_.selectedDelete();
+        if (!args) {
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard",
+                .ok = false,
+                .message = "cannot delete: no deletable snapshot selected"});
+            return;
+        }
+        if (askConfirm(QString::fromStdString(args->confirmText)))
+            pruneAndPushPending(facade_.deleteSnapshot(args->id));
+    });
+
     filterEdit_ = new QLineEdit;
     filterEdit_->setPlaceholderText(QStringLiteral("filter devices…"));
     connect(filterEdit_, &QLineEdit::textChanged, this,
@@ -283,10 +336,43 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     updatesSplitter->addWidget(updatesDetailTree_);
     updatesSplitter->setStretchFactor(1, 1);
 
+    // Snapshots page: counts banner + fixed-column snapshot list left, snapshot
+    // detail pane right — the Phase 7 TUI Snapshots screen, in widgets. No
+    // filter input and no request banner: SnapshotsVM exposes neither (mirrors
+    // the TUI shape).
+    snapshotsBannerLabel_ = new QLabel;
+    snapshotModel_ = new SnapshotListModel(snapshotsVm_, this);
+    snapshotsView_ = new QListView;
+    snapshotsView_->setModel(snapshotModel_);
+    snapshotsView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    snapshotsView_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+
+    // Restore/Delete double as the list's context menu (the Updates page idiom).
+    snapshotsView_->addAction(restoreSnapshotAction_);
+    snapshotsView_->addAction(deleteSnapshotAction_);
+    snapshotsView_->setContextMenuPolicy(Qt::ActionsContextMenu);
+
+    snapshotsDetailTree_ = new QTreeWidget;
+    snapshotsDetailTree_->setColumnCount(2);
+    snapshotsDetailTree_->setHeaderLabels({QStringLiteral("Field"), QStringLiteral("Value")});
+    snapshotsDetailTree_->setRootIsDecorated(false);
+    snapshotsDetailTree_->setSelectionMode(QAbstractItemView::NoSelection);
+
+    auto* snapshotsLeft = new QWidget;
+    auto* snapshotsLeftLayout = new QVBoxLayout(snapshotsLeft);
+    snapshotsLeftLayout->setContentsMargins(0, 0, 0, 0);
+    snapshotsLeftLayout->addWidget(snapshotsBannerLabel_);
+    snapshotsLeftLayout->addWidget(snapshotsView_);
+    auto* snapshotsSplitter = new QSplitter;
+    snapshotsSplitter->addWidget(snapshotsLeft);
+    snapshotsSplitter->addWidget(snapshotsDetailTree_);
+    snapshotsSplitter->setStretchFactor(1, 1);
+
     tabs_ = new QTabWidget;
     tabs_->addTab(splitter, QStringLiteral("Devices"));
     tabs_->addTab(modulesSplitter, QStringLiteral("Modules"));
     tabs_->addTab(updatesSplitter, tr("Updates"));
+    tabs_->addTab(snapshotsSplitter, tr("Snapshots"));
     setCentralWidget(tabs_);
 
     // Tab entry mirrors the TUI's 'm'/'u' cycle: banner(s) recomputed (they
@@ -308,6 +394,10 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             updateRequestBannerLabel();
             updatesVm_.rebuild();
             pruneAndPushPending(facade_.refreshUpdates());
+        } else if (index == 3) {
+            snapshotsBannerLabel_->setText(QString::fromStdString(snapshotsVm_.banner()));
+            snapshotsVm_.rebuild();
+            pruneAndPushPending(facade_.refreshSnapshots());
         }
     });
 
@@ -353,6 +443,24 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (tabs_->currentIndex() == 2) updateActionEnablement();
     });
 
+    connect(snapshotsView_->selectionModel(), &QItemSelectionModel::currentChanged, this,
+            [this](const QModelIndex& current, const QModelIndex&) {
+                if (current.isValid()) snapshotsVm_.selectedRef() = current.row();
+                updateSnapshotsDetailPane();
+                updateActionEnablement();
+            });
+    connect(snapshotModel_, &QAbstractItemModel::modelReset, this, [this] {
+        updateSnapshotsDetailPane();
+        // A snapshot-side reset also lands on the cross-frontend refresh path
+        // (a CLI/other-UI mutation → SnapshotsRefreshedEvent → rebuild): keep the
+        // counts banner in step with the list, and re-gate the verbs — but only
+        // while the Snapshots tab is current (F-1 gating, extended here).
+        if (tabs_->currentIndex() == 3) {
+            snapshotsBannerLabel_->setText(QString::fromStdString(snapshotsVm_.banner()));
+            updateActionEnablement();
+        }
+    });
+
     // The Qt analogue of the TUI re-rendering on Event::Custom: StatusLineVM
     // posts a wake closure on every message set/clear; re-read text() then.
     // Review lesson (T11): a banner/request-banner/action-enablement computed
@@ -365,12 +473,19 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             updatesBannerLabel_->setText(QString::fromStdString(updatesVm_.banner()));
             updateRequestBannerLabel();
             updateActionEnablement();
+        } else if (tabs_->currentIndex() == 3) {
+            // A create/restore/delete completion wakes here (TaskCompletedEvent →
+            // StatusLineVM); the banner reads the rebuilt metas, so refresh it
+            // and re-gate the verbs while the Snapshots tab stays current.
+            snapshotsBannerLabel_->setText(QString::fromStdString(snapshotsVm_.banner()));
+            updateActionEnablement();
         }
     });
 
     updateDetailPane();  // "(no device selected)" until something is chosen
     updateModuleDetailPane();
     updateUpdatesDetailPane();
+    updateSnapshotsDetailPane();
     updateActionEnablement();
 }
 // NOLINTEND(readability-function-cognitive-complexity)
@@ -452,6 +567,23 @@ void MainWindow::updateUpdatesDetailPane() {
     updatesDetailTree_->resizeColumnToContents(0);
 }
 
+void MainWindow::updateSnapshotsDetailPane() {
+    snapshotsDetailTree_->clear();
+    for (const std::string& line : snapshotsVm_.detailLines()) {
+        // Parented to snapshotsDetailTree_ — the tree deletes its items.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        auto* item = new QTreeWidgetItem(snapshotsDetailTree_);
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos) {
+            item->setText(0, QString::fromStdString(line));
+        } else {
+            item->setText(0, QString::fromStdString(line.substr(0, colon)).trimmed());
+            item->setText(1, QString::fromStdString(line.substr(colon + 1)).trimmed());
+        }
+    }
+    snapshotsDetailTree_->resizeColumnToContents(0);
+}
+
 void MainWindow::updateRequestBannerLabel() {
     const std::string banner = updatesVm_.requestBanner();
     requestBannerLabel_->setText(QString::fromStdString(banner));
@@ -495,6 +627,15 @@ void MainWindow::updateActionEnablement() {
     installUpdateAction_->setEnabled(tab == 2 && updatesVm_.selectedInstall().has_value());
     refreshUpdatesAction_->setEnabled(tab == 2);
     dismissRequestAction_->setEnabled(tab == 2 && !updatesVm_.requestBanner().empty());
+
+    // Snapshot verbs are gated to the Snapshots tab; the per-selection refusal
+    // (placeholder/corrupt/unsupported) is enforced on click and explained on
+    // the status line — the TUI parity model, so safety refusals stay visible
+    // (DESIGN.md §5.3) rather than being silently greyed out.
+    const bool onSnapshots = tab == 3;
+    createSnapshotAction_->setEnabled(onSnapshots);
+    restoreSnapshotAction_->setEnabled(onSnapshots);
+    deleteSnapshotAction_->setEnabled(onSnapshots);
 
     // Devices probe only when tab == 0 (T1 F-1 gating, extended to the
     // Updates tab): findById()/canDisable() below are Devices-tab-only work.

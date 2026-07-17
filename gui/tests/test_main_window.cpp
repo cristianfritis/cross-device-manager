@@ -22,9 +22,11 @@
 #include "devmgr/app/device_list_vm.hpp"
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
+#include "devmgr/app/snapshots_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
 #include "devmgr/app/updates_vm.hpp"
 #include "devmgr/core/events.hpp"
+#include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/update_models.hpp"
 #include "devmgr/pal/criticality.hpp"
 #include "devmgr/pal/hotplug_event.hpp"
@@ -33,6 +35,7 @@
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "fakes/fake_criticality_prober.hpp"
 #include "fakes/fake_pal.hpp"
+#include "fakes/fake_privileged_channel.hpp"
 #include "fakes/fake_update_provider.hpp"
 #include "gui/src/main_window.hpp"
 #include "gui/src/qt_ui_dispatcher.hpp"
@@ -70,6 +73,21 @@ core::UpdateCandidate updateCandidate(std::string name, std::string current, std
     return c;
 }
 
+// One snapshot meta; `idFill`/`health` vary the identity and the restore/delete
+// verb gating (Ok restores + deletes, Corrupt refuses restore, Unsupported
+// refuses both) — the same shapes test_snapshots_vm.cpp pins at the VM level.
+core::SnapshotMeta snapMeta(char idFill, core::SnapshotHealth health = core::SnapshotHealth::Ok) {
+    core::SnapshotMeta m;
+    m.id = std::string(64, idFill);
+    m.createdAtUtc = 1600000000;  // 2020-09-13 12:26:40 UTC
+    m.trigger = core::SnapshotTrigger::Manual;
+    m.reason = {.verb = "", .subject = "pre-upgrade"};
+    m.health = health;
+    m.entryCount = 1;
+    m.modprobeFileCount = 0;
+    return m;
+}
+
 struct Fixture {
     runtime::EventBus bus;
     runtime::TaskScheduler scheduler{2};
@@ -78,18 +96,23 @@ struct Fixture {
     test::FakeCriticalityProber prober;
     app::DeviceService svc{bus};
     tests::FakeUpdateProvider provider;
+    // Real channel so the Snapshots verbs reach a scriptable seam; its default
+    // empty disabledEntries makes applyDisabledOverlay a no-op, so the device
+    // tests are unaffected (the overlay only ever marks devices Disabled).
+    test::FakePrivilegedChannel channel;
     gui::QtUiDispatcher dispatcher;
-    app::ApplicationFacade facade{pal,     scheduler, bus,  svc,        nullptr,
+    app::ApplicationFacade facade{pal,     scheduler, bus,  svc,        &channel,
                                   &prober, &pal,      &pal, {&provider}};
     app::DeviceListVM listVm{facade, bus, dispatcher};
     app::DeviceDetailVM detailVm{facade};
     app::StatusLineVM statusVm{bus, delayed, dispatcher};
     // Declared after the dispatcher so it is destroyed first: the ModulesVM/
-    // UpdatesVM dtors' alive_-token store and future waits must run while
-    // dispatcher and scheduler are still alive — the composition root's
+    // UpdatesVM/SnapshotsVM dtors' alive_-token store and future waits must run
+    // while dispatcher and scheduler are still alive — the composition root's
     // declaration-order contract, reproduced at fixture scope.
     app::ModulesVM modulesVm{facade, bus, scheduler, dispatcher};
     app::UpdatesVM updatesVm{facade, bus, dispatcher};
+    app::SnapshotsVM snapshotsVm{facade, bus, dispatcher};
     int refreshCalls = 0;
     int confirmCalls = 0;
     int confirmQuitCalls = 0;
@@ -131,8 +154,8 @@ struct Fixture {
             ++confirmQuitCalls;
             return confirmQuitAnswer;
         };
-        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, updatesVm, dispatcher,
-                               bus, std::move(actions));
+        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, updatesVm,
+                               snapshotsVm, dispatcher, bus, std::move(actions));
     }
     void refreshAndPump() {
         facade.refresh().wait();
@@ -161,6 +184,26 @@ struct Fixture {
         provider.enumerateResult_ = std::vector<core::UpdateCandidate>{
             updateCandidate("Webcam", "1.2.2", "1.2.4", localCab)};
         facade.refreshUpdates().wait();
+    }
+    // Scripts the channel's snapshot list and runs refreshSnapshots() to
+    // completion so the facade copy (and thus the model's ctor rebuild) reflects
+    // it before a window is built/tab-entered — the snapshot analogue of
+    // seedUpdateAndRefresh above.
+    void seedSnapshotsAndRefresh(std::vector<core::SnapshotMeta> metas) {
+        channel.snapshotMetas = std::move(metas);
+        facade.refreshSnapshots().wait();
+    }
+    // Triggers a snapshot mutation action and blocks until its (worker-thread)
+    // TaskCompletedEvent fires, so the channel's snapshotCalls write
+    // happens-before the assertion reads it (the mutation records into the
+    // channel before publishing completion — no data race).
+    void triggerAndAwaitMutation(QAction* action) {
+        std::atomic<bool> done{false};
+        auto sub = bus.subscribe<core::TaskCompletedEvent>(
+            [&](const core::TaskCompletedEvent&) { done.store(true); });
+        action->trigger();
+        while (!done.load()) QCoreApplication::processEvents();
+        QCoreApplication::processEvents();  // drain the completion/refresh posts
     }
 };
 }  // namespace
@@ -303,7 +346,7 @@ TEST(MainWindowTest, ModulesTabGatesActionEnablement) {
     auto window = f.makeWindow();
     f.refreshAndPump();
 
-    ASSERT_EQ(window.tabs()->count(), 3);  // Devices | Modules | Updates
+    ASSERT_EQ(window.tabs()->count(), 4);  // Devices | Modules | Updates | Snapshots
     // Devices tab: module actions off; device actions follow the selection.
     EXPECT_FALSE(window.loadModuleAction()->isEnabled());
     EXPECT_FALSE(window.unloadModuleAction()->isEnabled());
@@ -686,6 +729,140 @@ TEST(MainWindowTest, GuardRefusalGoesThroughStatusLineVM) {  // pins T1 F-1 for 
     // for the module/unbind guard refusals above.
     f.dispatcher.post([] {});
     EXPECT_TRUE(window.statusBar()->currentMessage().contains(QStringLiteral("not installable")));
+}
+
+// ----- Phase 7: Snapshots tab -----
+
+TEST(MainWindowTest, SnapshotsTabAddedAndVerbsGatedToTab) {
+    Fixture f;
+    auto window = f.makeWindow();
+    ASSERT_EQ(window.tabs()->count(), 4);
+    EXPECT_EQ(window.tabs()->tabText(3), QStringLiteral("Snapshots"));
+
+    // Off the Snapshots tab (Devices): all three verbs disabled.
+    EXPECT_FALSE(window.createSnapshotAction()->isEnabled());
+    EXPECT_FALSE(window.restoreSnapshotAction()->isEnabled());
+    EXPECT_FALSE(window.deleteSnapshotAction()->isEnabled());
+
+    window.tabs()->setCurrentIndex(3);
+    // On the tab, the verbs are live; the per-selection refusal is enforced on
+    // click (TUI parity), not by greying the action out.
+    EXPECT_TRUE(window.createSnapshotAction()->isEnabled());
+    EXPECT_TRUE(window.restoreSnapshotAction()->isEnabled());
+    EXPECT_TRUE(window.deleteSnapshotAction()->isEnabled());
+}
+
+TEST(MainWindowTest, SnapshotsTabEntrySetsBannerAndRows) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a'), snapMeta('b', core::SnapshotHealth::Corrupt)});
+    auto window = f.makeWindow();
+
+    window.tabs()->setCurrentIndex(3);  // banner + rebuild + refreshSnapshots
+    // Byte-frozen banner rendered exactly as the VM emits it.
+    EXPECT_EQ(window.snapshotsBannerLabel()->text(),
+              QString::fromStdString(f.snapshotsVm.banner()));
+    auto* model = window.snapshotsView()->model();
+    ASSERT_EQ(model->rowCount(), 2);
+    // Byte-frozen row fidelity end to end (VM → Qt model → view data).
+    EXPECT_EQ(model->data(model->index(0, 0), Qt::DisplayRole).toString().toStdString(),
+              f.snapshotsVm.rowsRef()[0]);
+}
+
+TEST(MainWindowTest, SnapshotDetailPaneShowsSelectedSnapshot) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+
+    auto* tree = window.snapshotsDetailTree();
+    ASSERT_GE(tree->topLevelItemCount(), 1);
+    // First detail line is "Id:      <id>" → split into ("Id", "<id>").
+    EXPECT_EQ(tree->topLevelItem(0)->text(0), QStringLiteral("Id"));
+    EXPECT_EQ(tree->topLevelItem(0)->text(1), QString::fromStdString(std::string(64, 'a')));
+}
+
+TEST(MainWindowTest, CreateSnapshotFlowsThroughTextInputAndFacade) {
+    Fixture f;
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+
+    f.textAnswer = QStringLiteral("pre-upgrade");
+    f.triggerAndAwaitMutation(window.createSnapshotAction());
+    ASSERT_EQ(f.channel.snapshotCalls.size(), 1u);
+    EXPECT_EQ(f.channel.snapshotCalls[0], "create:pre-upgrade");
+}
+
+TEST(MainWindowTest, RestoreConfirmedInvokesFacadeWithSelectedId) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+
+    f.triggerAndAwaitMutation(window.restoreSnapshotAction());
+    EXPECT_EQ(f.confirmCalls, 1);
+    ASSERT_EQ(f.channel.snapshotCalls.size(), 1u);
+    EXPECT_EQ(f.channel.snapshotCalls[0], "restore:" + std::string(64, 'a'));
+}
+
+TEST(MainWindowTest, DeclinedRestoreSendsNothing) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+
+    f.confirmAnswer = false;
+    window.restoreSnapshotAction()->trigger();
+    QCoreApplication::processEvents();
+    EXPECT_EQ(f.confirmCalls, 1);
+    EXPECT_TRUE(f.channel.snapshotCalls.empty());
+}
+
+TEST(MainWindowTest, DeleteConfirmedInvokesFacadeWithSelectedId) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+
+    f.triggerAndAwaitMutation(window.deleteSnapshotAction());
+    EXPECT_EQ(f.confirmCalls, 1);
+    ASSERT_EQ(f.channel.snapshotCalls.size(), 1u);
+    EXPECT_EQ(f.channel.snapshotCalls[0], "delete:" + std::string(64, 'a'));
+}
+
+// The refusal path (task 5.2): a corrupt snapshot refuses restore locally. The
+// verb stays enabled (TUI parity), so the click reaches the guard branch, which
+// publishes through StatusLineVM — no confirm, no facade call. Delete on the
+// same corrupt snapshot is still permitted.
+TEST(MainWindowTest, CorruptSnapshotRestoreRefusedThroughStatusLineVM) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a', core::SnapshotHealth::Corrupt)});
+    auto window = f.makeWindow();
+    f.statusVm.arm();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+
+    window.restoreSnapshotAction()->trigger();
+    EXPECT_EQ(f.confirmCalls, 0);  // refusal short-circuits before the confirm
+    EXPECT_TRUE(f.channel.snapshotCalls.empty());
+    EXPECT_TRUE(window.statusBar()->currentMessage().contains(QStringLiteral("cannot restore:")));
+}
+
+// The placeholder (empty) list refuses both verbs locally: the guard branch
+// publishes the refusal instead of confirming or calling the facade.
+TEST(MainWindowTest, PlaceholderSnapshotDeleteRefusedThroughStatusLineVM) {
+    Fixture f;  // no snapshots seeded → "(no snapshots)" placeholder row
+    auto window = f.makeWindow();
+    f.statusVm.arm();
+    window.tabs()->setCurrentIndex(3);
+
+    window.deleteSnapshotAction()->trigger();
+    EXPECT_EQ(f.confirmCalls, 0);
+    EXPECT_TRUE(f.channel.snapshotCalls.empty());
+    EXPECT_TRUE(window.statusBar()->currentMessage().contains(QStringLiteral("cannot delete:")));
 }
 
 // ----- T12: destruction-order / teardown stress -----

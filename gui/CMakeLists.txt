@@ -10,6 +10,7 @@ add_library(devmgr_gui STATIC
     src/main_window.cpp
     src/module_list_model.cpp
     src/qt_ui_dispatcher.cpp
+    src/snapshot_list_model.cpp
     src/update_list_model.cpp)
 target_include_directories(devmgr_gui PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(devmgr_gui
@@ -22,6 +23,7 @@ add_executable(devmgr_gui_tests
     tests/test_main_window.cpp
     tests/test_module_list_model.cpp
     tests/test_qt_ui_dispatcher.cpp
+    tests/test_snapshot_list_model.cpp
     tests/test_update_list_model.cpp)
 target_include_directories(devmgr_gui_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_link_libraries(devmgr_gui_tests PRIVATE devmgr_gui Qt6::Test GTest::gtest)

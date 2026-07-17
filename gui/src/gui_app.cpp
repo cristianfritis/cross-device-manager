@@ -16,6 +16,7 @@
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/hotplug_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
+#include "devmgr/app/snapshots_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
 #include "devmgr/app/updates_vm.hpp"
 #include "devmgr/core/events.hpp"
@@ -93,6 +94,7 @@ int runGuiApp(int argc, char** argv) {
     app::StatusLineVM statusVm(bus, delayed, dispatcher);
     app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);
     app::UpdatesVM updatesVm(facade, bus, dispatcher);
+    app::SnapshotsVM snapshotsVm(facade, bus, dispatcher);
 
     // Keep every refresh future alive so we can wait on them before teardown —
     // ApplicationFacade::refresh()'s documented lifetime contract.
@@ -136,8 +138,8 @@ int runGuiApp(int argc, char** argv) {
     actions.onUnbindDriver = [&](const core::DeviceId& id) {
         pruneAndPush(facade.unbindDriver(id));
     };
-    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, updatesVm, dispatcher, bus,
-                      std::move(actions));
+    MainWindow window(facade, listVm, detailVm, statusVm, modulesVm, updatesVm, snapshotsVm,
+                      dispatcher, bus, std::move(actions));
 
     int rc = 0;
     // The try widens over hotplug.start()/publish for the same reason as
