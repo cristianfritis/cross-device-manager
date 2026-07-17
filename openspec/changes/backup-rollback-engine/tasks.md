@@ -26,7 +26,7 @@
 
 - [x] 5.1 TUI `[4]Snapshots` tab: digit/m-cycle integration, s=create (label prompt), r=restore (confirm modal), x=delete (confirm modal), outcome via status line; DESIGN.md conventions
 - [x] 5.2 GUI Snapshots tab: `SnapshotListModel` (list-model house pattern + model-tester), Create/Restore/Delete actions tab-gated, Qt confirm dialogs, status-bar outcomes + gui tests (row parity vs VM, refusal path)
-- [ ] 5.3 CLI binary `devmgr`: `snapshot list|create|restore|delete`, unique-prefix ids, exit codes 0–5, `--json`, sdbus-gated target + unit/integration tests (prefix ambiguity, daemon-down exit 4)
+- [x] 5.3 CLI binary `devmgr`: `snapshot list|create|restore|delete`, unique-prefix ids, exit codes 0–5, `--json`, sdbus-gated target + unit/integration tests (prefix ambiguity, daemon-down exit 4)
 
 ## 6. E2E, docs, close-out
 

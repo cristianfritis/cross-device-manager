@@ -26,6 +26,9 @@ if(UNIX AND NOT APPLE)
     option(DEVMGR_WITH_SDBUS "Build devmgrd + the D-Bus privileged channel" ${sdbus-c++_FOUND})
     add_subdirectory(platform/linux)
     add_subdirectory(daemon)
+    # Recovery CLI: bus-free logic builds always (its unit tests run even in the
+    # nosdbus config); the devmgr binary is gated on DEVMGR_WITH_SDBUS inside.
+    add_subdirectory(cli)
     add_subdirectory(tui)
     # Qt 6 GUI: auto-ON where system Qt is present, so the tree still
     # configures and builds with no Qt installed. (System packages by design —

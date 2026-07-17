@@ -2,7 +2,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -32,6 +34,34 @@ std::string readFile(const fs::path& p) {
     std::ifstream in(p);
     std::string s;
     std::getline(in, s);
+    return s;
+}
+
+// Runs the real `devmgr` recovery binary on the private session bus and returns
+// its exit code plus captured stdout. Driving the shipped executable (not the
+// channel directly) is the point: it proves argv parsing, exit codes, and the
+// D-Bus round-trip end to end. Inherits DBUS_SESSION_BUS_ADDRESS from
+// dbus-run-session, so it reaches the same daemon the fixture started.
+struct CliRun {
+    int code;
+    std::string out;
+};
+
+CliRun runCli(const std::string& args) {
+    const std::string cmd = std::string(DEVMGR_CLI_BIN) + " --bus session " + args + " 2>/dev/null";
+    std::string out;
+    FILE* pipe = ::popen(cmd.c_str(), "r");
+    if (pipe == nullptr) return {-1, out};
+    std::array<char, 512> buffer{};
+    size_t n = 0;
+    while ((n = ::fread(buffer.data(), 1, buffer.size(), pipe)) > 0)
+        out.append(buffer.data(), n);
+    const int status = ::pclose(pipe);
+    return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, out};
+}
+
+std::string trimmed(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
     return s;
 }
 
@@ -339,4 +369,43 @@ TEST_F(IpcRoundTripTest, RestorePartialConvergenceReportsGuardRefusal) {
     EXPECT_EQ(outcome->items[0].status, "guard-refused");
     EXPECT_EQ(outcome->items[0].detail, "backs the root filesystem");
     EXPECT_EQ(readFile(device_ / "authorized"), "1");  // refusal is never bypassed
+}
+
+// --- Recovery CLI end-to-end (snapshot-cli spec) ------------------------------
+
+TEST_F(IpcRoundTripTest, CliExitsFourWhenDaemonUnreachable) {
+    // No daemon on the private bus: every verb must exit 4 naming the bus error.
+    EXPECT_EQ(runCli("snapshot list").code, 4);
+    EXPECT_EQ(runCli("snapshot create").code, 4);
+    EXPECT_EQ(runCli("snapshot restore deadbeef").code, 4);
+}
+
+TEST_F(IpcRoundTripTest, CliSnapshotVerbsRoundTripThroughTheBus) {
+    startDaemon("allow-all");
+
+    // create prints the new full id and exits 0.
+    auto created = runCli("snapshot create --label cli-made");
+    ASSERT_EQ(created.code, 0) << created.out;
+    const std::string id = trimmed(created.out);
+    ASSERT_EQ(id.size(), 64U);
+
+    // list (human) shows the short id; --json carries the full id.
+    auto human = runCli("snapshot list");
+    EXPECT_EQ(human.code, 0);
+    EXPECT_NE(human.out.find(id.substr(0, 12)), std::string::npos);
+    auto asJson = runCli("snapshot list --json");
+    EXPECT_EQ(asJson.code, 0);
+    EXPECT_NE(asJson.out.find(id), std::string::npos);
+
+    // restore accepts a unique prefix and reports the outcome; exit 0.
+    auto restored = runCli("snapshot restore " + id.substr(0, 12));
+    EXPECT_EQ(restored.code, 0) << restored.out;
+    EXPECT_NE(restored.out.find("restored " + id.substr(0, 12)), std::string::npos);
+
+    // delete accepts a unique prefix; the store is empty afterwards.
+    auto deleted = runCli("snapshot delete " + id.substr(0, 12));
+    EXPECT_EQ(deleted.code, 0) << deleted.out;
+    auto empty = runCli("snapshot list");
+    EXPECT_EQ(empty.code, 0);
+    EXPECT_NE(empty.out.find("(no snapshots)"), std::string::npos);
 }
