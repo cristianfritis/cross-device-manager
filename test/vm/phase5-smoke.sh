@@ -29,7 +29,11 @@ rm -rf /var/lib/devmgrd   # clean slate for the persistence checks
 start_daemon() {
     ./build/linux-debug/daemon/devmgrd &
     DPID=$!
-    sleep 1
+    for _ in $(seq 1 50); do
+        busctl status org.devmgr.Manager1 >/dev/null 2>&1 && return 0
+        sleep 0.2
+    done
+    echo "devmgrd did not claim org.devmgr.Manager1 within 10s"; exit 1
 }
 stop_daemon() { kill "$DPID" 2>/dev/null || true; wait "$DPID" 2>/dev/null || true; }
 trap 'stop_daemon' EXIT

@@ -180,6 +180,36 @@ TEST_F(EnforcementServiceTest, SweepFallbackSkipsDeviceAlreadyDisabledOnDisk) {
     EXPECT_TRUE(pal_.setEnabledCalls.empty());
 }
 
+TEST_F(EnforcementServiceTest, SweepFallbackReappliesUnbindMechanism) {
+    const std::string path = makeSysfsDevice("usb3/3-2", "1");
+    // Simulate a driver rebound to the device while the daemon was down:
+    // maybeReapply's unbind-mechanism branch keys on boundDriver.has_value(),
+    // not the "authorized" attr (Phase 5 review T9 m-2).
+    const fs::path driverDir = dir_ / "bus/usb/drivers/e1000e";
+    fs::create_directories(driverDir);
+    std::error_code ec;
+    fs::create_directory_symlink(driverDir, fs::path(path) / "driver", ec);
+    ASSERT_FALSE(ec) << ec.message();
+
+    Device seeded;
+    seeded.sysfsPath = path;
+    pal_.seedDevice(seeded);  // controller side only — enumerator below sees nothing
+
+    auto e = entryFor(usbDevice(path, "SER-unbind"));
+    e.mechanism = "unbind";
+    e.lastDriver = "e1000e";
+    ASSERT_TRUE(store_->upsert(e).has_value());
+
+    EmptyEnumerator empty;
+    EnforcementService svc(empty, pal_, prober_, *store_, mutex_);
+    svc.sweep();
+
+    // FakePal's controller records setEnabled calls — assert the disable landed.
+    ASSERT_FALSE(pal_.setEnabledCalls.empty());
+    EXPECT_EQ(pal_.setEnabledCalls.back().sysfsPath, path);
+    EXPECT_FALSE(pal_.setEnabledCalls.back().enabled);
+}
+
 TEST_F(EnforcementServiceTest, SweepFallbackIgnoresVanishedPath) {
     // Entry survives, but the device is physically gone: no re-apply, no throw.
     ASSERT_TRUE(

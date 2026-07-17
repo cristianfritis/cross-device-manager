@@ -9,7 +9,9 @@ add_library(devmgr_pal_linux STATIC
     src/linux_criticality_prober.cpp
     src/udev_hotplug_monitor.cpp
     src/kmod_driver_manager.cpp
-    src/linux_system_info.cpp)
+    src/linux_system_info.cpp
+    src/cab_resolver.cpp
+    src/dkms_status_provider.cpp)
 target_include_directories(devmgr_pal_linux
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -19,7 +21,10 @@ target_link_libraries(devmgr_pal_linux
 target_compile_features(devmgr_pal_linux PUBLIC cxx_std_20)
 
 if(DEVMGR_WITH_SDBUS)
-    target_sources(devmgr_pal_linux PRIVATE src/dbus_privileged_channel.cpp)
+    target_sources(devmgr_pal_linux PRIVATE
+        src/dbus_privileged_channel.cpp
+        src/fwupd_contract.cpp
+        src/fwupd_update_provider.cpp)
     target_link_libraries(devmgr_pal_linux PRIVATE SDBusCpp::sdbus-c++)
     # Lets composition roots (tui/gui) wire the channel only when it exists.
     target_compile_definitions(devmgr_pal_linux PUBLIC DEVMGR_HAS_SDBUS)

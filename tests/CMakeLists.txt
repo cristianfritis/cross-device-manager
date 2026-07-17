@@ -13,6 +13,7 @@ add_executable(devmgr_tests
     unit/test_udev_field_mapping.cpp
     unit/test_device_service.cpp
     unit/test_application_facade.cpp
+    unit/test_application_facade_updates.cpp
     unit/test_device_list_vm.cpp
     unit/test_device_detail_vm.cpp
     unit/test_hotplug_service.cpp
@@ -21,6 +22,8 @@ add_executable(devmgr_tests
     unit/test_device_key.cpp
     unit/test_disabled_overlay.cpp
     unit/test_modules_vm.cpp
+    unit/test_update_models.cpp
+    unit/test_updates_vm.cpp
 )
 target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest GTest::gtest_main)
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -37,7 +40,9 @@ if(UNIX AND NOT APPLE)
         unit/test_kmod_driver_manager.cpp
         unit/test_kmod_error_taxonomy.cpp
         unit/test_linux_system_info.cpp
-        unit/test_enforcement_service.cpp)
+        unit/test_enforcement_service.cpp
+        unit/test_cab_resolver.cpp
+        unit/test_dkms_status_provider.cpp)
     target_link_libraries(devmgr_tests PRIVATE devmgr_pal_linux devmgrd_lib)
 
     # KmodDriverManagerTest needs real depmod-processed .ko files: libkmod's
@@ -69,4 +74,12 @@ if(UNIX AND NOT APPLE)
     target_compile_definitions(devmgr_tests PRIVATE
         DEVMGR_KMOD_FIXTURE_DIR="${DEVMGR_KMOD_FIXTURE_DIR}")
 endif()
+
+if(DEVMGR_WITH_SDBUS)
+    target_sources(devmgr_tests PRIVATE
+        unit/test_fwupd_contract.cpp
+        unit/test_fwupd_provider_nodaemon.cpp)
+    target_link_libraries(devmgr_tests PRIVATE SDBusCpp::sdbus-c++)  # sdbus::Variant in test bodies
+endif()
+
 gtest_discover_tests(devmgr_tests)

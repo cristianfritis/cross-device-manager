@@ -68,3 +68,62 @@ disable devices that would break the running system:
 
 Refused devices show the reason on the TUI status line and as a greyed-out
 action with a tooltip in the GUI. Re-enabling is never guarded.
+
+## Firmware & driver updates (Phase 6)
+
+Phase 6 adds an **Updates** tab to both UIs, covering device firmware (via
+fwupd) and DKMS out-of-tree kernel module status.
+
+- **Updates tab, both UIs.** TUI: third tab in the cycle (`Devices` →
+  `Modules` → `Updates`); `u` installs the selected release (confirm modal:
+  version delta, needs-reboot warning, estimated duration), `r` refreshes.
+  GUI: a dedicated **Updates** tab with the same install/refresh actions on
+  the toolbar and row context menu, progress shown in the status bar.
+- **fwupd, frontend-direct.** `FwupdUpdateProvider` talks to
+  `org.freedesktop.fwupd` directly over the system D-Bus (sdbus-c++ v2) —
+  unlike enable/disable and module management, updates never go through
+  `devmgrd`. One connection per process; daemon signals (`DeviceAdded`,
+  `DeviceChanged`, …) are forwarded onto the app `EventBus` and debounced
+  into a coalesced refresh. fwupd's own polkit action gates the privileged
+  `Install` call, so a desktop polkit agent is required exactly as for
+  Phase 4/5 — a bare TTY session gets a non-hanging "no polkit agent" error
+  instead of a hang.
+- **Local-cab-only installs.** A release is only actionable when its cab
+  file resolves to a path we can open ourselves (`file://`, an absolute
+  path, or a relative path under a `directory`-kind remote's cache) — never
+  an `https://` download. Remote-only releases are still shown, so you can
+  see what's available, but their install action is disabled; the detail
+  pane explains "external download required — run `fwupdmgr update`", which
+  performs the network fetch that fwupd's own CLI supports and that we
+  deliberately do not reimplement.
+- **DKMS: status only.** `DkmsStatusProvider` walks `/var/lib/dkms` and
+  `/lib/modules` read-only — no `dkms` binary invocation, no D-Bus. Rows
+  report a per-kernel state (`added` / `built` / `built + installed` /
+  `unknown`) as a status view only; DKMS rows never have an install action.
+- **Reboot-required banner.** An install that completes with disposition
+  `NeedsReboot` (or `Scheduled`/offline) is recorded as a durable pending
+  action — independent of whether the device stays visible in the live
+  candidate list — and surfaces as a banner plus a row marker in both UIs
+  until fwupd's own history reports it resolved (e.g. after the reboot
+  actually happens). The banner also carries the provider's availability
+  line (e.g. `fwupd 2.0.20`) and the host's Secure Boot state.
+
+### VM smoke test
+
+`test/vm/phase6-smoke.sh` drives `FwupdUpdateProvider`/`DkmsStatusProvider`
+directly (never `fwupdmgr`/`dkms` as a shortcut) against fwupd's built-in
+`fwupd-tests` fake-device remote: it enables the test devices, confirms a
+`fakedevice` upgrade is visible with a resolvable local cab, installs it
+end-to-end (`1.2.2` → `1.2.4`), and — where DKMS headers are available in the
+VM — registers a throwaway DKMS module and checks its status through
+`DkmsStatusProvider`. Run the whole rig (Phase 4 + 5 + 6) with:
+
+```sh
+./test-vm.sh
+```
+
+which provisions the disposable VM (now including the `fwupd` and `dkms`
+packages), builds the tree with `-DDEVMGR_WITH_SDBUS=ON`, and runs
+`test/vm/phase4-smoke.sh`, `test/vm/phase5-smoke.sh`, and
+`test/vm/phase6-smoke.sh` in sequence — expect `PHASE4 VM SMOKE OK`,
+`PHASE5 VM SMOKE OK`, and `PHASE6 VM SMOKE OK`.

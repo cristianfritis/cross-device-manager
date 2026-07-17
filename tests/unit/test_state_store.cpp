@@ -35,6 +35,21 @@ class StateStoreTest : public ::testing::Test {
         fs::remove_all(dir_);
     }
     void TearDown() override { fs::remove_all(dir_); }
+
+    [[nodiscard]] std::string dir() const { return dir_.string(); }
+    void writeStateFile(const std::string& contents) const {
+        fs::create_directories(dir_);
+        std::ofstream(dir_ / "state.json") << contents;
+    }
+    // Counts directory entries whose filename starts with `prefix`.
+    [[nodiscard]] int countFilesMatching(const std::string& prefix) const {
+        std::error_code ec;
+        if (!fs::exists(dir_, ec)) return 0;
+        int n = 0;
+        for (const auto& e : fs::directory_iterator(dir_))
+            if (e.path().filename().string().starts_with(prefix)) ++n;
+        return n;
+    }
 };
 
 TEST_F(StateStoreTest, RoundTripsEntriesAcrossInstances) {
@@ -68,7 +83,8 @@ TEST_F(StateStoreTest, CorruptFileIsMovedAsideAndStoreStartsEmpty) {
     StateStore store(dir_.string());
     ASSERT_TRUE(store.load().has_value());  // load succeeds (empty), evidence kept
     EXPECT_TRUE(store.entries().empty());
-    EXPECT_TRUE(fs::exists(dir_ / "state.json.bad"));
+    // Timestamped quarantine name (T4 m-4) — match by prefix, not exact name.
+    EXPECT_EQ(countFilesMatching("state.json.bad"), 1);
 }
 
 TEST_F(StateStoreTest, EntryLevelCorruptFileIsMovedAsideAndStoreStartsEmpty) {
@@ -77,7 +93,7 @@ TEST_F(StateStoreTest, EntryLevelCorruptFileIsMovedAsideAndStoreStartsEmpty) {
     StateStore store(dir_.string());
     ASSERT_TRUE(store.load().has_value());  // load succeeds (empty), evidence kept
     EXPECT_TRUE(store.entries().empty());
-    EXPECT_TRUE(fs::exists(dir_ / "state.json.bad"));
+    EXPECT_EQ(countFilesMatching("state.json.bad"), 1);
 }
 
 TEST_F(StateStoreTest, GuardSuspensionAndPathUpdatesPersist) {
@@ -91,6 +107,25 @@ TEST_F(StateStoreTest, GuardSuspensionAndPathUpdatesPersist) {
     ASSERT_TRUE(reloaded.load().has_value());
     EXPECT_TRUE(reloaded.entries()[0].guardSuspended);
     EXPECT_EQ(reloaded.entries()[0].lastSysfsPath, "/sys/new/path");
+}
+
+TEST_F(StateStoreTest, NullEntriesArrayQuarantinesFile) {
+    writeStateFile(R"({"version":1,"entries":null})");
+    StateStore store(dir());
+    ASSERT_TRUE(store.load().has_value());
+    EXPECT_TRUE(store.entries().empty());
+    // Evidence preserved: exactly one quarantine file, original gone.
+    EXPECT_EQ(countFilesMatching("state.json.bad"), 1);
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(dir()) / "state.json"));
+}
+
+TEST_F(StateStoreTest, SecondCorruptionDoesNotOverwriteFirstEvidence) {
+    writeStateFile("not json at all");
+    StateStore store(dir());
+    ASSERT_TRUE(store.load().has_value());
+    writeStateFile(R"({"entries":null})");
+    ASSERT_TRUE(store.load().has_value());
+    EXPECT_EQ(countFilesMatching("state.json.bad"), 2);  // timestamped, both kept
 }
 
 TEST_F(StateStoreTest, FindForMatchesBySerialTupleOrLastPath) {

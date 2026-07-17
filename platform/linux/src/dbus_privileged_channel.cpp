@@ -156,6 +156,13 @@ core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::list
         return out;
     } catch (const sdbus::Error& e) {
         return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
+    } catch (const std::exception& e) {
+        // Defense vs a future daemon omitting keys: m.at() throws
+        // std::out_of_range, which must not escape the never-throws Result
+        // contract nor kill the facade refresh worker (Phase 5 review T9 m-1).
+        return tl::unexpected(
+            core::makeError(core::Error::Code::Io,
+                            std::string{"malformed ListDisabledDevices reply: "} + e.what()));
     }
 }
 

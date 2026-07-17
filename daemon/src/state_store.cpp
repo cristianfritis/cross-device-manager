@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <utility>
@@ -57,6 +58,23 @@ core::Result<void> syncFd(const std::string& path, int flags) {
     if (::close(fd) != 0) return core::makeError(core::Error::Code::Io, "close failed: " + path);
     return {};
 }
+
+// Moves `file` aside so a corrupt/malformed state.json never gets silently
+// overwritten or destroyed (spec §5.2). Every call gets a fresh, distinct
+// name: timestamped, with a numeric suffix appended if a same-second
+// quarantine already exists — so a second corruption never clobbers the
+// first piece of evidence (Phase 5 review T4 m-4). dir is state_store's own
+// directory (dir_), file is always dir/"state.json"; both call sites pass
+// them in this fixed order, so a swap isn't a realistic mistake.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+void quarantine(const fs::path& dir, const fs::path& file) {
+    std::error_code ec;
+    const auto stamp = std::to_string(std::time(nullptr));
+    fs::path bad = dir / ("state.json.bad-" + stamp);
+    for (int n = 1; fs::exists(bad, ec); ++n)
+        bad = dir / ("state.json.bad-" + stamp + "." + std::to_string(n));
+    fs::rename(file, bad, ec);
+}
 }  // namespace
 
 StateStore::StateStore(std::string dirPath) : dir_(std::move(dirPath)) {}
@@ -69,9 +87,12 @@ core::Result<void> StateStore::load() {
     if (!fs::exists(file, ec)) return {};
     std::ifstream in(file);
     json doc = json::parse(in, nullptr, /*allow_exceptions=*/false);
-    if (doc.is_discarded() || !doc.is_object() || !doc.contains("entries")) {
-        // Never silently destroy evidence (spec §5.2).
-        fs::rename(file, fs::path(dir_) / "state.json.bad", ec);
+    if (doc.is_discarded() || !doc.is_object() || !doc.contains("entries") ||
+        !doc["entries"].is_array()) {
+        // Never silently destroy evidence (spec §5.2); null/non-array "entries"
+        // must quarantine too — iterating it as empty would silently drop every
+        // persisted disable (Phase 5 review T4 m-5).
+        quarantine(fs::path(dir_), file);
         return {};
     }
     std::vector<core::DisabledDeviceEntry> parsed;
@@ -81,7 +102,7 @@ core::Result<void> StateStore::load() {
         // Structurally-valid JSON but wrong entry shape (wrong types, missing
         // keys, etc). Same graceful path as top-level corruption: never
         // silently destroy evidence, and never leave entries_ half-filled.
-        fs::rename(file, fs::path(dir_) / "state.json.bad", ec);
+        quarantine(fs::path(dir_), file);
         return {};
     }
     entries_ = std::move(parsed);
@@ -100,11 +121,21 @@ core::Result<void> StateStore::save() {
         if (!out) return core::makeError(core::Error::Code::Io, "cannot write " + tmp.string());
         out << doc.dump(2);
         out.flush();
-        if (!out) return core::makeError(core::Error::Code::Io, "write failed: " + tmp.string());
+        if (!out) {
+            fs::remove(tmp, ec);
+            return core::makeError(core::Error::Code::Io, "write failed: " + tmp.string());
+        }
     }  // ofstream closed here — safe to reopen and fsync its contents.
-    if (auto r = syncFd(tmp.string(), O_WRONLY | O_CLOEXEC); !r) return r;
+    if (auto r = syncFd(tmp.string(), O_WRONLY | O_CLOEXEC); !r) {
+        fs::remove(tmp, ec);
+        return r;
+    }
     fs::rename(tmp, file, ec);  // atomic on POSIX
-    if (ec) return core::makeError(core::Error::Code::Io, "rename failed: " + ec.message());
+    if (ec) {
+        const auto msg = ec.message();
+        fs::remove(tmp, ec);
+        return core::makeError(core::Error::Code::Io, "rename failed: " + msg);
+    }
     // fsync the directory entry too, so the rename itself survives a crash.
     if (auto r = syncFd(dir_, O_RDONLY | O_DIRECTORY | O_CLOEXEC); !r) return r;
     return {};
