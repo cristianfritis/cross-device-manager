@@ -15,6 +15,8 @@
 #include "devmgr/daemon/authority.hpp"
 #include "devmgr/daemon/enforcement_service.hpp"
 #include "devmgr/daemon/request_processor.hpp"
+#include "devmgr/daemon/snapshot_service.hpp"
+#include "devmgr/daemon/snapshot_store.hpp"
 #include "devmgr/daemon/state_store.hpp"
 #include "devmgr/platform/linux/dbus_contract.hpp"
 #include "devmgr/platform/linux/kmod_driver_manager.hpp"
@@ -32,6 +34,7 @@ struct Options {
     std::string mountsPath = "/proc/self/mounts";
     std::string authority = "polkit";
     std::string stateDir = "/var/lib/devmgrd";
+    std::string modprobeDir = "/etc/modprobe.d";
     bool valid = true;
 };
 
@@ -42,7 +45,8 @@ Options parse(std::span<char*> args) {
                                                             {"--sysfs-root", &opts.sysfsRoot},
                                                             {"--mounts-path", &opts.mountsPath},
                                                             {"--authority", &opts.authority},
-                                                            {"--state-dir", &opts.stateDir}};
+                                                            {"--state-dir", &opts.stateDir},
+                                                            {"--modprobe-dir", &opts.modprobeDir}};
     for (std::size_t i = 1; i < args.size(); ++i) {
         const auto flag = flags.find(args[i]);
         if (flag == flags.end() || i + 1 == args.size()) {
@@ -63,6 +67,17 @@ std::unique_ptr<devmgr::daemon::IAuthority> makeAuthority(const std::string& kin
     return std::make_unique<devmgr::daemon::PolkitAuthority>();
 }
 
+void warnNonDefaultSeams(const Options& opts) {
+    if (opts.bus == "system" && opts.sysfsRoot == "/sys" &&
+        opts.mountsPath == "/proc/self/mounts" && opts.authority == "polkit" &&
+        opts.stateDir == "/var/lib/devmgrd" && opts.modprobeDir == "/etc/modprobe.d")
+        return;
+    spdlog::warn(
+        "running with NON-DEFAULT seams (test/dev mode): bus={} sysfs={} mounts={} "
+        "authority={} state-dir={} modprobe-dir={} — never use these in production",
+        opts.bus, opts.sysfsRoot, opts.mountsPath, opts.authority, opts.stateDir, opts.modprobeDir);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -71,18 +86,11 @@ int main(int argc, char** argv) {
     if (!opts.valid) {
         std::cerr << "usage: devmgrd [--bus system|session] [--sysfs-root PATH] "
                      "[--mounts-path PATH] [--authority polkit|allow-all|deny-all] "
-                     "[--state-dir PATH]\n";
+                     "[--state-dir PATH] [--modprobe-dir PATH]\n";
         return 2;
     }
     devmgr::runtime::init();  // spdlog global setup — the repo's logging entry point
-    if (opts.bus != "system" || opts.sysfsRoot != "/sys" ||
-        opts.mountsPath != "/proc/self/mounts" || opts.authority != "polkit" ||
-        opts.stateDir != "/var/lib/devmgrd") {
-        spdlog::warn(
-            "running with NON-DEFAULT seams (test/dev mode): bus={} sysfs={} mounts={} "
-            "authority={} state-dir={} — never use these in production",
-            opts.bus, opts.sysfsRoot, opts.mountsPath, opts.authority, opts.stateDir);
-    }
+    warnNonDefaultSeams(opts);
     try {
         auto connection =
             opts.bus == "session"
@@ -97,8 +105,11 @@ int main(int argc, char** argv) {
             spdlog::warn("state store load failed: {}", loaded.error().message);
         std::mutex applyMutex;
         auto authority = makeAuthority(opts.authority);
+        daemon::JsonSnapshotStore snapshotStore(opts.stateDir + "/snapshots");
+        daemon::SnapshotService snapshots(snapshotStore, store, enumerator, controller, prober,
+                                          opts.modprobeDir);
         daemon::RequestProcessor processor(controller, prober, *authority, drivers, enumerator,
-                                           store, applyMutex, opts.sysfsRoot);
+                                           store, snapshots, applyMutex, opts.sysfsRoot);
         daemon::EnforcementService enforcement(enumerator, controller, prober, store, applyMutex);
         enforcement.sweep();  // startup re-apply (spec §5.3)
         platform_linux::UdevHotplugMonitor monitor;

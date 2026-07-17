@@ -6,6 +6,10 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(devmgrd_lib STATIC
     src/request_processor.cpp
     src/state_store.cpp
+    src/atomic_file.cpp
+    src/entry_json.cpp
+    src/snapshot_store.cpp
+    src/snapshot_service.cpp
     src/enforcement_service.cpp
     src/sysfs_device_probe.cpp)
 target_include_directories(devmgrd_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

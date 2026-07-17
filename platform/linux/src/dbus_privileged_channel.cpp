@@ -10,10 +10,18 @@
 
 #include <sdbus-c++/sdbus-c++.h>
 
+#include "devmgr/core/snapshot_json.hpp"
 #include "devmgr/platform/linux/dbus_contract.hpp"
 
 namespace {
-constexpr int kListDisabledDevicesTimeoutSeconds = 5;
+// Read-only listings answer from memory/disk; mutating verbs may sit behind
+// an interactive polkit prompt (minutes), matching the Phase 4/5 verbs.
+constexpr int kListVerbTimeoutSeconds = 5;
+
+std::string apiTooOldMessage(std::uint32_t api, std::uint32_t minVersion) {
+    return "devmgrd too old (API " + std::to_string(api) + " < " + std::to_string(minVersion) +
+           ") — restart the daemon";
+}
 
 std::unique_ptr<sdbus::IProxy> makeProxy(devmgr::platform_linux::DbusPrivilegedChannel::Bus bus) {
     auto connection = bus == devmgr::platform_linux::DbusPrivilegedChannel::Bus::Session
@@ -46,14 +54,13 @@ core::Result<void> DbusPrivilegedChannel::setDeviceEnabled(const core::Device& d
     }
 }
 
-core::Result<void> DbusPrivilegedChannel::ensureApi2() {
+core::Result<void> DbusPrivilegedChannel::ensureApi(std::uint32_t minVersion) {
     {
         const std::scoped_lock lock(cacheMutex_);
         if (cachedApi_) {
-            if (*cachedApi_ >= 2) return {};
+            if (*cachedApi_ >= minVersion) return {};
             return core::makeError(core::Error::Code::Unsupported,
-                                   "devmgrd too old (API " + std::to_string(*cachedApi_) +
-                                       " < 2) — restart the daemon");
+                                   apiTooOldMessage(*cachedApi_, minVersion));
         }
     }
     try {
@@ -63,17 +70,15 @@ core::Result<void> DbusPrivilegedChannel::ensureApi2() {
         const auto api = v.get<std::uint32_t>();
         const std::scoped_lock lock(cacheMutex_);
         cachedApi_ = api;
-        if (api >= 2) return {};
-        return core::makeError(
-            core::Error::Code::Unsupported,
-            "devmgrd too old (API " + std::to_string(api) + " < 2) — restart the daemon");
+        if (api >= minVersion) return {};
+        return core::makeError(core::Error::Code::Unsupported, apiTooOldMessage(api, minVersion));
     } catch (const sdbus::Error& e) {
         return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
     }
 }
 
 core::Result<void> DbusPrivilegedChannel::loadModule(const std::string& name) {
-    if (auto api = ensureApi2(); !api) return api;
+    if (auto api = ensureApi(2); !api) return api;
     try {
         auto proxy = makeProxy(bus_);
         proxy->callMethod("LoadModule")
@@ -87,7 +92,7 @@ core::Result<void> DbusPrivilegedChannel::loadModule(const std::string& name) {
 }
 
 core::Result<void> DbusPrivilegedChannel::unloadModule(const std::string& name) {
-    if (auto api = ensureApi2(); !api) return api;
+    if (auto api = ensureApi(2); !api) return api;
     try {
         auto proxy = makeProxy(bus_);
         proxy->callMethod("UnloadModule")
@@ -102,7 +107,7 @@ core::Result<void> DbusPrivilegedChannel::unloadModule(const std::string& name) 
 
 core::Result<void> DbusPrivilegedChannel::bindDriver(const core::Device& device,
                                                      const std::string& driverName) {
-    if (auto api = ensureApi2(); !api) return api;
+    if (auto api = ensureApi(2); !api) return api;
     try {
         auto proxy = makeProxy(bus_);
         proxy->callMethod("BindDriver")
@@ -116,7 +121,7 @@ core::Result<void> DbusPrivilegedChannel::bindDriver(const core::Device& device,
 }
 
 core::Result<void> DbusPrivilegedChannel::unbindDriver(const core::Device& device) {
-    if (auto api = ensureApi2(); !api) return api;
+    if (auto api = ensureApi(2); !api) return api;
     try {
         auto proxy = makeProxy(bus_);
         proxy->callMethod("UnbindDriver")
@@ -130,13 +135,13 @@ core::Result<void> DbusPrivilegedChannel::unbindDriver(const core::Device& devic
 }
 
 core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::listDisabledDevices() {
-    if (auto api = ensureApi2(); !api) return tl::unexpected(api.error());
+    if (auto api = ensureApi(2); !api) return tl::unexpected(api.error());
     try {
         auto proxy = makeProxy(bus_);
         std::vector<std::map<std::string, sdbus::Variant>> raw;
         proxy->callMethod("ListDisabledDevices")
             .onInterface(sdbus::InterfaceName{kInterfaceName})
-            .withTimeout(std::chrono::seconds(kListDisabledDevicesTimeoutSeconds))
+            .withTimeout(std::chrono::seconds(kListVerbTimeoutSeconds))
             .storeResultsTo(raw);
         std::vector<core::DisabledDeviceEntry> out;
         for (const auto& m : raw) {
@@ -163,6 +168,67 @@ core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::list
         return tl::unexpected(
             core::makeError(core::Error::Code::Io,
                             std::string{"malformed ListDisabledDevices reply: "} + e.what()));
+    }
+}
+
+core::Result<std::vector<core::SnapshotMeta>> DbusPrivilegedChannel::snapshotList() {
+    if (auto api = ensureApi(3); !api) return tl::unexpected(api.error());
+    try {
+        auto proxy = makeProxy(bus_);
+        std::string json;
+        proxy->callMethod("SnapshotList")
+            .onInterface(sdbus::InterfaceName{kInterfaceName})
+            .withTimeout(std::chrono::seconds(kListVerbTimeoutSeconds))
+            .storeResultsTo(json);
+        return core::snapshotListFromJson(json);
+    } catch (const sdbus::Error& e) {
+        return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
+    }
+}
+
+core::Result<std::string> DbusPrivilegedChannel::snapshotCreate(const std::string& label) {
+    if (auto api = ensureApi(3); !api) return tl::unexpected(api.error());
+    try {
+        auto proxy = makeProxy(bus_);
+        std::string id;
+        proxy->callMethod("SnapshotCreate")
+            .onInterface(sdbus::InterfaceName{kInterfaceName})
+            .withArguments(label)
+            .withTimeout(std::chrono::minutes(2))
+            .storeResultsTo(id);
+        return id;
+    } catch (const sdbus::Error& e) {
+        return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
+    }
+}
+
+core::Result<core::RestoreOutcome> DbusPrivilegedChannel::snapshotRestore(const std::string& id) {
+    if (auto api = ensureApi(3); !api) return tl::unexpected(api.error());
+    try {
+        auto proxy = makeProxy(bus_);
+        std::string json;
+        proxy->callMethod("SnapshotRestore")
+            .onInterface(sdbus::InterfaceName{kInterfaceName})
+            .withArguments(id)
+            .withTimeout(std::chrono::minutes(2))
+            .storeResultsTo(json);
+        return core::restoreOutcomeFromJson(json);
+    } catch (const sdbus::Error& e) {
+        return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
+    }
+}
+
+core::Result<void> DbusPrivilegedChannel::snapshotDelete(const std::string& id) {
+    if (auto api = ensureApi(3); !api) return api;
+    try {
+        auto proxy = makeProxy(bus_);
+        proxy->callMethod("SnapshotDelete")
+            .onInterface(sdbus::InterfaceName{kInterfaceName})
+            .withArguments(id)
+            .withTimeout(std::chrono::minutes(2));
+        return {};
+    } catch (const sdbus::Error& e) {
+        return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
     }
 }
 

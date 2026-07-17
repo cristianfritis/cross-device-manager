@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include "devmgr/core/models.hpp"
+#include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
 
 namespace fs = std::filesystem;
@@ -55,6 +56,9 @@ class IpcRoundTripTest : public ::testing::Test {
         std::ofstream(device_ / "idProduct") << "0x5678";
         std::ofstream(device_ / "serial") << "IPCSER";
         std::ofstream(root_ / "mounts") << "";  // no storage facts by default
+        // Private modprobe.d: snapshot payloads must never capture (or restore
+        // over) the host's real /etc/modprobe.d.
+        fs::create_directories(root_ / "modprobe.d");
     }
 
     void startDaemon(const char* authority) {
@@ -63,8 +67,8 @@ class IpcRoundTripTest : public ::testing::Test {
         if (daemonPid_ == 0) {
             ::execl(DEVMGRD_BIN, "devmgrd", "--bus", "session", "--sysfs-root", root_.c_str(),
                     "--mounts-path", (root_ / "mounts").c_str(), "--state-dir",
-                    (root_ / "state").c_str(), "--authority", authority,
-                    static_cast<char*>(nullptr));
+                    (root_ / "state").c_str(), "--modprobe-dir", (root_ / "modprobe.d").c_str(),
+                    "--authority", authority, static_cast<char*>(nullptr));
             ::_exit(127);
         }
         // Up when a bogus-path call stops failing with "helper unavailable".
@@ -217,4 +221,122 @@ TEST_F(IpcRoundTripTest, InvalidModuleNameRefusedAsNotFound) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, Error::Code::NotFound);
     EXPECT_EQ(r.error().message, "invalid module name");
+}
+
+TEST_F(IpcRoundTripTest, SnapshotLifecycleRoundTripsThroughTheBus) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+
+    // Disable → the pre-mutation auto snapshot (empty payload) appears.
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+    auto afterDisable = channel.snapshotList();
+    ASSERT_TRUE(afterDisable.has_value()) << afterDisable.error().message;
+    ASSERT_EQ(afterDisable->size(), 1U);
+    const devmgr::core::SnapshotMeta autoMeta = (*afterDisable)[0];
+    EXPECT_EQ(autoMeta.id.size(), 64U);
+    EXPECT_FALSE(autoMeta.parent.has_value());
+    EXPECT_EQ(autoMeta.trigger, devmgr::core::SnapshotTrigger::Auto);
+    EXPECT_EQ(autoMeta.reason.verb, "SetDeviceEnabled");
+    EXPECT_EQ(autoMeta.health, devmgr::core::SnapshotHealth::Ok);
+    EXPECT_EQ(autoMeta.entryCount, 0U);
+
+    // Manual snapshot captures the disabled state and chains onto the auto one.
+    auto manualId = channel.snapshotCreate("with-disable");
+    ASSERT_TRUE(manualId.has_value()) << manualId.error().message;
+    auto listed = channel.snapshotList();
+    ASSERT_TRUE(listed.has_value());
+    ASSERT_EQ(listed->size(), 2U);  // newest first via the HEAD chain
+    EXPECT_EQ((*listed)[0].id, *manualId);
+    EXPECT_EQ((*listed)[0].trigger, devmgr::core::SnapshotTrigger::Manual);
+    EXPECT_EQ((*listed)[0].reason.subject, "with-disable");
+    EXPECT_EQ((*listed)[0].entryCount, 1U);
+    ASSERT_TRUE((*listed)[0].parent.has_value());
+    EXPECT_EQ(*(*listed)[0].parent, autoMeta.id);
+
+    // Restore the pre-disable snapshot: device re-enabled, outcome itemized.
+    auto outcome = channel.snapshotRestore(autoMeta.id);
+    ASSERT_TRUE(outcome.has_value()) << outcome.error().message;
+    EXPECT_EQ(outcome->snapshotId, autoMeta.id);
+    // The safety snapshot dedupes onto the manual one: state is unchanged
+    // between the manual capture and the restore.
+    EXPECT_EQ(outcome->safetySnapshotId, *manualId);
+    ASSERT_EQ(outcome->items.size(), 1U);
+    EXPECT_EQ(outcome->items[0].action, "re-enable");
+    EXPECT_EQ(outcome->items[0].status, "ok");
+    EXPECT_EQ(readFile(device_ / "authorized"), "1");
+    auto disabled = channel.listDisabledDevices();
+    ASSERT_TRUE(disabled.has_value());
+    EXPECT_TRUE(disabled->empty());
+
+    // Delete the manual snapshot (HEAD): the auto one survives as new HEAD.
+    ASSERT_TRUE(channel.snapshotDelete(*manualId).has_value());
+    auto afterDelete = channel.snapshotList();
+    ASSERT_TRUE(afterDelete.has_value());
+    ASSERT_EQ(afterDelete->size(), 1U);
+    EXPECT_EQ((*afterDelete)[0].id, autoMeta.id);
+}
+
+TEST_F(IpcRoundTripTest, SnapshotMutationsDeniedButListStaysUnprivileged) {
+    startDaemon("deny-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    auto created = channel.snapshotCreate("nope");
+    ASSERT_FALSE(created.has_value());
+    EXPECT_EQ(created.error().code, Error::Code::Permission);
+    auto restored = channel.snapshotRestore("deadbeef");
+    ASSERT_FALSE(restored.has_value());
+    EXPECT_EQ(restored.error().code, Error::Code::Permission);
+    auto deleted = channel.snapshotDelete("deadbeef");
+    ASSERT_FALSE(deleted.has_value());
+    EXPECT_EQ(deleted.error().code, Error::Code::Permission);
+    auto listed = channel.snapshotList();  // metadata only: no authorization needed
+    ASSERT_TRUE(listed.has_value()) << listed.error().message;
+    EXPECT_TRUE(listed->empty());
+}
+
+TEST_F(IpcRoundTripTest, UnknownOrInvalidSnapshotIdsArriveAsNotFound) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    auto restored = channel.snapshotRestore("deadbeef");  // valid hex, no such snapshot
+    ASSERT_FALSE(restored.has_value());
+    EXPECT_EQ(restored.error().code, Error::Code::NotFound);
+    auto listed = channel.snapshotList();  // spec: a refused restore takes no snapshot
+    ASSERT_TRUE(listed.has_value());
+    EXPECT_TRUE(listed->empty());
+    auto deleted = channel.snapshotDelete("deadbeef");
+    ASSERT_FALSE(deleted.has_value());
+    EXPECT_EQ(deleted.error().code, Error::Code::NotFound);
+    auto traversal = channel.snapshotRestore("../evil");  // path-traversal guard
+    ASSERT_FALSE(traversal.has_value());
+    EXPECT_EQ(traversal.error().code, Error::Code::NotFound);
+    EXPECT_EQ(traversal.error().message, "invalid snapshot id");
+}
+
+TEST_F(IpcRoundTripTest, RestorePartialConvergenceReportsGuardRefusal) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    // Disable while harmless, capture that state manually, then re-enable.
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+    auto snapId = channel.snapshotCreate("disabled-era");
+    ASSERT_TRUE(snapId.has_value()) << snapId.error().message;
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), true).has_value());
+
+    // The device now hosts the root filesystem's disk: the restore's re-apply
+    // must be guard-refused — as an outcome ITEM, with the verb succeeding.
+    const fs::path block = device_ / "1-4:1.0/host7/block/sdb";
+    fs::create_directories(block);
+    fs::create_directories(root_ / "class/block");
+    fs::create_directory_symlink(block, root_ / "class/block/sdb");
+    fs::create_directories(root_ / "dev");
+    std::ofstream(root_ / "dev/sdb") << "";
+    std::ofstream(root_ / "mounts") << (root_ / "dev/sdb").string() + " / ext4 rw 0 0\n";
+
+    auto outcome = channel.snapshotRestore(*snapId);
+    ASSERT_TRUE(outcome.has_value()) << outcome.error().message;
+    EXPECT_EQ(outcome->snapshotId, *snapId);
+    EXPECT_FALSE(outcome->safetySnapshotId.empty());
+    ASSERT_EQ(outcome->items.size(), 1U);
+    EXPECT_EQ(outcome->items[0].action, "re-apply-disable");
+    EXPECT_EQ(outcome->items[0].status, "guard-refused");
+    EXPECT_EQ(outcome->items[0].detail, "backs the root filesystem");
+    EXPECT_EQ(readFile(device_ / "authorized"), "1");  // refusal is never bypassed
 }

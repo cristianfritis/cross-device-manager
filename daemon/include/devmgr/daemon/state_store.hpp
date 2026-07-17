@@ -20,6 +20,8 @@ class StateStore {
     core::Result<void> load();  // missing file => empty store, success
     core::Result<void> upsert(const core::DisabledDeviceEntry& entry);  // keyed by entry.key
     core::Result<void> remove(const core::DeviceKey& key);
+    // Atomically replaces the whole entry list (snapshot restore write-back).
+    core::Result<void> replaceAll(std::vector<core::DisabledDeviceEntry> entries);
     core::Result<void> setGuardSuspended(const core::DeviceKey& key, bool suspended);
     core::Result<void> setLastSysfsPath(const core::DeviceKey& key, const std::string& path);
     std::vector<core::DisabledDeviceEntry> entries() const;

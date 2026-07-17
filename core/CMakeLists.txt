@@ -6,6 +6,9 @@ find_package(Threads REQUIRED)
 add_library(devmgr_core
     src/version.cpp
     src/models.cpp
+    src/snapshot_models.cpp
+    src/snapshot_json.cpp
+    src/sha256.cpp
     src/logging.cpp
     src/task_scheduler.cpp
     src/delayed_scheduler.cpp

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "devmgr/core/snapshot_json.hpp"
 #include "devmgr/platform/linux/dbus_contract.hpp"
 
 namespace devmgr::daemon {
@@ -13,6 +14,16 @@ void throwIfFailed(const core::Result<void>& result) {
         throw sdbus::Error(
             sdbus::Error::Name{platform_linux::dbusErrorNameFor(result.error().code)},
             result.error().message);
+}
+
+// Unwraps Result<T> or throws the mapped D-Bus error (value-returning verbs).
+template <class T>
+T valueOrThrow(core::Result<T> result) {
+    if (!result)
+        throw sdbus::Error(
+            sdbus::Error::Name{platform_linux::dbusErrorNameFor(result.error().code)},
+            result.error().message);
+    return std::move(*result);
 }
 }  // namespace
 
@@ -66,6 +77,29 @@ ManagerAdaptor::ManagerAdaptor(sdbus::IConnection& connection, RequestProcessor&
                                        {"guard_suspended", sdbus::Variant(e.guardSuspended)}});
                     }
                     return out;
+                }),
+            sdbus::registerMethod("SnapshotList")
+                .withOutputParamNames("metadata_json")
+                .implementedAs([this] {
+                    return core::snapshotListToJson(valueOrThrow(processor_.snapshotList()));
+                }),
+            sdbus::registerMethod("SnapshotCreate")
+                .withInputParamNames("label")
+                .withOutputParamNames("id")
+                .implementedAs([this, sender](const std::string& label) {
+                    return valueOrThrow(processor_.snapshotCreate(sender(), label));
+                }),
+            sdbus::registerMethod("SnapshotRestore")
+                .withInputParamNames("id")
+                .withOutputParamNames("outcome_json")
+                .implementedAs([this, sender](const std::string& id) {
+                    return core::restoreOutcomeToJson(
+                        valueOrThrow(processor_.snapshotRestore(sender(), id)));
+                }),
+            sdbus::registerMethod("SnapshotDelete")
+                .withInputParamNames("id")
+                .implementedAs([this, sender](const std::string& id) {
+                    throwIfFailed(processor_.snapshotDelete(sender(), id));
                 }),
             sdbus::registerProperty("ApiVersion").withGetter([] {
                 return platform_linux::kApiVersion;

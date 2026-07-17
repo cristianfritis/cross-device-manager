@@ -2,20 +2,20 @@
 
 ## 1. Core models and store
 
-- [ ] 1.1 Snapshot core models in `core/` (SnapshotMeta, SnapshotPayload, trigger/reason types, events) + unit tests
-- [ ] 1.2 `ISnapshotStore` interface + JSON file store v1 in `daemon/`: canonical payload serialization, SHA-256 id, parent/HEAD chain, tmp+fsync+rename writes, hash-verify + quarantine on read, formatVersion gate + unit tests (round-trip, torn-write, corrupt, future-version)
-- [ ] 1.3 Pruning (keep-last-20 auto, manual exempt, dangling-parent tolerance) + hash-dedupe (payload hash == HEAD → return existing id) + unit tests
+- [x] 1.1 Snapshot core models in `core/` (SnapshotMeta, SnapshotPayload, trigger/reason types, events) + unit tests
+- [x] 1.2 `ISnapshotStore` interface + JSON file store v1 in `daemon/`: canonical payload serialization, SHA-256 id, parent/HEAD chain, tmp+fsync+rename writes, hash-verify + quarantine on read, formatVersion gate + unit tests (round-trip, torn-write, corrupt, future-version)
+- [x] 1.3 Pruning (keep-last-20 auto, manual exempt, dangling-parent tolerance) + hash-dedupe (payload hash == HEAD → return existing id) + unit tests
 
 ## 2. Lifecycle service and hook
 
-- [ ] 2.1 `SnapshotService`: create (under apply mutex, payload gathered from StateStore + devmgr modprobe.d files), list, delete (HEAD→parent move) + unit tests on fake store dir
-- [ ] 2.2 Restore: integrity check → own auto safety snapshot → atomic write-back (StateStore replace-all, modprobe.d rewrite) → convergence (enforcement sweep re-applies; pre/post entry-set diff triggers re-enables; guard refusals collected) → per-item outcome summary + unit tests on FakePal (re-enable case, re-apply case, guard-refusal case, undo-restore case)
-- [ ] 2.3 `RequestProcessor` auto-snapshot hook before every mutating verb, fail-closed on snapshot error + unit tests (snapshot-before-write ordering, unwritable-dir blocks mutation)
+- [x] 2.1 `SnapshotService`: create (under apply mutex, payload gathered from StateStore + devmgr modprobe.d files), list, delete (HEAD→parent move) + unit tests on fake store dir
+- [x] 2.2 Restore: integrity check → own auto safety snapshot → atomic write-back (StateStore replace-all, modprobe.d rewrite) → convergence (enforcement sweep re-applies; pre/post entry-set diff triggers re-enables; guard refusals collected) → per-item outcome summary + unit tests on FakePal (re-enable case, re-apply case, guard-refusal case, undo-restore case)
+- [x] 2.3 `RequestProcessor` auto-snapshot hook before every mutating verb, fail-closed on snapshot error + unit tests (snapshot-before-write ordering, unwritable-dir blocks mutation)
 
 ## 3. IPC v3
 
-- [ ] 3.1 `org.devmgr.Manager1` ApiVersion 2→3: SnapshotList/Create/Restore/Delete verbs, dbus_contract + adaptor + error taxonomy mapping (NotFound/Io/NotAuthorized) + polkit action `org.devmgr.manage-snapshots` (auth_admin_keep; List unprivileged) in `daemon/data/org.devmgr.policy`
-- [ ] 3.2 `DbusPrivilegedChannel` client side for the four verbs + `tests/ipc` round-trip suite extension (authorized, unauthorized, unknown id, partial-convergence summary)
+- [x] 3.1 `org.devmgr.Manager1` ApiVersion 2→3: SnapshotList/Create/Restore/Delete verbs, dbus_contract + adaptor + error taxonomy mapping (NotFound/Io/NotAuthorized) + polkit action `org.devmgr.manage-snapshots` (auth_admin_keep; List unprivileged) in `daemon/data/org.devmgr.policy`
+- [x] 3.2 `DbusPrivilegedChannel` client side for the four verbs + `tests/ipc` round-trip suite extension (authorized, unauthorized, unknown id, partial-convergence summary)
 
 ## 4. Facade and SnapshotsVM
 

@@ -10,10 +10,13 @@ namespace devmgr::platform_linux {
 // The Phase 4 IPC contract (spec 2026-07-03) — names + the error table, shared
 // by devmgrd (throw side) and DbusPrivilegedChannel (catch side). Pure
 // strings: NO sdbus-c++ include here (CI purity guard).
+// ApiVersion 3 (Phase 7): additive snapshot verbs — SnapshotList() -> s,
+// SnapshotCreate(s label) -> s, SnapshotRestore(s id) -> s, SnapshotDelete(s
+// id). All v2 verbs unchanged; clients check ApiVersion >= required.
 inline constexpr const char* kBusName = "org.devmgr.Manager1";
 inline constexpr const char* kObjectPath = "/org/devmgr/Manager1";
 inline constexpr const char* kInterfaceName = "org.devmgr.Manager1";
-inline constexpr std::uint32_t kApiVersion = 2;
+inline constexpr std::uint32_t kApiVersion = 3;
 
 inline constexpr const char* kErrCritical = "org.devmgr.Error.CriticalDevice";
 inline constexpr const char* kErrNotAuthorized = "org.devmgr.Error.NotAuthorized";

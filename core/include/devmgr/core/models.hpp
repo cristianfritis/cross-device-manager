@@ -89,38 +89,6 @@ struct DisabledDeviceEntry {
     friend bool operator==(const DisabledDeviceEntry&, const DisabledDeviceEntry&) = default;
 };
 
-struct DeviceState {
-    DeviceId id;
-    bool enabled = true;
-    std::optional<std::string> boundDriver;
-    std::optional<std::string> driverVersion;
-};
-
-struct DriverState {
-    std::string name;
-    std::string version;
-    bool loaded = false;
-    std::vector<std::string> options;
-};
-
-struct Snapshot {
-    std::string id;  // sha256 of canonical body (filled by BackupService in Phase 7)
-    std::optional<std::string> parent;
-    std::int64_t timestampUtc = 0;
-    std::string author;
-    std::string description;
-    std::string osVersion;
-    std::string kernelVersion;
-    std::vector<DeviceState> devices;
-    std::vector<DriverState> drivers;
-    std::vector<std::string> modprobeConfigDigests;
-};
-
-struct HistoryGraph {
-    std::string head;
-    std::map<std::string, Snapshot> nodes;
-};
-
 }  // namespace devmgr::core
 
 template <>

@@ -6,6 +6,7 @@
 
 #include "devmgr/core/models.hpp"
 #include "devmgr/core/result.hpp"
+#include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/update_models.hpp"
 #include "devmgr/pal/hotplug_event.hpp"
 #include "devmgr/runtime/progress.hpp"
@@ -123,6 +124,14 @@ class IPrivilegedChannel {
                                           const std::string& driverName) = 0;
     virtual core::Result<void> unbindDriver(const core::Device& device) = 0;
     virtual core::Result<std::vector<core::DisabledDeviceEntry>> listDisabledDevices() = 0;
+    // ApiVersion 3 snapshot verbs (snapshot-ipc spec). The mutating three are
+    // polkit-gated (interactive auth: blocking, worker-thread only, like the
+    // verbs above); list is unprivileged metadata. Guard refusals during
+    // restore are ITEMS in the outcome, never channel-level errors.
+    virtual core::Result<std::vector<core::SnapshotMeta>> snapshotList() = 0;
+    virtual core::Result<std::string> snapshotCreate(const std::string& label) = 0;
+    virtual core::Result<core::RestoreOutcome> snapshotRestore(const std::string& id) = 0;
+    virtual core::Result<void> snapshotDelete(const std::string& id) = 0;
 };
 
 }  // namespace devmgr::pal

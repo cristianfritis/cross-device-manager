@@ -24,20 +24,54 @@ std::int64_t nowUtc() {
                std::chrono::system_clock::now().time_since_epoch())
         .count();
 }
+
+constexpr std::size_t kSnapshotIdMaxLength = 64;      // SHA-256 hex digest length
+constexpr std::size_t kSnapshotLabelMaxLength = 128;  // free text, bounded
+constexpr unsigned char kHighBit = 0x80;              // UTF-8 lead/continuation bytes
+
+// Snapshot ids become <id>.json file names inside the store directory, so the
+// charset check is a path-traversal guard, not just input hygiene: only
+// lowercase hex, and never longer than a SHA-256. Rejects "" and "../x".
+bool validSnapshotId(const std::string& id) {
+    if (id.empty() || id.size() > kSnapshotIdMaxLength) return false;
+    return std::ranges::all_of(
+        id, [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+// Manual snapshot labels are free text shown back in UIs: printable
+// characters only (no control bytes), bounded length. Bytes with the high
+// bit set pass so multi-byte UTF-8 labels survive.
+bool validLabel(const std::string& label) {
+    if (label.size() > kSnapshotLabelMaxLength) return false;
+    return std::ranges::all_of(
+        label, [](unsigned char c) { return std::isprint(c) != 0 || (c & kHighBit) != 0; });
+}
 }  // namespace
 
 RequestProcessor::RequestProcessor(pal::IDeviceController& controller,
                                    pal::ICriticalityProber& prober, IAuthority& authority,
                                    pal::IDriverManager& drivers, pal::IDeviceEnumerator& enumerator,
-                                   StateStore& store, std::mutex& applyMutex, std::string sysfsRoot)
+                                   StateStore& store, SnapshotService& snapshots,
+                                   std::mutex& applyMutex, std::string sysfsRoot)
     : controller_(controller),
       prober_(prober),
       authority_(authority),
       drivers_(drivers),
       enumerator_(enumerator),
       store_(store),
+      snapshots_(snapshots),
       applyMutex_(applyMutex),
       sysfsRoot_(std::move(sysfsRoot)) {}
+
+core::Result<void> RequestProcessor::snapshotBefore(const char* verb, const std::string& subject) {
+    auto snap = snapshots_.create(core::SnapshotTrigger::Auto,
+                                  core::SnapshotReason{.verb = verb, .subject = subject});
+    if (!snap)
+        return core::makeError(core::Error::Code::Io, std::string("snapshot before ") + verb +
+                                                          " failed (" + snap.error().message +
+                                                          "); mutation refused");
+    return {};
+}
 
 core::Result<std::string> RequestProcessor::canonicalContained(const std::string& sysfsPath) const {
     std::error_code ec;
@@ -129,6 +163,7 @@ core::Result<void> RequestProcessor::setDeviceEnabled(const CallerId& caller,
     if (auto auth = authorize(caller, kActionSetDeviceEnabled); !auth) return auth;
 
     const std::scoped_lock lock(applyMutex_);
+    if (auto snap = snapshotBefore("SetDeviceEnabled", *canonical); !snap) return snap;
     return enabled ? applyEnable(*canonical) : applyDisable(*canonical);
 }
 
@@ -138,6 +173,7 @@ core::Result<void> RequestProcessor::loadModule(const CallerId& caller, const st
         return core::makeError(core::Error::Code::NotFound, "invalid module name");
     if (auto auth = authorize(caller, kActionManageModules); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
+    if (auto snap = snapshotBefore("LoadModule", name); !snap) return snap;
     return drivers_.loadModule(name);
 }
 
@@ -165,6 +201,7 @@ core::Result<void> RequestProcessor::unloadModule(const CallerId& caller, const 
 
     if (auto auth = authorize(caller, kActionManageModules); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
+    if (auto snap = snapshotBefore("UnloadModule", name); !snap) return snap;
     return drivers_.unloadModule(name);
 }
 
@@ -178,6 +215,7 @@ core::Result<void> RequestProcessor::bindDriver(const CallerId& caller,
         return core::makeError(core::Error::Code::NotFound, "invalid driver name");
     if (auto auth = authorize(caller, kActionManageDrivers); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
+    if (auto snap = snapshotBefore("BindDriver", *canonical); !snap) return snap;
     return controller_.bindDriver(*canonical, driverName);  // surgical: no store
 }
 
@@ -192,11 +230,48 @@ core::Result<void> RequestProcessor::unbindDriver(const CallerId& caller,
     if (!verdict.allowed) return core::makeError(core::Error::Code::Conflict, verdict.reason);
     if (auto auth = authorize(caller, kActionManageDrivers); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
+    if (auto snap = snapshotBefore("UnbindDriver", *canonical); !snap) return snap;
     return controller_.unbindDriver(*canonical);  // surgical: no store
 }
 
 std::vector<core::DisabledDeviceEntry> RequestProcessor::listDisabledDevices() const {
     return store_.entries();
+}
+
+core::Result<std::vector<core::SnapshotMeta>> RequestProcessor::snapshotList() {
+    return snapshots_.list();  // unprivileged: metadata only, no secrets
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
+core::Result<std::string> RequestProcessor::snapshotCreate(const CallerId& caller,
+                                                           const std::string& label) {
+    if (!validLabel(label))
+        return core::makeError(core::Error::Code::NotFound, "invalid snapshot label");
+    if (auto auth = authorize(caller, kActionManageSnapshots); !auth)
+        return tl::unexpected(auth.error());
+    const std::scoped_lock lock(applyMutex_);
+    return snapshots_.create(core::SnapshotTrigger::Manual,
+                             core::SnapshotReason{.verb = "", .subject = label});
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
+core::Result<core::RestoreOutcome> RequestProcessor::snapshotRestore(const CallerId& caller,
+                                                                     const std::string& id) {
+    if (!validSnapshotId(id))
+        return core::makeError(core::Error::Code::NotFound, "invalid snapshot id");
+    if (auto auth = authorize(caller, kActionManageSnapshots); !auth)
+        return tl::unexpected(auth.error());
+    const std::scoped_lock lock(applyMutex_);
+    return snapshots_.restore(id);
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
+core::Result<void> RequestProcessor::snapshotDelete(const CallerId& caller, const std::string& id) {
+    if (!validSnapshotId(id))
+        return core::makeError(core::Error::Code::NotFound, "invalid snapshot id");
+    if (auto auth = authorize(caller, kActionManageSnapshots); !auth) return auth;
+    const std::scoped_lock lock(applyMutex_);
+    return snapshots_.remove(id);
 }
 
 }  // namespace devmgr::daemon

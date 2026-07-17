@@ -12,6 +12,8 @@
 
 #include "devmgr/daemon/authority.hpp"
 #include "devmgr/daemon/request_processor.hpp"
+#include "devmgr/daemon/snapshot_service.hpp"
+#include "devmgr/daemon/snapshot_store.hpp"
 #include "devmgr/daemon/state_store.hpp"
 #include "fakes/fake_pal.hpp"
 
@@ -54,6 +56,8 @@ class RequestProcessorTest : public ::testing::Test {
     StubProber prober_;
     RecordingAuthority authority_;
     std::unique_ptr<daemon::StateStore> store_;
+    std::unique_ptr<daemon::JsonSnapshotStore> snapStore_;
+    std::unique_ptr<daemon::SnapshotService> snapshots_;
     std::mutex mutex_;
 
     void SetUp() override {
@@ -80,14 +84,17 @@ class RequestProcessorTest : public ::testing::Test {
         if (auto loaded = store_->load(); !loaded) {
             // Warn but continue (as per brief)
         }
+        snapStore_ = std::make_unique<daemon::JsonSnapshotStore>((root_ / "snapshots").string());
+        snapshots_ = std::make_unique<daemon::SnapshotService>(
+            *snapStore_, *store_, pal_, pal_, prober_, (root_ / "modprobe.d").string());
     }
     void TearDown() override {
         std::error_code ec;
         fs::remove_all(root_, ec);
     }
     daemon::RequestProcessor processor() {
-        return daemon::RequestProcessor(pal_, prober_, authority_, pal_, pal_, *store_, mutex_,
-                                        root_.string());
+        return daemon::RequestProcessor(pal_, prober_, authority_, pal_, pal_, *store_, *snapshots_,
+                                        mutex_, root_.string());
     }
 
     // Fixture helper for the enumerator-fallback test: creates
@@ -332,7 +339,7 @@ TEST_F(RequestProcessorTest, DisableOfUnenumeratedDeviceFallsBackToSysfsKey) {
     pal_.seedDevice(seeded);  // controller side only
     EmptyEnumerator empty;
     devmgr::daemon::RequestProcessor processor(pal_, prober_, authority_, pal_, empty, *store_,
-                                               mutex_, root_.string());
+                                               *snapshots_, mutex_, root_.string());
     auto r = processor.setDeviceEnabled(":1.7", ghost, false);
     ASSERT_TRUE(r.has_value()) << r.error().message;
     const auto entries = store_->entries();
@@ -340,4 +347,120 @@ TEST_F(RequestProcessorTest, DisableOfUnenumeratedDeviceFallsBackToSysfsKey) {
     EXPECT_EQ(entries[0].key.bus, "usb");        // from the subsystem link
     EXPECT_EQ(entries[0].key.vendorId, "1234");  // 0x stripped
     EXPECT_EQ(entries[0].key.serial, "GH0ST");   // from the serial attr
+}
+
+// Phase 7: every mutating verb snapshots BEFORE writing (fail-closed hook).
+
+TEST_F(RequestProcessorTest, DisableTakesAutoSnapshotOfPreMutationState) {
+    auto p = processor();
+    ASSERT_TRUE(p.setDeviceEnabled(":1.7", devicePath_, false).has_value());
+
+    auto metas = snapshots_->list();
+    ASSERT_TRUE(metas.has_value());
+    ASSERT_EQ(metas->size(), 1u);
+    EXPECT_EQ((*metas)[0].reason.verb, "SetDeviceEnabled");
+    EXPECT_EQ((*metas)[0].reason.subject, devicePath_);
+    // Snapshot-before-write ordering: the captured payload is the state
+    // BEFORE the disable — no entries yet.
+    auto snap = snapStore_->read((*metas)[0].id);
+    ASSERT_TRUE(snap.has_value());
+    EXPECT_TRUE(snap->payload.entries.empty());
+    ASSERT_EQ(store_->entries().size(), 1u);  // ...while the disable did land
+}
+
+TEST_F(RequestProcessorTest, UnwritableSnapshotDirBlocksMutationFailClosed) {
+    // Replace the snapshots dir with a regular FILE so every store write fails.
+    fs::remove_all(root_ / "snapshots");
+    std::ofstream(root_ / "snapshots") << "not a directory";
+
+    auto p = processor();
+    auto r = p.setDeviceEnabled(":1.7", devicePath_, false);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::Io);
+    EXPECT_TRUE(store_->entries().empty());     // no state change
+    EXPECT_TRUE(pal_.setEnabledCalls.empty());  // no hardware write
+}
+
+TEST_F(RequestProcessorTest, ModuleAndDriverVerbsSnapshotToo) {
+    auto p = processor();
+    pal_.seedLoadedModule({.name = "snd_test", .sizeBytes = 1, .refCount = 0, .holders = {}});
+    ASSERT_TRUE(p.loadModule(":1.7", "snd_test").has_value());
+    ASSERT_TRUE(p.unloadModule(":1.7", "snd_test").has_value());
+    ASSERT_TRUE(p.unbindDriver(":1.7", devicePath_).has_value());
+
+    auto metas = snapshots_->list();
+    ASSERT_TRUE(metas.has_value());
+    // State never changes between verbs, so hash-dedupe collapses all three
+    // snapshots into one — but each verb DID run the hook (newest reason wins
+    // only for the first write; dedupe keeps the original).
+    ASSERT_EQ(metas->size(), 1u);
+    EXPECT_EQ((*metas)[0].reason.verb, "LoadModule");
+    EXPECT_EQ((*metas)[0].reason.subject, "snd_test");
+}
+
+// Phase 7 / ApiVersion 3: snapshot verb dispatch, authorization, validation.
+
+TEST_F(RequestProcessorTest, SnapshotCreateUsesManageSnapshotsAction) {
+    auto p = processor();
+    auto id = p.snapshotCreate(":1.9", "my label");
+    ASSERT_TRUE(id.has_value());
+    ASSERT_EQ(authority_.actions.size(), 1u);
+    EXPECT_EQ(authority_.actions[0], daemon::kActionManageSnapshots);
+    auto metas = p.snapshotList();
+    ASSERT_TRUE(metas.has_value());
+    ASSERT_EQ(metas->size(), 1u);
+    EXPECT_EQ((*metas)[0].trigger, core::SnapshotTrigger::Manual);
+    EXPECT_EQ((*metas)[0].reason.subject, "my label");
+}
+
+TEST_F(RequestProcessorTest, SnapshotListNeedsNoAuthorization) {
+    authority_.answer = false;  // even a denied caller may list
+    auto p = processor();
+    auto metas = p.snapshotList();
+    ASSERT_TRUE(metas.has_value());
+    EXPECT_TRUE(authority_.actions.empty());
+}
+
+TEST_F(RequestProcessorTest, SnapshotMutatingVerbsDeniedWithoutAuthorization) {
+    authority_.answer = false;
+    auto p = processor();
+    EXPECT_EQ(p.snapshotCreate(":1.9", "x").error().code, Error::Code::Permission);
+    EXPECT_EQ(p.snapshotRestore(":1.9", std::string(64, 'a')).error().code,
+              Error::Code::Permission);
+    EXPECT_EQ(p.snapshotDelete(":1.9", std::string(64, 'a')).error().code, Error::Code::Permission);
+}
+
+TEST_F(RequestProcessorTest, SnapshotIdValidationRejectsTraversalBeforeAuth) {
+    auto p = processor();
+    auto r = p.snapshotRestore(":1.9", "../../../etc/passwd");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::NotFound);
+    EXPECT_TRUE(authority_.actions.empty());  // rejected before any auth prompt
+    EXPECT_EQ(p.snapshotDelete(":1.9", "DEADBEEF").error().code, Error::Code::NotFound);
+    EXPECT_EQ(p.snapshotCreate(":1.9", std::string("bad\x01label")).error().code,
+              Error::Code::NotFound);
+}
+
+TEST_F(RequestProcessorTest, SnapshotRestoreOfUnknownIdIsNotFound) {
+    auto p = processor();
+    auto r = p.snapshotRestore(":1.9", std::string(64, '0'));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::NotFound);
+}
+
+TEST_F(RequestProcessorTest, SnapshotFullLifecycleThroughVerbs) {
+    auto p = processor();
+    auto clean = p.snapshotCreate(":1.9", "clean");
+    ASSERT_TRUE(clean.has_value());
+    ASSERT_TRUE(p.setDeviceEnabled(":1.9", devicePath_, false).has_value());
+    ASSERT_EQ(store_->entries().size(), 1u);
+
+    auto outcome = p.snapshotRestore(":1.9", *clean);
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_TRUE(store_->entries().empty());  // back to clean
+
+    ASSERT_TRUE(p.snapshotDelete(":1.9", *clean).has_value());
+    auto metas = p.snapshotList();
+    ASSERT_TRUE(metas.has_value());
+    for (const auto& m : *metas) EXPECT_NE(m.id, *clean);
 }
