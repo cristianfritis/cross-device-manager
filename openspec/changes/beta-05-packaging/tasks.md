@@ -1,0 +1,32 @@
+# Tasks: beta-05-packaging
+
+## 1. Versioning
+
+- [ ] 1.1 Root CMake `project(VERSION 0.5.0)` + prerelease suffix cache var + configure-generated `version.hpp`; remove any hard-coded versions
+- [ ] 1.2 `--version` flag on all four binaries (no D-Bus/display side effects) + unit tests
+
+## 2. Daemon lifecycle files
+
+- [ ] 2.1 systemd unit (`devmgrd.service`, sandboxing directives) + D-Bus system activation file (`org.devmgr.Manager1.service` with `SystemdService=`) + verify activation flow manually against a local install
+- [ ] 2.2 OpenRC init script for the tarball path
+
+## 3. CPack packaging
+
+- [ ] 3.1 Install rules for binaries, unit, activation, bus policy, polkit policy; packaged-build option flipping sdbus-c++ to static link (dev builds unchanged)
+- [ ] 3.2 CPack DEB config: metadata, per-series runtime Depends resolution, postinst/prerm (systemd + D-Bus reload, daemon stop), remove-vs-purge state-dir rule; build + install locally in container
+- [ ] 3.3 CPack TGZ config + `packaging/install.sh` (root check, systemd/OpenRC detect, idempotent, file-list summary) + `uninstall.sh` (same file list, `--purge`) + `bash -n`/shellcheck + container dry-run
+
+## 4. Release pipeline
+
+- [ ] 4.1 GH Actions workflow on `v*` tags: container build, tag==version guard, full ctest, cpack DEB+TGZ, SHA256SUMS, draft prerelease with 3 assets + template-filled body
+
+## 5. Docs
+
+- [ ] 5.1 README Install section (3 steps Ubuntu, tarball path, checksum verify, polkit re-install note for source upgrades)
+- [ ] 5.2 `BETA-TESTING.md`: scenario loop (enumerate/hotplug, disable+restore, blacklist+restore, firmware check, manual snapshot), expected results, warnings (spare devices, restore limits), log collection, issue template + `.github/ISSUE_TEMPLATE`
+- [ ] 5.3 Release-notes template with substitutable version fields; owner pre-public checklist (LICENSE, secret scan, flip, publish) recorded in docs
+
+## 6. Exit gate
+
+- [ ] 6.1 `test/vm/install-smoke.sh` + rig wiring: fresh Ubuntu VM → install deb → bus activation → both UIs enumerate → snapshot/restore round-trip → uninstall residue check → `INSTALL SMOKE OK`
+- [ ] 6.2 Full standard gates (build/ctest both configs, format, gated tidy, purity greps) + tag `v0.5.0-beta.1` dry-run through the workflow (draft release verified, then discarded or kept per owner)
