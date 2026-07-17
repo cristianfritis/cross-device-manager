@@ -1,11 +1,14 @@
 #include "tui/src/tui_app.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <functional>
 #include <future>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <ftxui/component/component.hpp>
@@ -13,6 +16,7 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/string.hpp>
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_detail_vm.hpp"
@@ -49,6 +53,23 @@ void drainPending(std::vector<std::future<void>>& pending) {
     for (auto& f : pending) {
         if (f.valid()) f.wait();
     }
+}
+
+// Loop-scrolls a string that exceeds `width` cells: pause at the start,
+// advance one glyph per tick to the end, pause, restart from the beginning
+// (DESIGN.md §2.4 — long identifiers "scroll within a bounded region").
+// Glyph-based so multi-byte names (e.g. "…Webcam™") never split mid-codepoint.
+std::string marqueeWindow(const std::string& s, int width, int tick) {
+    const auto glyphs = ftxui::Utf8ToGlyphs(s);
+    const int n = static_cast<int>(glyphs.size());
+    if (n <= width) return s;
+    constexpr int kEndPauseTicks = 7;  // ~1 s at the 150 ms tick rate
+    const int overflow = n - width;
+    const int cycle = overflow + 2 * kEndPauseTicks;
+    const int offset = std::clamp(tick % cycle - kEndPauseTicks, 0, overflow);
+    std::string out;
+    for (int i = offset; i < offset + width; ++i) out += glyphs[static_cast<std::size_t>(i)];
+    return out;
 }
 }  // namespace
 
@@ -141,7 +162,29 @@ int runTuiApp() {
     inputOpt.on_change = [&] { listVm.setFilter(filter); };
     auto searchInput = Input(inputOpt);
 
-    auto deviceMenu = Menu(&listVm.rowsRef(), &listVm.selectedRef(), MenuOption::Vertical());
+    // Marquee for the selected device row (user request): when its text
+    // overflows the fixed-width left pane, loop-scroll it instead of
+    // truncating. Deliberate, documented deviation from DESIGN.md §4.5
+    // (motion beyond a task indicator): sanctioned by §2.4's bounded-region
+    // scroll, and the ticker below only fires while an overflowing row is
+    // actually selected — an idle screen stays static.
+    int marqueeTick = 0;                     // UI thread only (render + tick event)
+    std::atomic<bool> marqueeNeeded{false};  // render thread → ticker thread
+    const Event kMarqueeTick = Event::Special("devmgr-marquee-tick");
+    MenuOption deviceMenuOpt = MenuOption::Vertical();
+    deviceMenuOpt.entries_option.transform = [&](const EntryState& s) {
+        constexpr int kRowWidth = kLeftPaneWidth - 4;  // border + "> " prefix + scrollbar
+        std::string label = s.label;
+        if (s.active && string_width(label) > kRowWidth) {
+            marqueeNeeded = true;
+            label = marqueeWindow(label, kRowWidth, marqueeTick);
+        }
+        Element e = text((s.active ? "> " : "  ") + label);
+        if (s.focused) e = e | inverted;
+        if (s.active) e = e | bold;
+        return e;
+    };
+    auto deviceMenu = Menu(&listVm.rowsRef(), &listVm.selectedRef(), deviceMenuOpt);
 
     auto leftPane = Container::Vertical({searchInput, deviceMenu});
 
@@ -243,24 +286,28 @@ int runTuiApp() {
     int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates
     auto tabs = Container::Tab({layout, modulesLayout, updatesLayout}, &activeTab);
 
-    // Tab titles line: names all three m-cycle views (parity with the GUI's
-    // persistent tab bar, DESIGN.md §9 Primary navigation); only the active
-    // one is bold — the rest of each header keeps the existing per-tab
-    // bold-legend convention below it.
+    // Tab titles line: names all three views with their direct-access digit
+    // (parity with the GUI's persistent tab bar, DESIGN.md §9 Primary
+    // navigation); only the active one is bold — the rest of each header
+    // keeps the existing per-tab bold-legend convention below it. Letters
+    // were considered for the hints but collide with existing verbs
+    // (d=dismiss, u=install/unload, U=unbind), so digits it is; 'm' still
+    // cycles.
     auto tabTitles = [&] {
-        auto name = [&](const char* label, int tab) {
-            Element e = text(label);
+        auto name = [&](const char* key, const char* label, int tab) {
+            Element e = hbox({text(std::string("[") + key + "]"), text(label)});
             return activeTab == tab ? e | bold : e;
         };
-        return hbox({text(" "), name("Devices", 0), text(" | "), name("Modules", 1), text(" | "),
-                     name("Updates", 2), text(" ")});
+        return hbox({text(" "), name("1", "Devices", 0), text(" | "), name("2", "Modules", 1),
+                     text(" | "), name("3", "Updates", 2), text("  (m: next tab) ")});
     };
 
     auto ui = Renderer(tabs, [&] {
+        marqueeNeeded = false;  // re-set by the menu transform while an overflowing row is selected
         if (activeTab == 1) {
             return vbox({
                        tabTitles(),
-                       text(" Modules (m=devices  l=load  u=unload  q=quit) ") | bold,
+                       text(" Modules (/=filter  l=load  u=unload  q=quit) ") | bold,
                        text(" " + bannerText + " "),
                        separator(),
                        hbox({
@@ -279,7 +326,7 @@ int runTuiApp() {
         if (activeTab == 2) {
             Elements top = {
                 tabTitles(),
-                text(" Updates (u=install  r=refresh  d=dismiss  m=devices  q=quit) ") | bold,
+                text(" Updates (u=install  r=refresh  d=dismiss  q=quit) ") | bold,
                 text(" " + bannerText + " "),
             };
             const auto reqBanner = updatesVm.requestBanner();
@@ -296,14 +343,16 @@ int runTuiApp() {
             top.push_back(text(" " + updatesStatusLine() + " ") | inverted);
             return vbox(std::move(top)) | flex;
         }
+        // Legend is a full-width row like the other two tabs (it used to live
+        // inside the 44-column left pane, where it truncated mid-shortcut).
         return vbox({
                    tabTitles(),
+                   text(" Devices (/=filter  r=refresh  e=enable/disable  U=unbind  B=bind  "
+                        "q=quit) ") |
+                       bold,
+                   separator(),
                    hbox({
                        vbox({
-                           text(" Devices (r=refresh  e=enable/disable  U=unbind  B=bind  "
-                                "m=modules  q=quit) ") |
-                               bold,
-                           separator(),
                            searchInput->Render(),
                            separator(),
                            deviceMenu->Render() | vscroll_indicator | yframe | flex,
@@ -316,7 +365,36 @@ int runTuiApp() {
                flex;
     });
 
+    // Single tab-entry path shared by the 'm' cycle and the direct 1/2/3
+    // keys, so the per-tab side effects (banner recompute, rebuild, updates
+    // refresh) can never diverge between the two routes. Focus lands on the
+    // tab's list: predictable, and it keeps single-key verbs live (the filter
+    // guard below routes keys to a filter Input only while it owns focus).
+    auto switchToTab = [&](int tab) {
+        activeTab = tab;
+        if (tab == 1) {
+            bannerText = modulesVm.banner();
+            modulesVm.rebuild();
+            modDetailDirty = true;       // A-1: fresh snapshot under the cache
+            modulesVm.fillSignatures();  // cached names are skipped
+            modulesMenu->TakeFocus();
+        } else if (tab == 2) {
+            bannerText = updatesVm.banner();
+            updatesVm.rebuild();
+            updDetailDirty = true;  // A-1 idiom: fresh snapshot under the cache
+            prunePending();
+            pending.push_back(facade.refreshUpdates());  // fresh data on entry
+            updatesMenu->TakeFocus();
+        } else {
+            deviceMenu->TakeFocus();
+        }
+    };
+
     auto root = CatchEvent(ui, [&](const Event& event) {
+        if (event == kMarqueeTick) {
+            ++marqueeTick;
+            return true;  // handled → FTXUI re-renders → the transform scrolls
+        }
         if (event == Event::Custom) {
             detailDirty = true;
             modDetailDirty = true;  // A-1: drained posts may rebuild the modules model
@@ -358,20 +436,51 @@ int runTuiApp() {
             }
             return true;
         }
-        if (event == Event::Character('m')) {
-            activeTab = (activeTab + 1) % 3;  // Devices → Modules → Updates → …
-            if (activeTab == 1) {
-                bannerText = modulesVm.banner();
-                modulesVm.rebuild();
-                modDetailDirty = true;       // A-1: fresh snapshot under the cache
-                modulesVm.fillSignatures();  // cached names are skipped
-            } else if (activeTab == 2) {
-                bannerText = updatesVm.banner();
-                updatesVm.rebuild();
-                updDetailDirty = true;  // A-1 idiom: fresh snapshot under the cache
-                prunePending();
-                pending.push_back(facade.refreshUpdates());  // fresh data on entry
+        // While a filter Input owns focus, printable keys belong to the
+        // filter, never to single-key commands (typing 'U' must not unbind a
+        // driver mid-search). Enter hands focus back to the list keeping the
+        // filter text; Escape also clears it (DESIGN.md §5.1 "a direct way to
+        // clear the filter").
+        const Component filterInput = activeTab == 0   ? searchInput
+                                      : activeTab == 1 ? moduleFilterInput
+                                                       : nullptr;
+        if (filterInput && filterInput->Focused()) {
+            const Component menu = activeTab == 0 ? deviceMenu : modulesMenu;
+            if (event == Event::Return) {
+                menu->TakeFocus();
+                return true;
             }
+            if (event == Event::Escape) {
+                if (activeTab == 0) {
+                    filter.clear();
+                    listVm.setFilter(filter);
+                } else {
+                    moduleFilter.clear();
+                    modulesVm.setFilter(moduleFilter);
+                }
+                menu->TakeFocus();
+                return true;
+            }
+            return false;  // characters, backspace, arrows, mouse → the Input
+        }
+        if (event == Event::Character('/') && activeTab != 2) {  // updates has no filter
+            (activeTab == 0 ? searchInput : moduleFilterInput)->TakeFocus();
+            return true;
+        }
+        if (event == Event::Character('m')) {
+            switchToTab((activeTab + 1) % 3);  // Devices → Modules → Updates → …
+            return true;
+        }
+        if (event == Event::Character('1')) {
+            switchToTab(0);
+            return true;
+        }
+        if (event == Event::Character('2')) {
+            switchToTab(1);
+            return true;
+        }
+        if (event == Event::Character('3')) {
+            switchToTab(2);
             return true;
         }
         if (event == Event::Character('q') || event == Event::Escape) {
@@ -450,7 +559,7 @@ int runTuiApp() {
             return false;  // filter input / menu / mouse
         }
         // ----- devices keys (activeTab == 0) -----
-        if (event == Event::Character('e')) {  // global like 'r' (not typable in filter)
+        if (event == Event::Character('e')) {  // list focused — the filter guard above ran
             const auto id = listVm.selectedDeviceId();
             if (!id) return true;
             const auto device = facade.findById(*id);
@@ -523,6 +632,26 @@ int runTuiApp() {
         return false;  // let Input / Menu handle the rest (incl. mouse)
     });
 
+    // The list, not the filter, owns focus at startup so single-key verbs work
+    // immediately; '/' reaches the filter.
+    deviceMenu->TakeFocus();
+
+    // Marquee ticker: wakes every 150 ms but posts (→ re-render) only while
+    // the last render flagged an overflowing selected row — an idle screen
+    // stays static (DESIGN.md §4.5). Joined on both exit paths below, before
+    // the screen and VM locals unwind.
+    std::atomic<bool> marqueeTickerRun{true};
+    std::thread marqueeTicker([&] {
+        while (marqueeTickerRun.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            if (marqueeTickerRun.load() && marqueeNeeded.load()) screen.PostEvent(kMarqueeTick);
+        }
+    });
+    auto stopMarqueeTicker = [&] {
+        marqueeTickerRun = false;
+        if (marqueeTicker.joinable()) marqueeTicker.join();
+    };
+
     // Initial populate synchronously so the first frame is not empty and so the
     // status line stays silent for the initial enumeration (statusVm is armed
     // only afterward). Events published by refresh() are drained onto this (UI)
@@ -563,6 +692,7 @@ int runTuiApp() {
         // normal-path sequence (stop event sources -> drain pending refreshes ->
         // return) instead of reordering it the way a plain scope guard destroyed at
         // function-return time would. stop()/shutdown() are each idempotent regardless.
+        stopMarqueeTicker();  // ticker posts into `screen` — join before unwind
         hotplug.stop();
         delayed.shutdown();
         // Mirror the normal-path drain below: an enumeration still running on the
@@ -573,10 +703,12 @@ int runTuiApp() {
         throw;
     }
 
-    // Stop event sources before the VMs/dispatcher unwind: join the monitor
-    // reader thread (no new events into the debounce map), then join the timer
-    // thread (no flush/clear callback can still publish into a VM being torn
-    // down). Order: monitor -> timer -> drain in-flight refreshes.
+    // Stop event sources before the VMs/dispatcher unwind: join the marquee
+    // ticker (posts into `screen`), then the monitor reader thread (no new
+    // events into the debounce map), then the timer thread (no flush/clear
+    // callback can still publish into a VM being torn down). Order:
+    // ticker -> monitor -> timer -> drain in-flight refreshes.
+    stopMarqueeTicker();
     hotplug.stop();
     delayed.shutdown();
 
