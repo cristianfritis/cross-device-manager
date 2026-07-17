@@ -14,6 +14,13 @@ namespace devmgr::core {
 // Readers MUST reject documents whose formatVersion is greater than this.
 inline constexpr int kSnapshotFormatVersion = 1;
 
+// Short display form of a snapshot id (snapshot-ui spec: first 12 hex chars),
+// shared by facade outcome messages and VM rows so the two never drift.
+inline constexpr std::size_t kSnapshotShortIdLength = 12;
+inline std::string snapshotShortId(std::string_view id) {
+    return std::string{id.substr(0, kSnapshotShortIdLength)};
+}
+
 enum class SnapshotTrigger { Manual, Auto };
 
 // Serialized forms are the spec's lowercase strings: "manual" / "auto".

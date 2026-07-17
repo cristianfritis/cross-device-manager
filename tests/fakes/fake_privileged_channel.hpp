@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,10 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
     core::Result<std::vector<core::DisabledDeviceEntry>> listDisabledDevices() override {
         return disabledEntries;
     }
-    core::Result<std::vector<core::SnapshotMeta>> snapshotList() override { return snapshotMetas; }
+    core::Result<std::vector<core::SnapshotMeta>> snapshotList() override {
+        ++listCalls;
+        return snapshotMetas;
+    }
     core::Result<std::string> snapshotCreate(const std::string& label) override {
         snapshotCalls.push_back("create:" + label);
         return nextCreate;
@@ -52,6 +56,9 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
     std::vector<Call> calls;
     std::vector<std::string> moduleCalls;
     std::vector<std::string> snapshotCalls;
+    // Counter, not a vector entry: snapshotList runs on facade worker threads
+    // (refreshSnapshots), so recording must be data-race-free.
+    std::atomic<int> listCalls{0};
     core::Result<void> next = {};
     core::Result<std::vector<core::DisabledDeviceEntry>> disabledEntries =
         std::vector<core::DisabledDeviceEntry>{};

@@ -19,12 +19,12 @@
 
 ## 4. Facade and SnapshotsVM
 
-- [ ] 4.1 `ApplicationFacade` async snapshot API (list/create/restore/delete snapshots, completion via existing task/event machinery)
-- [ ] 4.2 `SnapshotsVM`: byte-frozen row format (short id, local datetime, trigger, subject), detail lines (full id, parent, payload counts), corrupt marking, coalesced refresh, teardown-safe + unit tests (row byte-freeze, cross-frontend refresh via event)
+- [x] 4.1 `ApplicationFacade` async snapshot API (list/create/restore/delete snapshots, completion via existing task/event machinery)
+- [x] 4.2 `SnapshotsVM`: byte-frozen row format (short id, local datetime, trigger, subject), detail lines (full id, parent, payload counts), corrupt marking, coalesced refresh, teardown-safe + unit tests (row byte-freeze, cross-frontend refresh via event)
 
 ## 5. Frontends
 
-- [ ] 5.1 TUI `[4]Snapshots` tab: digit/m-cycle integration, s=create (label prompt), r=restore (confirm modal), x=delete (confirm modal), outcome via status line; DESIGN.md conventions
+- [x] 5.1 TUI `[4]Snapshots` tab: digit/m-cycle integration, s=create (label prompt), r=restore (confirm modal), x=delete (confirm modal), outcome via status line; DESIGN.md conventions
 - [ ] 5.2 GUI Snapshots tab: `SnapshotListModel` (list-model house pattern + model-tester), Create/Restore/Delete actions tab-gated, Qt confirm dialogs, status-bar outcomes + gui tests (row parity vs VM, refusal path)
 - [ ] 5.3 CLI binary `devmgr`: `snapshot list|create|restore|delete`, unique-prefix ids, exit codes 0–5, `--json`, sdbus-gated target + unit/integration tests (prefix ambiguity, daemon-down exit 4)
 

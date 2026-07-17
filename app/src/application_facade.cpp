@@ -10,6 +10,36 @@
 namespace devmgr::app {
 
 namespace {
+// One line for the status surfaces (snapshot-ui spec: partial-convergence
+// summary): per-status item counts, zero counts omitted, "ok" always shown.
+std::string restoreSummary(const core::RestoreOutcome& outcome) {
+    std::size_t ok = 0;
+    std::size_t refused = 0;
+    std::size_t failed = 0;
+    std::size_t absent = 0;
+    for (const auto& item : outcome.items) {
+        if (item.status == "ok")
+            ++ok;
+        else if (item.status == "guard-refused")
+            ++refused;
+        else if (item.status == "failed")
+            ++failed;
+        else if (item.status == "device-absent")
+            ++absent;
+    }
+    std::string text = "Restored " + core::snapshotShortId(outcome.snapshotId) + ": ";
+    if (outcome.items.empty()) {
+        text += "no changes needed";
+    } else {
+        text += std::to_string(ok) + " ok";
+        if (refused > 0) text += ", " + std::to_string(refused) + " guard-refused";
+        if (failed > 0) text += ", " + std::to_string(failed) + " failed";
+        if (absent > 0) text += ", " + std::to_string(absent) + " device-absent";
+    }
+    text += "; safety snapshot " + core::snapshotShortId(outcome.safetySnapshotId);
+    return text;
+}
+
 // Releases the serialization gate on EVERY worker exit path (spec §5.4).
 struct InstallActiveGuard {
     std::atomic<bool>& flag;
@@ -313,6 +343,94 @@ std::future<void> ApplicationFacade::installUpdate(std::string providerId, std::
         installActive_.store(false);  // scheduler stopping: release the slot we claimed
         throw;
     }
+}
+
+// ---- Phase 7: snapshots ----
+
+std::future<void> ApplicationFacade::refreshSnapshots() {
+    return scheduler_.submit([this] {
+        if (channel_ == nullptr) {
+            // Read degradation: no channel, no snapshots — publish so VMs
+            // still rebuild to the empty state.
+            {
+                std::scoped_lock lock(snapshotsMutex_);
+                snapshots_.clear();
+            }
+            bus_.publish(core::SnapshotsRefreshedEvent{});
+            return;
+        }
+        auto result = channel_->snapshotList();
+        if (!result) {
+            bus_.publish(
+                core::ErrorEvent{.source = "snapshot-list", .message = result.error().message});
+            return;  // last list stays intact, mirroring refresh()
+        }
+        {
+            std::scoped_lock lock(snapshotsMutex_);
+            snapshots_ = std::move(*result);
+        }
+        bus_.publish(core::SnapshotsRefreshedEvent{});
+    });
+}
+
+std::vector<core::SnapshotMeta> ApplicationFacade::snapshots() const {
+    std::scoped_lock lock(snapshotsMutex_);
+    return snapshots_;
+}
+
+std::future<void> ApplicationFacade::runSnapshotMutation(
+    std::string taskId, std::function<core::Result<std::string>(pal::IPrivilegedChannel&)> call) {
+    return scheduler_.submit([this, taskId = std::move(taskId), call = std::move(call)] {
+        if (channel_ == nullptr) {
+            bus_.publish(
+                core::TaskCompletedEvent{.taskId = taskId,
+                                         .ok = false,
+                                         .message = "built without privileged-helper support"});
+            return;
+        }
+        auto result = call(*channel_);
+        if (result) {
+            bus_.publish(
+                core::TaskCompletedEvent{.taskId = taskId, .ok = true, .message = *result});
+            bus_.publish(core::SnapshotsChangedEvent{});
+        } else {
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = taskId, .ok = false, .message = result.error().message});
+        }
+    });
+}
+
+std::future<void> ApplicationFacade::createSnapshot(std::string label) {
+    std::string taskId = "snapshot-create:" + label;
+    return runSnapshotMutation(
+        std::move(taskId),
+        [label = std::move(label)](pal::IPrivilegedChannel& c) -> core::Result<std::string> {
+            auto id = c.snapshotCreate(label);
+            if (!id) return tl::unexpected(id.error());
+            return "Created snapshot " + core::snapshotShortId(*id);
+        });
+}
+
+std::future<void> ApplicationFacade::restoreSnapshot(std::string id) {
+    std::string taskId = "snapshot-restore:" + id;
+    return runSnapshotMutation(
+        std::move(taskId),
+        [id = std::move(id)](pal::IPrivilegedChannel& c) -> core::Result<std::string> {
+            auto outcome = c.snapshotRestore(id);
+            if (!outcome) return tl::unexpected(outcome.error());
+            return restoreSummary(*outcome);
+        });
+}
+
+std::future<void> ApplicationFacade::deleteSnapshot(std::string id) {
+    std::string taskId = "snapshot-delete:" + id;
+    return runSnapshotMutation(
+        std::move(taskId),
+        [id = std::move(id)](pal::IPrivilegedChannel& c) -> core::Result<std::string> {
+            auto result = c.snapshotDelete(id);
+            if (!result) return tl::unexpected(result.error());
+            return "Deleted snapshot " + core::snapshotShortId(id);
+        });
 }
 
 std::vector<core::UpdateProviderState> ApplicationFacade::updatesSnapshot() const {

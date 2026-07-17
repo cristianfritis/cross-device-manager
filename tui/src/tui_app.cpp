@@ -24,6 +24,7 @@
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/hotplug_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
+#include "devmgr/app/snapshots_vm.hpp"
 #include "devmgr/app/status_line_vm.hpp"
 #include "devmgr/app/updates_vm.hpp"
 #include "devmgr/core/events.hpp"
@@ -113,6 +114,7 @@ int runTuiApp() {
     app::StatusLineVM statusVm(bus, delayed, dispatcher);
     app::ModulesVM modulesVm(facade, bus, scheduler, dispatcher);
     app::UpdatesVM updatesVm(facade, bus, dispatcher);
+    app::SnapshotsVM snapshotsVm(facade, bus, dispatcher);
 
     // Keep every refresh future alive so we can wait on them before teardown
     // (see the note after screen.Loop()).
@@ -273,6 +275,31 @@ int runTuiApp() {
     });
     auto updatesLayout = Container::Horizontal({updatesMenu, updatesDetail});
 
+    // Snapshots tab (backup-rollback-engine, snapshot-ui spec): no filter —
+    // mirrors the updates shape.
+    auto snapshotsMenu =
+        Menu(&snapshotsVm.rowsRef(), &snapshotsVm.selectedRef(), MenuOption::Vertical());
+
+    // detailLines() is cheap (reads the last rebuilt metas_), but cache like
+    // the other panes (A-1 idiom): identity is the row index.
+    int snapDetailForIndex = -1;
+    std::vector<std::string> snapDetailLines;
+    bool snapDetailDirty = true;
+
+    auto snapshotsDetail = Renderer([&] {
+        const int idx = snapshotsVm.selectedRef();
+        if (snapDetailDirty || idx != snapDetailForIndex) {
+            snapDetailLines = snapshotsVm.detailLines();
+            snapDetailForIndex = idx;
+            snapDetailDirty = false;
+        }
+        Elements els;
+        els.reserve(snapDetailLines.size());
+        for (const auto& line : snapDetailLines) els.push_back(text(line));
+        return vbox(std::move(els)) | flex;
+    });
+    auto snapshotsLayout = Container::Horizontal({snapshotsMenu, snapshotsDetail});
+
     // Status/prompt line for the updates tab (DESIGN.md §3.2: one row, stable
     // edge): modal text wins, then the durable install-progress text (spec
     // §5.5), else the shared transient status line.
@@ -283,8 +310,8 @@ int runTuiApp() {
         return progress.empty() ? statusVm.text() : progress;
     };
 
-    int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates
-    auto tabs = Container::Tab({layout, modulesLayout, updatesLayout}, &activeTab);
+    int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates, 3 = snapshots
+    auto tabs = Container::Tab({layout, modulesLayout, updatesLayout, snapshotsLayout}, &activeTab);
 
     // Tab titles line: names all three views with their direct-access digit
     // (parity with the GUI's persistent tab bar, DESIGN.md §9 Primary
@@ -299,7 +326,8 @@ int runTuiApp() {
             return activeTab == tab ? e | bold : e;
         };
         return hbox({text(" "), name("1", "Devices", 0), text(" | "), name("2", "Modules", 1),
-                     text(" | "), name("3", "Updates", 2), text("  (m: next tab) ")});
+                     text(" | "), name("3", "Updates", 2), text(" | "), name("4", "Snapshots", 3),
+                     text("  (m: next tab) ")});
     };
 
     auto ui = Renderer(tabs, [&] {
@@ -343,6 +371,23 @@ int runTuiApp() {
             top.push_back(text(" " + updatesStatusLine() + " ") | inverted);
             return vbox(std::move(top)) | flex;
         }
+        if (activeTab == 3) {
+            return vbox({
+                       tabTitles(),
+                       text(" Snapshots (s=create…  r=restore  x=delete  q=quit) ") | bold,
+                       text(" " + bannerText + " "),
+                       separator(),
+                       hbox({
+                           vbox({
+                               snapshotsMenu->Render() | vscroll_indicator | yframe | flex,
+                           }) | size(WIDTH, EQUAL, 72) |
+                               border,
+                           snapshotsDetail->Render() | border | flex,
+                       }) | flex,
+                       text(" " + statusLine() + " ") | inverted,
+                   }) |
+                   flex;
+        }
         // Legend is a full-width row like the other two tabs (it used to live
         // inside the 44-column left pane, where it truncated mid-shortcut).
         return vbox({
@@ -385,6 +430,13 @@ int runTuiApp() {
             prunePending();
             pending.push_back(facade.refreshUpdates());  // fresh data on entry
             updatesMenu->TakeFocus();
+        } else if (tab == 3) {
+            snapshotsVm.rebuild();
+            bannerText = snapshotsVm.banner();  // after rebuild: banner reads the rebuilt metas
+            snapDetailDirty = true;             // A-1 idiom: fresh snapshot under the cache
+            prunePending();
+            pending.push_back(facade.refreshSnapshots());  // fresh data on entry
+            snapshotsMenu->TakeFocus();
         } else {
             deviceMenu->TakeFocus();
         }
@@ -397,8 +449,9 @@ int runTuiApp() {
         }
         if (event == Event::Custom) {
             detailDirty = true;
-            modDetailDirty = true;  // A-1: drained posts may rebuild the modules model
-            updDetailDirty = true;  // A-1 idiom: drained posts may rebuild the updates model
+            modDetailDirty = true;   // A-1: drained posts may rebuild the modules model
+            updDetailDirty = true;   // A-1 idiom: drained posts may rebuild the updates model
+            snapDetailDirty = true;  // A-1 idiom: drained posts may rebuild the snapshots model
             dispatcher.drain();
             // Review finding I-1: banner() queries the PAL (systemInfo()) and must
             // never run in Render() (DESIGN.md §8) — recompute it here, the same
@@ -407,6 +460,7 @@ int runTuiApp() {
             // entries. Gated to the active tab only — same reasoning as the other
             // two A-1 dirty flags above.
             if (activeTab == 2) bannerText = updatesVm.banner();
+            if (activeTab == 3) bannerText = snapshotsVm.banner();
             return true;
         }
         if (textPrompt) {  // modal typed input
@@ -463,12 +517,13 @@ int runTuiApp() {
             }
             return false;  // characters, backspace, arrows, mouse → the Input
         }
-        if (event == Event::Character('/') && activeTab != 2) {  // updates has no filter
+        if (event == Event::Character('/') &&
+            (activeTab == 0 || activeTab == 1)) {  // updates/snapshots have no filter
             (activeTab == 0 ? searchInput : moduleFilterInput)->TakeFocus();
             return true;
         }
         if (event == Event::Character('m')) {
-            switchToTab((activeTab + 1) % 3);  // Devices → Modules → Updates → …
+            switchToTab((activeTab + 1) % 4);  // Devices → Modules → Updates → Snapshots → …
             return true;
         }
         if (event == Event::Character('1')) {
@@ -481,6 +536,10 @@ int runTuiApp() {
         }
         if (event == Event::Character('3')) {
             switchToTab(2);
+            return true;
+        }
+        if (event == Event::Character('4')) {
+            switchToTab(3);
             return true;
         }
         if (event == Event::Character('q') || event == Event::Escape) {
@@ -557,6 +616,56 @@ int runTuiApp() {
                 return true;
             }
             return false;  // filter input / menu / mouse
+        }
+        if (activeTab == 3) {                      // ----- snapshots keys -----
+            if (event == Event::Character('s')) {  // create manual snapshot (label prompt)
+                textPrompt = PendingText{.onSubmit =
+                                             [&](const std::string& label) {
+                                                 prunePending();
+                                                 pending.push_back(facade.createSnapshot(label));
+                                             },
+                                         .prompt = "snapshot label: ",
+                                         .buffer = ""};
+                return true;
+            }
+            if (event == Event::Character('r')) {  // restore selected (confirm modal)
+                const auto args = snapshotsVm.selectedRestore();
+                if (!args) {
+                    // Refused locally: placeholder row or corrupt/unsupported
+                    // snapshot (DESIGN.md §5.3: the key stays documented, the
+                    // status line explains the refusal).
+                    bus.publish(core::TaskCompletedEvent{
+                        .taskId = "guard",
+                        .ok = false,
+                        .message = "cannot restore: no healthy snapshot selected"});
+                    return true;
+                }
+                confirm = PendingConfirm{.onYes =
+                                             [&, a = *args] {
+                                                 prunePending();
+                                                 pending.push_back(facade.restoreSnapshot(a.id));
+                                             },
+                                         .prompt = args->confirmText + " (y/n)"};
+                return true;
+            }
+            if (event == Event::Character('x')) {  // delete selected (confirm modal)
+                const auto args = snapshotsVm.selectedDelete();
+                if (!args) {
+                    bus.publish(core::TaskCompletedEvent{
+                        .taskId = "guard",
+                        .ok = false,
+                        .message = "cannot delete: no deletable snapshot selected"});
+                    return true;
+                }
+                confirm = PendingConfirm{.onYes =
+                                             [&, a = *args] {
+                                                 prunePending();
+                                                 pending.push_back(facade.deleteSnapshot(a.id));
+                                             },
+                                         .prompt = args->confirmText + " (y/n)"};
+                return true;
+            }
+            return false;  // menu / mouse
         }
         // ----- devices keys (activeTab == 0) -----
         if (event == Event::Character('e')) {  // list focused — the filter guard above ran

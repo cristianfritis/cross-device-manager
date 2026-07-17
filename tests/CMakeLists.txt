@@ -27,6 +27,7 @@ add_executable(devmgr_tests
     unit/test_modules_vm.cpp
     unit/test_update_models.cpp
     unit/test_updates_vm.cpp
+    unit/test_snapshots_vm.cpp
 )
 target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest GTest::gtest_main)
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

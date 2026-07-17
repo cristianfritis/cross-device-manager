@@ -107,10 +107,36 @@ class ApplicationFacade {
     std::future<void> installUpdate(std::string providerId, std::string candidateId,
                                     core::ReleaseRef release);
 
+    // ---- Phase 7: snapshots (backup-rollback-engine, snapshot-ui spec) ----
+    // Lists snapshot metadata via the privileged channel on the TaskScheduler,
+    // replaces the mutex-guarded copy, then publishes SnapshotsRefreshedEvent.
+    // Null channel degrades to an empty list (read degradation, like the other
+    // seams); a channel error leaves the last list intact and publishes
+    // ErrorEvent instead. Same future-custody contract as refresh().
+    std::future<void> refreshSnapshots();
+    std::vector<core::SnapshotMeta> snapshots() const;  // mutex-guarded copy
+    // Mutations (async, Phase 4 pattern): ONE TaskCompletedEvent each — success
+    // and every failure alike — taskId prefixes "snapshot-create:",
+    // "snapshot-restore:", "snapshot-delete:"; SnapshotsChangedEvent
+    // additionally on success so every frontend view refreshes. Restore's
+    // message is the per-item convergence summary: guard refusals are items in
+    // it, never a failed task (ok stays true). Same future-custody contract as
+    // refresh().
+    std::future<void> createSnapshot(std::string label);
+    std::future<void> restoreSnapshot(std::string id);
+    std::future<void> deleteSnapshot(std::string id);
+
    private:
     std::future<void> runChannelTask(
         std::string taskId, std::string okMessage, bool modulesChanged,
         std::function<core::Result<void>(pal::IPrivilegedChannel&)> call);
+
+    // Snapshot mutation worker: null-channel degradation, ONE
+    // TaskCompletedEvent, SnapshotsChangedEvent on success. `call` returns the
+    // ok-message (restore: the per-item convergence summary).
+    std::future<void> runSnapshotMutation(
+        std::string taskId,
+        std::function<core::Result<std::string>(pal::IPrivilegedChannel&)> call);
 
     pal::IUpdateProvider* findProvider(const std::string& providerId) const;
     // One provider's availability + candidates + M1 reconcile (refreshUpdates worker step).
@@ -143,6 +169,9 @@ class ApplicationFacade {
     // evidence. Never derived from the live candidate list (V4).
     std::map<std::pair<std::string, std::string>, core::PendingAction> pending_;
     std::atomic<bool> installActive_{false};  // serialization gate (spec §5.4)
+
+    mutable std::mutex snapshotsMutex_;  // guards snapshots_
+    std::vector<core::SnapshotMeta> snapshots_;
 };
 
 }  // namespace devmgr::app

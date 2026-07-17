@@ -290,3 +290,173 @@ TEST(ApplicationFacadeTest, CanUnloadModuleAdvisesInUse) {
     EXPECT_FALSE(verdict.allowed);
     EXPECT_EQ(verdict.reason, "in use by usbhid");
 }
+
+// ---- Phase 7: snapshots ----
+
+namespace {
+core::SnapshotMeta meta(char fill) {
+    core::SnapshotMeta m;
+    m.id = std::string(64, fill);
+    return m;
+}
+}  // namespace
+
+TEST(ApplicationFacadeTest, RefreshSnapshotsReplacesListAndPublishesRefreshed) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.snapshotMetas = std::vector<core::SnapshotMeta>{meta('a'), meta('b')};
+    int refreshed = 0;
+    auto sub = bus.subscribe<core::SnapshotsRefreshedEvent>(
+        [&](const core::SnapshotsRefreshedEvent&) { ++refreshed; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.refreshSnapshots().wait();
+
+    EXPECT_EQ(refreshed, 1);
+    EXPECT_EQ(facade.snapshots().size(), 2U);
+}
+
+TEST(ApplicationFacadeTest, RefreshSnapshotsErrorKeepsLastListAndEmitsError) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.snapshotMetas = std::vector<core::SnapshotMeta>{meta('a')};
+    int refreshed = 0;
+    auto sub = bus.subscribe<core::SnapshotsRefreshedEvent>(
+        [&](const core::SnapshotsRefreshedEvent&) { ++refreshed; });
+    int errors = 0;
+    auto sub2 = bus.subscribe<core::ErrorEvent>([&](const core::ErrorEvent&) { ++errors; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.refreshSnapshots().wait();
+    channel.snapshotMetas = core::makeError(core::Error::Code::Io, "daemon gone");
+    facade.refreshSnapshots().wait();
+
+    EXPECT_EQ(refreshed, 1);  // failed refresh publishes no refreshed event
+    EXPECT_EQ(errors, 1);
+    EXPECT_EQ(facade.snapshots().size(), 1U);  // last good list intact
+}
+
+TEST(ApplicationFacadeTest, RefreshSnapshotsWithoutChannelPublishesEmptyList) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    int refreshed = 0;
+    auto sub = bus.subscribe<core::SnapshotsRefreshedEvent>(
+        [&](const core::SnapshotsRefreshedEvent&) { ++refreshed; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refreshSnapshots().wait();
+
+    EXPECT_EQ(refreshed, 1);
+    EXPECT_TRUE(facade.snapshots().empty());
+}
+
+TEST(ApplicationFacadeTest, CreateSnapshotPublishesCompletionAndChanged) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.nextCreate = std::string(64, 'c');
+    int changed = 0;
+    auto sub = bus.subscribe<core::SnapshotsChangedEvent>(
+        [&](const core::SnapshotsChangedEvent&) { ++changed; });
+    std::optional<core::TaskCompletedEvent> done;
+    auto sub2 = bus.subscribe<core::TaskCompletedEvent>(
+        [&](const core::TaskCompletedEvent& e) { done = e; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.createSnapshot("pre-upgrade").wait();
+
+    ASSERT_TRUE(done.has_value());
+    EXPECT_EQ(done->taskId, "snapshot-create:pre-upgrade");
+    EXPECT_TRUE(done->ok);
+    EXPECT_EQ(done->message, "Created snapshot cccccccccccc");
+    EXPECT_EQ(changed, 1);
+    ASSERT_EQ(channel.snapshotCalls.size(), 1U);
+    EXPECT_EQ(channel.snapshotCalls[0], "create:pre-upgrade");
+}
+
+TEST(ApplicationFacadeTest, RestoreSnapshotReportsPartialConvergenceSummary) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    core::RestoreOutcome outcome;
+    outcome.snapshotId = std::string(64, 'a');
+    outcome.safetySnapshotId = std::string(64, 'b');
+    outcome.items = {
+        {.subject = "/sys/devices/usb1/1-4", .action = "re-enable", .status = "ok", .detail = ""},
+        {.subject = "/sys/devices/pci0/gpu",
+         .action = "re-apply-disable",
+         .status = "guard-refused",
+         .detail = "critical device"}};
+    channel.nextRestore = outcome;
+    int changed = 0;
+    auto sub = bus.subscribe<core::SnapshotsChangedEvent>(
+        [&](const core::SnapshotsChangedEvent&) { ++changed; });
+    std::optional<core::TaskCompletedEvent> done;
+    auto sub2 = bus.subscribe<core::TaskCompletedEvent>(
+        [&](const core::TaskCompletedEvent& e) { done = e; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.restoreSnapshot(outcome.snapshotId).wait();
+
+    ASSERT_TRUE(done.has_value());
+    EXPECT_TRUE(done->ok);  // guard refusals are items, never a failed task
+    EXPECT_EQ(done->message,
+              "Restored aaaaaaaaaaaa: 1 ok, 1 guard-refused; safety snapshot bbbbbbbbbbbb");
+    EXPECT_EQ(changed, 1);
+}
+
+TEST(ApplicationFacadeTest, DeleteSnapshotFailureCarriesErrorWithoutChangedEvent) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.next = core::makeError(core::Error::Code::NotFound, "no such snapshot");
+    int changed = 0;
+    auto sub = bus.subscribe<core::SnapshotsChangedEvent>(
+        [&](const core::SnapshotsChangedEvent&) { ++changed; });
+    std::optional<core::TaskCompletedEvent> done;
+    auto sub2 = bus.subscribe<core::TaskCompletedEvent>(
+        [&](const core::TaskCompletedEvent& e) { done = e; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.deleteSnapshot(std::string(64, 'a')).wait();
+
+    ASSERT_TRUE(done.has_value());
+    EXPECT_FALSE(done->ok);
+    EXPECT_EQ(done->message, "no such snapshot");
+    EXPECT_EQ(changed, 0);
+}
+
+TEST(ApplicationFacadeTest, SnapshotMutationWithoutChannelIsUnsupported) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    int changed = 0;
+    auto sub = bus.subscribe<core::SnapshotsChangedEvent>(
+        [&](const core::SnapshotsChangedEvent&) { ++changed; });
+    std::optional<core::TaskCompletedEvent> done;
+    auto sub2 = bus.subscribe<core::TaskCompletedEvent>(
+        [&](const core::TaskCompletedEvent& e) { done = e; });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.createSnapshot("x").wait();
+
+    ASSERT_TRUE(done.has_value());
+    EXPECT_FALSE(done->ok);
+    EXPECT_EQ(done->message, "built without privileged-helper support");
+    EXPECT_EQ(changed, 0);
+}
