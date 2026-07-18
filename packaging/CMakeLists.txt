@@ -10,6 +10,13 @@ install(FILES ${CMAKE_SOURCE_DIR}/daemon/data/devmgrd.service
               ${CMAKE_SOURCE_DIR}/daemon/data/org.devmgr.policy
         DESTINATION packaging COMPONENT tarball)
 
+# License, in both artifacts. Debian policy requires /usr/share/doc/<pkg>/copyright
+# (the deb's prefix is /usr, so the destination is relative); the tarball carries it
+# at the archive root next to the README-facing install.sh.
+install(FILES ${CMAKE_SOURCE_DIR}/LICENSE
+        DESTINATION share/doc/devmgr RENAME copyright COMPONENT system)
+install(FILES ${CMAKE_SOURCE_DIR}/LICENSE DESTINATION . COMPONENT tarball)
+
 if(DEVMGR_PACKAGED_BUILD)
     # CPack: one deb (Ubuntu) + one generic tarball from the same build tree
     # (packaging-deb / packaging-tarball specs). Component selection and the

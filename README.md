@@ -242,3 +242,8 @@ which provisions the disposable VM (now including the `fwupd` and `dkms`
 packages), builds the tree with `-DDEVMGR_WITH_SDBUS=ON`, and runs
 `test/vm/phase4-smoke.sh` through `test/vm/phase7-smoke.sh` in sequence —
 expect `PHASE4 VM SMOKE OK` … `PHASE7 VM SMOKE OK`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The `.deb` installs it as
+`/usr/share/doc/devmgr/copyright`; the tarball carries it at the archive root.
