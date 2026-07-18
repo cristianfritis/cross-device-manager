@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "cli/src/cli.hpp"
+#include "devmgr/core/version.hpp"
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
 
 // devmgr: the minimal recovery CLI (snapshot-cli spec). A thin D-Bus client
@@ -20,6 +21,12 @@ int main(int argc, char** argv) {
     const std::span<char*> raw(argv, static_cast<std::size_t>(argc));
     std::vector<std::string> tokens;
     for (std::size_t i = 1; i < raw.size(); ++i) tokens.emplace_back(raw[i]);
+    // --version must exit before any channel/D-Bus construction
+    // (release-versioning spec).
+    if (!tokens.empty() && tokens.front() == "--version") {
+        std::cout << devmgr::core::versionLine("devmgr") << "\n";
+        return 0;
+    }
     auto bus = DbusPrivilegedChannel::Bus::System;
 
     // Optional leading `--bus system|session` selects the connection (the

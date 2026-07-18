@@ -1,0 +1,16 @@
+#!/bin/sh
+# devmgr postrm (packaging-deb spec): plain remove PRESERVES /var/lib/devmgrd
+# (state + snapshots survive a reinstall); purge deletes it.
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /var/lib/devmgrd
+        ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+exit 0

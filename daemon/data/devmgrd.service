@@ -1,0 +1,41 @@
+# devmgrd — devmgr device manager daemon (packaging-deb spec).
+# Bus-activated: dbus-daemon starts this unit via SystemdService= in
+# org.devmgr.Manager1.service; there is deliberately no [Install] section so
+# the daemon's lifetime is on-demand, not boot-time.
+[Unit]
+Description=devmgr device manager daemon
+Documentation=https://github.com/cristianfritis/cross-device-manager
+Requires=dbus.service
+After=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.devmgr.Manager1
+ExecStart=/usr/bin/devmgrd
+Restart=on-failure
+
+# State (snapshots + persisted device state) lives in /var/lib/devmgrd.
+StateDirectory=devmgrd
+
+# Sandboxing. Two protections must stay OFF for the daemon to work at all:
+# ProtectKernelTunables (would remount /sys read-only — we write sysfs to
+# enable/disable devices and bind/unbind drivers) and ProtectKernelModules
+# (we load/unload modules via libkmod). Everything else is locked down.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/sys /etc/modprobe.d
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# AF_UNIX: D-Bus (bus itself, polkit, fwupd). AF_NETLINK: udev hotplug monitor.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_SYS_MODULE CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER

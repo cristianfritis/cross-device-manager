@@ -67,3 +67,4 @@ ui_*.h
 # ---- Python (for any helper scripts) ----
 __pycache__/
 *.py[cod]
+dist/

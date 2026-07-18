@@ -1,0 +1,13 @@
+#!/bin/sh
+# devmgr prerm (packaging-deb spec): stop the daemon before files disappear.
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop devmgrd.service 2>/dev/null || true
+        fi
+        ;;
+esac
+
+exit 0

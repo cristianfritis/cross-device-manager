@@ -4,3 +4,14 @@ services:
       context: ..
       dockerfile: Dockerfile
     command: ["ctest", "--test-dir", "build/linux-debug", "--output-on-failure"]
+  # Packaging image (packaging-deb spec): same Dockerfile on ubuntu:22.04 —
+  # release artifacts MUST be built on the oldest supported series so their
+  # glibc/libstdc++ requirements and shlibdeps Depends install on 22.04 AND
+  # 24.04 (t64 Provides cover the renamed Qt packages on amd64).
+  pkg:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BASE: "ubuntu:22.04"
+    command: ["bash"]

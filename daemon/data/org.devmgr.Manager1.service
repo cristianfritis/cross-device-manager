@@ -1,0 +1,9 @@
+# D-Bus system-bus activation for devmgrd (packaging-deb spec): the daemon
+# starts on the first org.devmgr.Manager1 call. Under systemd the bus defers
+# to devmgrd.service (SystemdService=); init systems without systemd (OpenRC
+# tarball path) fall back to the plain Exec= line.
+[D-BUS Service]
+Name=org.devmgr.Manager1
+Exec=/usr/bin/devmgrd
+User=root
+SystemdService=devmgrd.service

@@ -12,6 +12,13 @@ target_compile_features(devmgr_cli_lib PUBLIC cxx_std_20)
 if(DEVMGR_WITH_SDBUS)
     add_executable(devmgr src/main.cpp)
     target_link_libraries(devmgr PRIVATE devmgr_cli_lib devmgr_pal_linux)
+    # --version must print and exit 0 without any D-Bus construction
+    # (release-versioning spec).
+    add_test(NAME devmgr_cli_version COMMAND devmgr --version)
+    set_tests_properties(devmgr_cli_version PROPERTIES
+        PASS_REGULAR_EXPRESSION "^devmgr [0-9]+\\.[0-9]+\\.[0-9]+")
+
+    install(TARGETS devmgr RUNTIME DESTINATION bin COMPONENT runtime)
 endif()
 
 add_subdirectory(tests)

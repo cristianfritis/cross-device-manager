@@ -1,0 +1,18 @@
+#!/bin/sh
+# devmgr postinst (packaging-deb spec): refresh systemd + D-Bus so bus
+# activation works immediately — no reboot, no manual daemon start.
+set -e
+
+case "$1" in
+    configure)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        # Make the system bus rescan activation files and bus policy.
+        dbus-send --system --type=method_call \
+            --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig \
+            2>/dev/null || true
+        ;;
+esac
+
+exit 0

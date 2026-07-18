@@ -1,3 +1,49 @@
+# devmgr
+
+Manage devices, drivers, firmware, and state snapshots on Linux — one
+polkit-gated daemon (`devmgrd`), a Qt 6 GUI (`devmgr-gui`), a terminal UI
+(`devmgr-tui`), and a recovery CLI (`devmgr`).
+
+## Install (beta)
+
+### Ubuntu 22.04 / 24.04 (.deb)
+
+1. Download `devmgr_*_amd64.deb` and `SHA256SUMS` from the
+   [latest release](https://github.com/cristianfritis/cross-device-manager/releases).
+2. Verify the download, then install:
+   ```sh
+   sha256sum -c SHA256SUMS --ignore-missing
+   sudo apt install ./devmgr_*_amd64.deb
+   ```
+3. From a **graphical session** (the polkit prompt needs a desktop agent),
+   launch `devmgr-gui` — or `devmgr-tui` in a terminal. No daemon setup:
+   `devmgrd` starts on demand via D-Bus activation.
+
+### Other distros (tarball)
+
+Download `devmgr-*-linux-x86_64.tar.gz` plus `SHA256SUMS`, verify, and run the
+bundled installer (detects systemd vs OpenRC; binaries go to
+`/usr/local/bin`):
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+tar xf devmgr-*-linux-x86_64.tar.gz
+sudo devmgr-*-linux-x86_64/packaging/install.sh
+```
+
+Uninstall with `packaging/uninstall.sh`; add `--purge` to also delete the
+daemon state in `/var/lib/devmgrd`. (`apt remove` / plain uninstall preserve
+that state for reinstalls.)
+
+**Upgrading from a source install:** remove any manually copied policy files
+first, or at minimum re-install the polkit policy — the pre-Phase-7 file lacks
+the snapshot action and every mutating snapshot verb will be refused (see
+[Authorization (snapshot verbs)](#authorization-snapshot-verbs)):
+
+```sh
+sudo install -m644 daemon/data/org.devmgr.policy /usr/share/polkit-1/actions/
+```
+
 ## Enable/Disable (Phase 4)
 
 Cross-device-manager can disable and re-enable a **USB** device from either UI.

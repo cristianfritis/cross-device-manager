@@ -3,8 +3,12 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
+# version.hpp is configure-generated so the semver stays single-sourced in the
+# root project() call (release-versioning spec).
+configure_file(include/devmgr/core/version.hpp.in
+               ${CMAKE_CURRENT_BINARY_DIR}/generated/include/devmgr/core/version.hpp @ONLY)
+
 add_library(devmgr_core
-    src/version.cpp
     src/models.cpp
     src/snapshot_models.cpp
     src/snapshot_json.cpp
@@ -15,7 +19,8 @@ add_library(devmgr_core
     src/critical_device_guard.cpp
     src/device_key.cpp
 )
-target_include_directories(devmgr_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(devmgr_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                              ${CMAKE_CURRENT_BINARY_DIR}/generated/include)
 target_link_libraries(devmgr_core
     PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json tl::expected Threads::Threads)
 target_compile_features(devmgr_core PUBLIC cxx_std_20)

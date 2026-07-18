@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# devmgrd — devmgr device manager daemon, OpenRC service for the tarball
+# install path (packaging-tarball spec). Unlike the systemd path there is no
+# bus activation hand-off (SystemdService= is ignored without systemd), so
+# OpenRC starts the daemon directly; the D-Bus activation file still routes
+# messages once the name is owned.
+
+name="devmgrd"
+description="devmgr device manager daemon"
+command="/usr/local/bin/devmgrd"
+command_background="yes"
+pidfile="/run/devmgrd.pid"
+output_log="/var/log/devmgrd.log"
+error_log="/var/log/devmgrd.log"
+
+depend() {
+    need dbus
+    after bootmisc
+}
+
+start_pre() {
+    checkpath -d -m 0750 -o root:root /var/lib/devmgrd
+}

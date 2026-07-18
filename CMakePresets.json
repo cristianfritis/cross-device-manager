@@ -11,7 +11,20 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "linux-packaged",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-packaged",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "DEVMGR_PACKAGED_BUILD": "ON"
+      }
     }
   ],
-  "buildPresets": [{ "name": "linux-debug", "configurePreset": "linux-debug" }]
+  "buildPresets": [
+    { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-packaged", "configurePreset": "linux-packaged" }
+  ]
 }

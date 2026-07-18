@@ -12,6 +12,7 @@
 
 #include "daemon/src/manager_adaptor.hpp"
 #include "daemon/src/polkit_authority.hpp"
+#include "devmgr/core/version.hpp"
 #include "devmgr/daemon/authority.hpp"
 #include "devmgr/daemon/enforcement_service.hpp"
 #include "devmgr/daemon/request_processor.hpp"
@@ -78,11 +79,24 @@ void warnNonDefaultSeams(const Options& opts) {
         opts.bus, opts.sysfsRoot, opts.mountsPath, opts.authority, opts.stateDir, opts.modprobeDir);
 }
 
+// --version must exit before any bus/logging setup (release-versioning spec).
+bool handleVersionFlag(std::span<char*> args) {
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (std::string_view(args[i]) == "--version") {
+            std::cout << devmgr::core::versionLine("devmgrd") << "\n";
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     using namespace devmgr;
-    const Options opts = parse(std::span<char*>(argv, static_cast<std::size_t>(argc)));
+    const std::span<char*> rawArgs(argv, static_cast<std::size_t>(argc));
+    if (handleVersionFlag(rawArgs)) return 0;
+    const Options opts = parse(rawArgs);
     if (!opts.valid) {
         std::cerr << "usage: devmgrd [--bus system|session] [--sysfs-root PATH] "
                      "[--mounts-path PATH] [--authority polkit|allow-all|deny-all] "

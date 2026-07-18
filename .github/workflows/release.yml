@@ -1,0 +1,54 @@
+# Release pipeline (release-pipeline spec): tag v* → container build with the
+# tag==version guard, full ctest (fail = no artifacts), cpack DEB+TGZ,
+# SHA256SUMS, draft prerelease with the 3 assets and a template-filled body.
+# Publishing stays a manual owner action (paired with the repo-public flip).
+name: release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build packaging container (ubuntu:22.04 base)
+        # Oldest supported series: artifacts built here install on 22.04 AND
+        # 24.04 (glibc floor + t64 Provides), per the packaging-deb spec.
+        run: docker compose -f test/docker-compose.yml build pkg
+
+      - name: Build, guard tag==version, test, package (container)
+        run: |
+          mkdir -p dist
+          docker compose -f test/docker-compose.yml run --rm \
+            -e TAG="$GITHUB_REF_NAME" -v "$PWD/dist:/dist" pkg bash -c '
+            set -e
+            cmake --preset linux-packaged
+            cmake --build build/linux-packaged -j"$(nproc)"
+            ver=$(./build/linux-packaged/daemon/devmgrd --version | cut -d" " -f2)
+            if [ "v$ver" != "$TAG" ]; then
+              echo "tag $TAG does not match built version $ver" >&2
+              exit 1
+            fi
+            ctest --test-dir build/linux-packaged --output-on-failure
+            cpack --config build/linux-packaged/CPackConfig.cmake -B /dist
+            cd /dist && rm -rf _CPack_Packages && sha256sum *.deb *.tar.gz > SHA256SUMS
+          '
+
+      - name: Verify checksums
+        run: cd dist && sha256sum -c SHA256SUMS
+
+      - name: Draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=${GITHUB_REF_NAME#v}
+          sed "s/@VERSION@/$ver/g; s/@TAG@/$GITHUB_REF_NAME/g" \
+            docs/RELEASE-NOTES-TEMPLATE.md > /tmp/notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.deb dist/*.tar.gz dist/SHA256SUMS \
+            --draft --prerelease --title "devmgr $ver" --notes-file /tmp/notes.md

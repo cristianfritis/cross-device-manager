@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <thread>
@@ -74,7 +75,7 @@ std::string marqueeWindow(const std::string& s, int width, int tick) {
 }
 }  // namespace
 
-int runTuiApp() {
+int runTuiApp(bool selfTest) {
     using namespace ftxui;
 
     runtime::EventBus bus;
@@ -784,7 +785,13 @@ int runTuiApp() {
             // Degrade gracefully: without live events, 'r' refresh still works.
             bus.publish(core::ErrorEvent{.source = "hotplug", .message = started.error().message});
         }
-        screen.Loop(root);
+        if (selfTest) {
+            // Same line as the GUI's --self-test: wiring + one enumeration
+            // proved, without ever entering the alternate screen.
+            std::cout << "self-test rows: " << listVm.rowsRef().size() << "\n";
+        } else {
+            screen.Loop(root);
+        }
     } catch (...) {
         // Exception-safe teardown (deviation from the brief, user-approved — see
         // .superpowers/sdd/task-8-notes.md Deviation 2). Without this, plain

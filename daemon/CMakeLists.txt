@@ -24,4 +24,21 @@ if(DEVMGR_WITH_SDBUS)
     # Repo-root-relative includes for the private src/ headers, matching gui/.
     target_include_directories(devmgrd PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(devmgrd PRIVATE devmgrd_lib devmgr_pal_linux SDBusCpp::sdbus-c++)
+    # --version must print and exit 0 with no bus available (release-versioning spec).
+    add_test(NAME devmgrd_version COMMAND devmgrd --version)
+    set_tests_properties(devmgrd_version PROPERTIES
+        PASS_REGULAR_EXPRESSION "^devmgrd [0-9]+\\.[0-9]+\\.[0-9]+")
+
+    # Install rules (packaging-deb spec). "runtime" = binaries, shared by deb
+    # and tarball; "system" = FHS-path unit/policy files, deb only (the tarball
+    # carries them under packaging/ instead — see packaging/CMakeLists.txt).
+    install(TARGETS devmgrd RUNTIME DESTINATION bin COMPONENT runtime)
+    install(FILES data/devmgrd.service
+            DESTINATION lib/systemd/system COMPONENT system)
+    install(FILES data/org.devmgr.Manager1.service
+            DESTINATION share/dbus-1/system-services COMPONENT system)
+    install(FILES data/org.devmgr.Manager1.conf
+            DESTINATION share/dbus-1/system.d COMPONENT system)
+    install(FILES data/org.devmgr.policy
+            DESTINATION share/polkit-1/actions COMPONENT system)
 endif()

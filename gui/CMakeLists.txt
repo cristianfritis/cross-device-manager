@@ -37,3 +37,12 @@ target_link_libraries(devmgr-gui PRIVATE devmgr_gui)
 # exits 0; the smoke asserts wiring, not host capabilities.
 add_test(NAME devmgr_gui_selftest COMMAND devmgr-gui --self-test)
 set_tests_properties(devmgr_gui_selftest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# --version must print and exit 0 before QApplication exists — deliberately no
+# QT_QPA_PLATFORM here so a display requirement would fail the test
+# (release-versioning spec).
+add_test(NAME devmgr_gui_version COMMAND devmgr-gui --version)
+set_tests_properties(devmgr_gui_version PROPERTIES
+    PASS_REGULAR_EXPRESSION "^devmgr-gui [0-9]+\\.[0-9]+\\.[0-9]+")
+
+install(TARGETS devmgr-gui RUNTIME DESTINATION bin COMPONENT runtime)
