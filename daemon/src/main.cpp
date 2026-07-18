@@ -90,21 +90,9 @@ bool handleVersionFlag(std::span<char*> args) {
     return false;
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
+// Owns the object graph and the bus event loop; main() stays argument handling only.
+int serve(const Options& opts) {
     using namespace devmgr;
-    const std::span<char*> rawArgs(argv, static_cast<std::size_t>(argc));
-    if (handleVersionFlag(rawArgs)) return 0;
-    const Options opts = parse(rawArgs);
-    if (!opts.valid) {
-        std::cerr << "usage: devmgrd [--bus system|session] [--sysfs-root PATH] "
-                     "[--mounts-path PATH] [--authority polkit|allow-all|deny-all] "
-                     "[--state-dir PATH] [--modprobe-dir PATH]\n";
-        return 2;
-    }
-    devmgr::runtime::init();  // spdlog global setup — the repo's logging entry point
-    warnNonDefaultSeams(opts);
     try {
         auto connection =
             opts.bus == "session"
@@ -142,4 +130,21 @@ int main(int argc, char** argv) {
         return 1;
     }
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    const std::span<char*> rawArgs(argv, static_cast<std::size_t>(argc));
+    if (handleVersionFlag(rawArgs)) return 0;
+    const Options opts = parse(rawArgs);
+    if (!opts.valid) {
+        std::cerr << "usage: devmgrd [--bus system|session] [--sysfs-root PATH] "
+                     "[--mounts-path PATH] [--authority polkit|allow-all|deny-all] "
+                     "[--state-dir PATH] [--modprobe-dir PATH]\n";
+        return 2;
+    }
+    devmgr::runtime::init();  // spdlog global setup — the repo's logging entry point
+    warnNonDefaultSeams(opts);
+    return serve(opts);
 }

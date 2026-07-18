@@ -25,8 +25,12 @@ class TaskScheduler {
     template <class F, class... Args>
     auto submit(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F, Args...>> {
         using Return = std::invoke_result_t<F, Args...>;
+        // Init-capture pack instead of std::bind: libstdc++'s std::bind instantiates the
+        // deprecated std::result_of, which the clang-tidy gate rejects.
         auto task = std::make_shared<std::packaged_task<Return()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+            [f = std::forward<F>(f), ... args = std::forward<Args>(args)]() mutable -> Return {
+                return std::invoke(std::move(f), std::move(args)...);
+            });
         std::future<Return> future = task->get_future();
         {
             std::scoped_lock lock(mutex_);

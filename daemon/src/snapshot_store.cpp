@@ -84,12 +84,18 @@ std::vector<core::SnapshotMeta> orderNewestFirst(std::vector<core::SnapshotMeta>
     std::unordered_map<std::string, std::size_t> byId;
     for (std::size_t i = 0; i < metas.size(); ++i) byId.emplace(metas[i].id, i);
     std::unordered_set<std::string> taken;
-    std::optional<std::string> cursor = std::move(headId);
-    while (cursor && taken.insert(*cursor).second) {
-        const auto it = byId.find(*cursor);
-        if (it == byId.end()) break;  // dangling parent (pruned) — tolerated
-        ordered.push_back(metas[it->second]);
-        cursor = metas[it->second].parent;
+    // The chain walks on a plain string, not an optional: every optional deref stays guarded
+    // inside the iteration that checks it, which the analysis-gate checker requires.
+    if (headId) {
+        std::string id = *headId;
+        while (taken.insert(id).second) {  // insert fails on revisit — cycle
+            const auto it = byId.find(id);
+            if (it == byId.end()) break;  // dangling parent (pruned) — tolerated
+            ordered.push_back(metas[it->second]);
+            const std::optional<std::string>& parent = metas[it->second].parent;
+            if (!parent) break;
+            id = *parent;
+        }
     }
     std::vector<core::SnapshotMeta> rest;
     for (auto& m : metas)
