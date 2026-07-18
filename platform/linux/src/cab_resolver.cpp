@@ -69,7 +69,7 @@ core::Result<CabFile> openAndValidate(const std::string& path, std::uint64_t exp
     UniqueFd fd{::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW)};
     if (fd.get() < 0)
         return core::makeError(core::Error::Code::NotFound, "cannot open firmware file: " + path);
-    struct stat st{};
+    struct stat st = {};
     if (::fstat(fd.get(), &st) != 0 || !S_ISREG(st.st_mode))
         return core::makeError(core::Error::Code::Unsupported,
                                "firmware location is not a regular file: " + path);
