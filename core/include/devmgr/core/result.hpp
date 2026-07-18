@@ -7,7 +7,11 @@
 namespace devmgr::core {
 
 struct Error {
-    enum class Code { Permission, NotFound, Busy, Io, Network, Unsupported, Conflict };
+    // InvalidArgs (ApiVersion 4) means the request was malformed — caps, charset,
+    // or size — and was refused before any verb logic ran, so no state changed.
+    // Distinct from NotFound, which means a well-formed request named something
+    // that does not exist.
+    enum class Code { Permission, NotFound, Busy, Io, Network, Unsupported, Conflict, InvalidArgs };
     Code code;
     std::string message;
 };

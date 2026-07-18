@@ -243,13 +243,26 @@ TEST_F(IpcRoundTripTest, SurgicalUnbindGoesThroughTheBusAndSkipsTheStore) {
     EXPECT_EQ(readFile(drv / "bind"), "0000:00:03.0");
 }
 
-TEST_F(IpcRoundTripTest, InvalidModuleNameRefusedAsNotFound) {
+// ApiVersion 4: malformed arguments come back as InvalidArgs
+// (org.devmgr.Error.InvalidArgs), which is what proves the new error name
+// survives the real bus rather than collapsing to Io on the way home.
+TEST_F(IpcRoundTripTest, InvalidModuleNameRefusedAsInvalidArgs) {
     startDaemon("allow-all");
     DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
     auto r = channel.loadModule("../evil");
     ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error().code, Error::Code::NotFound);
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
     EXPECT_EQ(r.error().message, "invalid module name");
+}
+
+TEST_F(IpcRoundTripTest, OversizedArgumentRefusedOverTheBus) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    auto r = channel.loadModule(std::string(4U << 20U, 'a'));  // 4 MiB
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
+    // The daemon stayed responsive after refusing the oversized payload.
+    EXPECT_TRUE(channel.snapshotList().has_value());
 }
 
 TEST_F(IpcRoundTripTest, SnapshotLifecycleRoundTripsThroughTheBus) {
@@ -322,7 +335,9 @@ TEST_F(IpcRoundTripTest, SnapshotMutationsDeniedButListStaysUnprivileged) {
     EXPECT_TRUE(listed->empty());
 }
 
-TEST_F(IpcRoundTripTest, UnknownOrInvalidSnapshotIdsArriveAsNotFound) {
+// The two failures are deliberately different codes: a well-formed id that
+// names nothing is NotFound; a malformed id is InvalidArgs.
+TEST_F(IpcRoundTripTest, UnknownIdIsNotFoundWhileMalformedIdIsInvalidArgs) {
     startDaemon("allow-all");
     DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
     auto restored = channel.snapshotRestore("deadbeef");  // valid hex, no such snapshot
@@ -336,7 +351,7 @@ TEST_F(IpcRoundTripTest, UnknownOrInvalidSnapshotIdsArriveAsNotFound) {
     EXPECT_EQ(deleted.error().code, Error::Code::NotFound);
     auto traversal = channel.snapshotRestore("../evil");  // path-traversal guard
     ASSERT_FALSE(traversal.has_value());
-    EXPECT_EQ(traversal.error().code, Error::Code::NotFound);
+    EXPECT_EQ(traversal.error().code, Error::Code::InvalidArgs);
     EXPECT_EQ(traversal.error().message, "invalid snapshot id");
 }
 

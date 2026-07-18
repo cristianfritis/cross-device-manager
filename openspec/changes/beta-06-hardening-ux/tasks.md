@@ -3,7 +3,7 @@
 ## 1. Core & daemon hardening
 
 - [x] 1.1 EventBus unsubscribe barrier: generation-counted in-flight tracking, condition_variable drain in `unsubscribe()`, thread-id re-entrancy detection with deferred removal; unit tests including re-entrant unsubscribe-from-callback and cross-thread teardown race
-- [ ] 1.2 Central IPC validation layer at RequestProcessor entry (string length caps, JSON size caps, id hex charset, label rules — consolidate Phase 7 checks); InvalidArgs on violation, no state change; tests with oversized/malformed/hostile inputs on every verb
+- [x] 1.2 Central IPC validation layer at RequestProcessor entry (string length caps, JSON size caps, id hex charset, label rules — consolidate Phase 7 checks); InvalidArgs on violation, no state change; tests with oversized/malformed/hostile inputs on every verb
 - [ ] 1.3 Privilege audit doc (reads/writes/executes enumeration) + hardened `devmgrd.service` per design decision 5 with per-directive justification comments; verify manually in the VM that privileged flows still work
 
 ## 2. IPC v4 — diff verb & history core

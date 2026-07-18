@@ -8,7 +8,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: ApiVersion 4 with additive snapshot verbs
-`org.devmgr.Manager1` SHALL advertise `ApiVersion` 4. The v3 verbs remain unchanged: `SnapshotList() -> s` (JSON array of metadata: id, parent, createdAtUtc, trigger, reason, corrupt flag), `SnapshotCreate(s label) -> s` (returns id), `SnapshotRestore(s id) -> s` (returns JSON per-item outcome summary), `SnapshotDelete(s id)`. ApiVersion 4 adds one read verb: `SnapshotDiff(s baseId, s targetId) -> s` returning a JSON per-entry diff; an empty `targetId` means the current live system state. All ApiVersion 2 and 3 verbs SHALL remain unchanged — the bump is additive only.
+`org.devmgr.Manager1` SHALL advertise `ApiVersion` 4. The v3 verbs remain unchanged: `SnapshotList() -> s` (JSON array of metadata: id, parent, createdAtUtc, trigger, reason, corrupt flag), `SnapshotCreate(s label) -> s` (returns id), `SnapshotRestore(s id) -> s` (returns JSON per-item outcome summary), `SnapshotDelete(s id)`. ApiVersion 4 adds one read verb: `SnapshotDiff(s baseId, s targetId) -> s` returning a JSON per-entry diff; an empty `targetId` means the current live system state. All ApiVersion 2 and 3 verbs SHALL remain unchanged — the bump is additive only. ApiVersion 4 also adds the error name `org.devmgr.Error.InvalidArgs` for malformed arguments (see daemon-hardening); pre-v4 clients that do not recognize it fall through to the existing unknown-error rule and report it as `Io`.
 
 #### Scenario: Version negotiation
 - **WHEN** a client reads `ApiVersion`

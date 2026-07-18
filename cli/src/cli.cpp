@@ -35,7 +35,9 @@ int exitCodeFor(const core::Error& e) {
         case core::Error::Code::Permission:
             return kNotAuthorized;  // polkit refusal
         case core::Error::Code::NotFound:
-            return kNotFound;  // unknown / invalid snapshot id
+            return kNotFound;  // no snapshot with that id
+        case core::Error::Code::InvalidArgs:
+            return kUsage;  // malformed argument — the caller's mistake, not the daemon's
         case core::Error::Code::Busy:
             return kUnreachable;  // no-reply / timeout: daemon not answering
         case core::Error::Code::Io:

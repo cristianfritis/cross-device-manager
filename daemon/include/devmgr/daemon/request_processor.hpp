@@ -60,6 +60,7 @@ class RequestProcessor {
    private:
     core::Result<std::string> canonicalContained(const std::string& sysfsPath) const;
     core::Result<void> authorize(const CallerId& caller, const char* action);
+    core::Result<void> guardModuleUnload(const std::string& name);
     core::Result<void> applyDisable(const std::string& canonical);
     core::Result<void> applyEnable(const std::string& canonical);
     // The Phase 7 pre-mutation hook. Call with the apply mutex held, before

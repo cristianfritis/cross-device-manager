@@ -1,11 +1,11 @@
 #include "devmgr/daemon/request_processor.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <utility>
 
+#include "devmgr/daemon/request_validation.hpp"
 #include "devmgr/daemon/sysfs_device_probe.hpp"
 #include "devmgr/services/critical_device_guard.hpp"
 #include "devmgr/services/device_key.hpp"
@@ -14,37 +14,10 @@ namespace devmgr::daemon {
 namespace fs = std::filesystem;
 
 namespace {
-bool validName(const std::string& name) {  // module / driver names: [A-Za-z0-9_-]+
-    return !name.empty() && std::ranges::all_of(name, [](unsigned char c) {
-        return std::isalnum(c) != 0 || c == '_' || c == '-';
-    });
-}
 std::int64_t nowUtc() {
     return std::chrono::duration_cast<std::chrono::seconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
-}
-
-constexpr std::size_t kSnapshotIdMaxLength = 64;      // SHA-256 hex digest length
-constexpr std::size_t kSnapshotLabelMaxLength = 128;  // free text, bounded
-constexpr unsigned char kHighBit = 0x80;              // UTF-8 lead/continuation bytes
-
-// Snapshot ids become <id>.json file names inside the store directory, so the
-// charset check is a path-traversal guard, not just input hygiene: only
-// lowercase hex, and never longer than a SHA-256. Rejects "" and "../x".
-bool validSnapshotId(const std::string& id) {
-    if (id.empty() || id.size() > kSnapshotIdMaxLength) return false;
-    return std::ranges::all_of(
-        id, [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
-}
-
-// Manual snapshot labels are free text shown back in UIs: printable
-// characters only (no control bytes), bounded length. Bytes with the high
-// bit set pass so multi-byte UTF-8 labels survive.
-bool validLabel(const std::string& label) {
-    if (label.size() > kSnapshotLabelMaxLength) return false;
-    return std::ranges::all_of(
-        label, [](unsigned char c) { return std::isprint(c) != 0 || (c & kHighBit) != 0; });
 }
 }  // namespace
 
@@ -151,6 +124,8 @@ core::Result<void> RequestProcessor::applyEnable(const std::string& canonical) {
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<void> RequestProcessor::setDeviceEnabled(const CallerId& caller,
                                                       const std::string& sysfsPath, bool enabled) {
+    if (auto v = validation::caller(caller); !v) return v;
+    if (auto v = validation::sysfsPath(sysfsPath); !v) return v;
     auto canonical = canonicalContained(sysfsPath);
     if (!canonical) return tl::unexpected(canonical.error());
 
@@ -169,24 +144,23 @@ core::Result<void> RequestProcessor::setDeviceEnabled(const CallerId& caller,
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<void> RequestProcessor::loadModule(const CallerId& caller, const std::string& name) {
-    if (!validName(name))
-        return core::makeError(core::Error::Code::NotFound, "invalid module name");
+    if (auto v = validation::caller(caller); !v) return v;
+    if (auto v = validation::name(name, "module"); !v) return v;
     if (auto auth = authorize(caller, kActionManageModules); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
     if (auto snap = snapshotBefore("LoadModule", name); !snap) return snap;
     return drivers_.loadModule(name);
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
-core::Result<void> RequestProcessor::unloadModule(const CallerId& caller, const std::string& name) {
-    if (!validName(name))
-        return core::makeError(core::Error::Code::NotFound, "invalid module name");
-    // Guard (spec §6.3): holders/refcount + criticality of bound devices.
+// Guard (spec §6.3): holders/refcount + criticality of the devices bound to
+// the module. Split out of unloadModule so the verb body stays validate →
+// guard → authorize → act at a glance.
+core::Result<void> RequestProcessor::guardModuleUnload(const std::string& name) {
     services::ModuleUnloadFacts moduleFacts;
     auto loaded = drivers_.listLoadedModules();
     if (!loaded) return tl::unexpected(loaded.error());
-    const auto mod = std::find_if(loaded->begin(), loaded->end(),
-                                  [&](const core::LoadedModule& m) { return m.name == name; });
+    const auto mod =
+        std::ranges::find_if(*loaded, [&](const core::LoadedModule& m) { return m.name == name; });
     if (mod == loaded->end())
         return core::makeError(core::Error::Code::NotFound, "module '" + name + "' not loaded");
     moduleFacts.holders = mod->holders;
@@ -198,7 +172,14 @@ core::Result<void> RequestProcessor::unloadModule(const CallerId& caller, const 
     if (!facts) return tl::unexpected(facts.error());
     const auto verdict = services::evaluateModuleUnload(*facts, moduleFacts);
     if (!verdict.allowed) return core::makeError(core::Error::Code::Conflict, verdict.reason);
+    return {};
+}
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
+core::Result<void> RequestProcessor::unloadModule(const CallerId& caller, const std::string& name) {
+    if (auto v = validation::caller(caller); !v) return v;
+    if (auto v = validation::name(name, "module"); !v) return v;
+    if (auto guarded = guardModuleUnload(name); !guarded) return guarded;
     if (auto auth = authorize(caller, kActionManageModules); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
     if (auto snap = snapshotBefore("UnloadModule", name); !snap) return snap;
@@ -209,10 +190,11 @@ core::Result<void> RequestProcessor::unloadModule(const CallerId& caller, const 
 core::Result<void> RequestProcessor::bindDriver(const CallerId& caller,
                                                 const std::string& sysfsPath,
                                                 const std::string& driverName) {
+    if (auto v = validation::caller(caller); !v) return v;
+    if (auto v = validation::sysfsPath(sysfsPath); !v) return v;
+    if (auto v = validation::name(driverName, "driver"); !v) return v;
     auto canonical = canonicalContained(sysfsPath);
     if (!canonical) return tl::unexpected(canonical.error());
-    if (!validName(driverName))
-        return core::makeError(core::Error::Code::NotFound, "invalid driver name");
     if (auto auth = authorize(caller, kActionManageDrivers); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
     if (auto snap = snapshotBefore("BindDriver", *canonical); !snap) return snap;
@@ -222,6 +204,8 @@ core::Result<void> RequestProcessor::bindDriver(const CallerId& caller,
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<void> RequestProcessor::unbindDriver(const CallerId& caller,
                                                   const std::string& sysfsPath) {
+    if (auto v = validation::caller(caller); !v) return v;
+    if (auto v = validation::sysfsPath(sysfsPath); !v) return v;
     auto canonical = canonicalContained(sysfsPath);
     if (!canonical) return tl::unexpected(canonical.error());
     auto facts = prober_.probe();  // unbind ≡ disable risk (spec §6.1)
@@ -245,8 +229,8 @@ core::Result<std::vector<core::SnapshotMeta>> RequestProcessor::snapshotList() {
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<std::string> RequestProcessor::snapshotCreate(const CallerId& caller,
                                                            const std::string& label) {
-    if (!validLabel(label))
-        return core::makeError(core::Error::Code::NotFound, "invalid snapshot label");
+    if (auto v = validation::caller(caller); !v) return tl::unexpected(v.error());
+    if (auto v = validation::snapshotLabel(label); !v) return tl::unexpected(v.error());
     if (auto auth = authorize(caller, kActionManageSnapshots); !auth)
         return tl::unexpected(auth.error());
     const std::scoped_lock lock(applyMutex_);
@@ -257,8 +241,8 @@ core::Result<std::string> RequestProcessor::snapshotCreate(const CallerId& calle
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<core::RestoreOutcome> RequestProcessor::snapshotRestore(const CallerId& caller,
                                                                      const std::string& id) {
-    if (!validSnapshotId(id))
-        return core::makeError(core::Error::Code::NotFound, "invalid snapshot id");
+    if (auto v = validation::caller(caller); !v) return tl::unexpected(v.error());
+    if (auto v = validation::snapshotId(id); !v) return tl::unexpected(v.error());
     if (auto auth = authorize(caller, kActionManageSnapshots); !auth)
         return tl::unexpected(auth.error());
     const std::scoped_lock lock(applyMutex_);
@@ -267,8 +251,8 @@ core::Result<core::RestoreOutcome> RequestProcessor::snapshotRestore(const Calle
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<void> RequestProcessor::snapshotDelete(const CallerId& caller, const std::string& id) {
-    if (!validSnapshotId(id))
-        return core::makeError(core::Error::Code::NotFound, "invalid snapshot id");
+    if (auto v = validation::caller(caller); !v) return v;
+    if (auto v = validation::snapshotId(id); !v) return v;
     if (auto auth = authorize(caller, kActionManageSnapshots); !auth) return auth;
     const std::scoped_lock lock(applyMutex_);
     return snapshots_.remove(id);

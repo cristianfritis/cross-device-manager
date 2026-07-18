@@ -35,3 +35,18 @@ TEST(DbusContractTest, TransportErrorsMapPerSpecTable) {
     EXPECT_EQ(other.code, Error::Code::Io);
     EXPECT_EQ(other.message, "boom");
 }
+
+// ApiVersion 4 added InvalidArgs. It round-trips by name, and — critically for
+// pre-v4 clients — an unrecognized name still degrades to Io rather than being
+// mistaken for one of the codes they do know.
+TEST(DbusContractTest, InvalidArgsRoundTripsByName) {
+    EXPECT_STREQ(dbusErrorNameFor(Error::Code::InvalidArgs), kErrInvalidArgs);
+    const auto back = coreErrorFor(kErrInvalidArgs, "bad id");
+    EXPECT_EQ(back.code, Error::Code::InvalidArgs);
+    EXPECT_EQ(back.message, "bad id");
+}
+
+TEST(DbusContractTest, InvalidArgsIsDistinctFromNotFound) {
+    EXPECT_STRNE(dbusErrorNameFor(Error::Code::InvalidArgs),
+                 dbusErrorNameFor(Error::Code::NotFound));
+}

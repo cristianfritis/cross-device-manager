@@ -10,7 +10,7 @@ The shipped `devmgrd.service` SHALL declare a reviewed sandboxing set (at minimu
 - **THEN** all privileged scenarios pass and the journal shows no sandbox denials for supported operations
 
 ### Requirement: IPC input validation on every verb
-Every `org.devmgr.Manager1` verb SHALL validate its arguments before acting: length caps on all string inputs, id charset checks (hex-only where ids are expected), label printable-charset and length rules, and size caps on JSON payloads. Invalid input SHALL fail with the existing InvalidArgs mapping, change no state, and never crash or allocate unboundedly.
+Every `org.devmgr.Manager1` verb SHALL validate its arguments before acting: length caps on all string inputs, id charset checks (hex-only where ids are expected), label printable-charset and length rules, and size caps on JSON payloads. Invalid input SHALL fail with `InvalidArgs` (wire: `org.devmgr.Error.InvalidArgs`, added in ApiVersion 4), change no state, and never crash or allocate unboundedly. `InvalidArgs` is distinct from `NotFound`: malformed request versus a well-formed request naming something absent. Pre-v4 clients do not know the name and collapse it to `Io` per the existing unknown-error rule.
 
 #### Scenario: Oversized input refused
 - **WHEN** a client calls a verb with a multi-megabyte string argument

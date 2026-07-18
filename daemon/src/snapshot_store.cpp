@@ -12,6 +12,7 @@
 #include "devmgr/core/sha256.hpp"
 #include "devmgr/daemon/atomic_file.hpp"
 #include "devmgr/daemon/entry_json.hpp"
+#include "devmgr/daemon/request_validation.hpp"
 
 namespace devmgr::daemon {
 namespace fs = std::filesystem;
@@ -66,6 +67,13 @@ core::SnapshotMeta bestEffortMeta(const json& doc, const std::string& fallbackId
 }
 
 json parseFile(const fs::path& file) {  // discarded json on unreadable/invalid
+    // Size gate before the parser sees the file: a snapshot payload is a few
+    // hundred entries, so anything past the cap is corrupt or hostile and must
+    // not be allowed to drive an unbounded allocation. Oversize reads as
+    // invalid, which callers already treat as a corrupt snapshot.
+    std::error_code ec;
+    const auto size = fs::file_size(file, ec);
+    if (ec || size > validation::kJsonMaxBytes) return {json::value_t::discarded};
     std::ifstream in(file);
     return json::parse(in, nullptr, /*allow_exceptions=*/false);
 }

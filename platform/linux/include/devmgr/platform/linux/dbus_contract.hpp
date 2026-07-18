@@ -23,6 +23,10 @@ inline constexpr const char* kErrNotAuthorized = "org.devmgr.Error.NotAuthorized
 inline constexpr const char* kErrNotFound = "org.devmgr.Error.NotFound";
 inline constexpr const char* kErrUnsupported = "org.devmgr.Error.Unsupported";
 inline constexpr const char* kErrIo = "org.devmgr.Error.Io";
+// ApiVersion 4. Pre-v4 clients do not know this name; coreErrorFor() below
+// collapses any unknown name to Io, so an old client reports a malformed
+// request as an I/O failure rather than misreporting it as NotFound.
+inline constexpr const char* kErrInvalidArgs = "org.devmgr.Error.InvalidArgs";
 
 inline const char* dbusErrorNameFor(core::Error::Code code) {
     switch (code) {
@@ -34,6 +38,8 @@ inline const char* dbusErrorNameFor(core::Error::Code code) {
             return kErrNotFound;
         case core::Error::Code::Unsupported:
             return kErrUnsupported;
+        case core::Error::Code::InvalidArgs:
+            return kErrInvalidArgs;
         default:  // Io, Busy, Network collapse to Io on the wire
             return kErrIo;
     }
@@ -49,6 +55,8 @@ inline core::Error coreErrorFor(const std::string& dbusErrorName, std::string me
         return {.code = core::Error::Code::NotFound, .message = std::move(message)};
     if (dbusErrorName == kErrUnsupported)
         return {.code = core::Error::Code::Unsupported, .message = std::move(message)};
+    if (dbusErrorName == kErrInvalidArgs)
+        return {.code = core::Error::Code::InvalidArgs, .message = std::move(message)};
     if (dbusErrorName == "org.freedesktop.DBus.Error.ServiceUnknown")
         return {.code = core::Error::Code::Io, .message = "helper devmgrd is not available"};
     if (dbusErrorName == "org.freedesktop.DBus.Error.NoReply" ||

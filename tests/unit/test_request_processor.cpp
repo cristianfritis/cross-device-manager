@@ -12,6 +12,7 @@
 
 #include "devmgr/daemon/authority.hpp"
 #include "devmgr/daemon/request_processor.hpp"
+#include "devmgr/daemon/request_validation.hpp"
 #include "devmgr/daemon/snapshot_service.hpp"
 #include "devmgr/daemon/snapshot_store.hpp"
 #include "devmgr/daemon/state_store.hpp"
@@ -197,6 +198,7 @@ TEST_F(RequestProcessorTest, ProberErrorPropagatesOnDisable) {
 TEST_F(RequestProcessorTest, LoadModuleValidatesNameBeforeAnything) {
     auto r = processor().loadModule(":1.7", "../evil");
     ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
     EXPECT_EQ(r.error().message, "invalid module name");
     EXPECT_TRUE(authority_.actions.empty());  // never authorized
     EXPECT_TRUE(pal_.loadedModules.empty());  // never acted
@@ -286,6 +288,7 @@ TEST_F(RequestProcessorTest, SurgicalUnbindStillGuarded) {
 TEST_F(RequestProcessorTest, BindDriverValidatesDriverName) {
     auto r = processor().bindDriver(":1.7", devicePath_, "evil/../driver");
     ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
     EXPECT_EQ(r.error().message, "invalid driver name");
 }
 
@@ -434,11 +437,11 @@ TEST_F(RequestProcessorTest, SnapshotIdValidationRejectsTraversalBeforeAuth) {
     auto p = processor();
     auto r = p.snapshotRestore(":1.9", "../../../etc/passwd");
     ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error().code, Error::Code::NotFound);
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
     EXPECT_TRUE(authority_.actions.empty());  // rejected before any auth prompt
-    EXPECT_EQ(p.snapshotDelete(":1.9", "DEADBEEF").error().code, Error::Code::NotFound);
+    EXPECT_EQ(p.snapshotDelete(":1.9", "DEADBEEF").error().code, Error::Code::InvalidArgs);
     EXPECT_EQ(p.snapshotCreate(":1.9", std::string("bad\x01label")).error().code,
-              Error::Code::NotFound);
+              Error::Code::InvalidArgs);
 }
 
 TEST_F(RequestProcessorTest, SnapshotRestoreOfUnknownIdIsNotFound) {
@@ -463,4 +466,85 @@ TEST_F(RequestProcessorTest, SnapshotFullLifecycleThroughVerbs) {
     auto metas = p.snapshotList();
     ASSERT_TRUE(metas.has_value());
     for (const auto& m : *metas) EXPECT_NE(m.id, *clean);
+}
+
+// ---- Central validation layer (daemon-hardening spec) ----
+// Every verb caps and charset-checks its arguments before guard/authorize/act,
+// so hostile input never prompts for a password and never changes state.
+
+TEST_F(RequestProcessorTest, OversizedStringArgumentsRefusedOnEveryVerb) {
+    auto p = processor();
+    const std::string huge(4U << 20U, 'a');  // 4 MiB
+    const auto expect = [&](const Error& e) {
+        EXPECT_EQ(e.code, Error::Code::InvalidArgs) << e.message;
+    };
+    expect(p.setDeviceEnabled(":1.9", huge, false).error());
+    expect(p.loadModule(":1.9", huge).error());
+    expect(p.unloadModule(":1.9", huge).error());
+    expect(p.bindDriver(":1.9", huge, "dummy").error());
+    expect(p.bindDriver(":1.9", devicePath_, huge).error());
+    expect(p.unbindDriver(":1.9", huge).error());
+    expect(p.snapshotCreate(":1.9", huge).error());
+    expect(p.snapshotRestore(":1.9", huge).error());
+    expect(p.snapshotDelete(":1.9", huge).error());
+    // Nothing was authorized and nothing was acted on.
+    EXPECT_TRUE(authority_.actions.empty());
+    EXPECT_TRUE(pal_.setEnabledCalls.empty());
+    EXPECT_TRUE(pal_.loadedModules.empty());
+    EXPECT_TRUE(store_->entries().empty());
+}
+
+TEST_F(RequestProcessorTest, OversizedCallerRefusedBeforeAuthority) {
+    auto p = processor();
+    const std::string huge(512, ':');
+    auto r = p.setDeviceEnabled(huge, devicePath_, false);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
+    EXPECT_TRUE(authority_.actions.empty());
+}
+
+TEST_F(RequestProcessorTest, EmptyArgumentsRefused) {
+    auto p = processor();
+    EXPECT_EQ(p.loadModule(":1.9", "").error().code, Error::Code::InvalidArgs);
+    EXPECT_EQ(p.unbindDriver(":1.9", "").error().code, Error::Code::InvalidArgs);
+    EXPECT_EQ(p.snapshotRestore(":1.9", "").error().code, Error::Code::InvalidArgs);
+    EXPECT_EQ(p.setDeviceEnabled("", devicePath_, false).error().code, Error::Code::InvalidArgs);
+    EXPECT_TRUE(authority_.actions.empty());
+}
+
+// A NUL byte would silently truncate the path on the way to sysfs, so it is
+// refused rather than canonicalized.
+TEST_F(RequestProcessorTest, EmbeddedNulInPathRefused) {
+    auto p = processor();
+    const std::string sneaky = devicePath_ + std::string("\0/../../etc", 11);
+    auto r = p.setDeviceEnabled(":1.9", sneaky, false);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, Error::Code::InvalidArgs);
+    EXPECT_TRUE(pal_.setEnabledCalls.empty());
+}
+
+TEST_F(RequestProcessorTest, ModuleNameLengthCapEnforcedAtBoundary) {
+    auto p = processor();
+    const std::string atCap(devmgr::daemon::validation::kNameMaxLength, 'm');
+    const std::string overCap(devmgr::daemon::validation::kNameMaxLength + 1, 'm');
+    EXPECT_EQ(p.unloadModule(":1.9", overCap).error().code, Error::Code::InvalidArgs);
+    // At the cap the name is well-formed, so it passes validation and fails
+    // later for a real reason (no such module loaded) — proving the cap is
+    // off-by-one clean rather than rejecting everything.
+    EXPECT_EQ(p.unloadModule(":1.9", atCap).error().code, Error::Code::NotFound);
+}
+
+TEST_F(RequestProcessorTest, ControlBytesInLabelRefusedButUtf8Accepted) {
+    auto p = processor();
+    EXPECT_EQ(p.snapshotCreate(":1.9", "line\nbreak").error().code, Error::Code::InvalidArgs);
+    EXPECT_TRUE(p.snapshotCreate(":1.9", "café — ünïcode ✓").has_value());
+}
+
+TEST_F(RequestProcessorTest, UppercaseHexSnapshotIdRefused) {
+    auto p = processor();
+    // Ids are lowercase-hex only: the charset is a path-traversal guard, so
+    // "close enough" spellings are refused rather than normalized.
+    EXPECT_EQ(p.snapshotDelete(":1.9", std::string(64, 'A')).error().code,
+              Error::Code::InvalidArgs);
+    EXPECT_EQ(p.snapshotDelete(":1.9", "abc/../def").error().code, Error::Code::InvalidArgs);
 }
