@@ -161,8 +161,11 @@ core::Result<std::string> JsonSnapshotStore::put(const core::SnapshotPayload& pa
     std::string id = core::sha256Hex(canonicalPayload(payload));
     auto headId = headLocked();
     if (!headId) return tl::unexpected(headId.error());
+    // Local ref: one deref through the expected, so the optional-access check
+    // can track the check-then-use (house pattern, Phase 7 review).
+    const std::optional<std::string>& headOpt = *headId;
     // Hash-dedupe: unchanged state is free — no new file, existing id reported.
-    if (*headId && **headId == id) return id;
+    if (headOpt && *headOpt == id) return id;
 
     std::error_code ec;
     const bool exists = fs::exists(fs::path(dir_) / snapshotFileName(id), ec);
@@ -172,7 +175,7 @@ core::Result<std::string> JsonSnapshotStore::put(const core::SnapshotPayload& pa
         // file keeps its original parent/metadata and only HEAD moves.
         json doc{{"formatVersion", core::kSnapshotFormatVersion},
                  {"id", id},
-                 {"parent", *headId ? json(**headId) : json(nullptr)},
+                 {"parent", headOpt ? json(*headOpt) : json(nullptr)},
                  {"createdAtUtc", createdAtUtc},
                  {"trigger", core::to_string(trigger)},
                  {"reason", {{"verb", reason.verb}, {"subject", reason.subject}}},
@@ -180,7 +183,7 @@ core::Result<std::string> JsonSnapshotStore::put(const core::SnapshotPayload& pa
         if (auto w = atomicWriteFile(dir_, snapshotFileName(id), doc.dump(2)); !w)
             return tl::unexpected(w.error());
     }
-    if (*headId != id) {
+    if (headOpt != id) {
         if (auto w = atomicWriteFile(dir_, "HEAD", id + "\n"); !w) return tl::unexpected(w.error());
     }
     if (!exists) pruneLocked();  // only a new file can push the auto count past the cap
@@ -281,7 +284,8 @@ core::Result<void> JsonSnapshotStore::remove(const std::string& id) {
     if (!snap) return tl::unexpected(snap.error());
     auto headId = headLocked();
     if (!headId) return tl::unexpected(headId.error());
-    if (*headId && **headId == id) {
+    const std::optional<std::string>& headOpt = *headId;  // one deref (see put())
+    if (headOpt && *headOpt == id) {
         // Move HEAD to the parent BEFORE deleting: a crash in between leaves
         // an orphaned-but-listed file, never a HEAD naming a missing one.
         const std::string next = snap->meta.parent.value_or("");

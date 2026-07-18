@@ -54,8 +54,7 @@ CliRun runCli(const std::string& args) {
     if (pipe == nullptr) return {-1, out};
     std::array<char, 512> buffer{};
     size_t n = 0;
-    while ((n = ::fread(buffer.data(), 1, buffer.size(), pipe)) > 0)
-        out.append(buffer.data(), n);
+    while ((n = ::fread(buffer.data(), 1, buffer.size(), pipe)) > 0) out.append(buffer.data(), n);
     const int status = ::pclose(pipe);
     return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, out};
 }

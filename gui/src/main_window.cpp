@@ -41,8 +41,10 @@ void styleAsWarning(QLabel& label) {
     label.setFont(font);
     QPalette palette = label.palette();
     const bool dark = palette.color(QPalette::Window).lightness() < 128;
-    palette.setColor(QPalette::WindowText,
-                     dark ? QColor(0xE8, 0xB3, 0x5C) : QColor(0x8A, 0x5B, 0x00));
+    // Amber-on-dark / ochre-on-light warning foregrounds (contrast pair, §10).
+    static const QColor kWarnOnDark(0xE8, 0xB3, 0x5C);
+    static const QColor kWarnOnLight(0x8A, 0x5B, 0x00);
+    palette.setColor(QPalette::WindowText, dark ? kWarnOnDark : kWarnOnLight);
     label.setPalette(palette);
 }
 }  // namespace

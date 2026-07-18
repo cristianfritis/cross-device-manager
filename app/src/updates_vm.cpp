@@ -174,10 +174,18 @@ void UpdatesVM::onProgress(const core::TaskProgressEvent& e) {
     if (!e.taskId.starts_with(kInstallTaskPrefix)) return;
     std::string text = "installing " + e.taskId.substr(kInstallTaskPrefix.size()) + ": ";
     if (e.percent >= 0) text += std::to_string(e.percent) + "% ";
-    text += e.stage;
     {
         std::scoped_lock lock(textMutex_);
-        progressText_ = std::move(text);
+        // Percent-only frames carry no named stage (decoded as "unknown");
+        // retain the last named stage instead of flashing "unknown" — see
+        // lastNamedStage_ in the header.
+        std::string stage = e.stage;
+        if (stage.empty() || stage == "unknown") {
+            if (!lastNamedStage_.empty()) stage = lastNamedStage_;
+        } else {
+            lastNamedStage_ = stage;
+        }
+        progressText_ = text + stage;
     }
     postWake();
 }
@@ -187,6 +195,7 @@ void UpdatesVM::onCompleted(const core::TaskCompletedEvent& e) {
     {
         std::scoped_lock lock(textMutex_);
         progressText_.clear();
+        lastNamedStage_.clear();  // next install must not inherit a stale stage
         // requestBanner_ deliberately untouched: a "post"-kind DeviceRequest
         // must outlive the operation, so clearing is EXPLICIT-DISMISS ONLY —
         // sanctioned narrowing of spec §9 "dismiss | resolution" (T13 ledger).

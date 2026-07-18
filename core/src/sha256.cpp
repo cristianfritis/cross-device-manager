@@ -8,6 +8,21 @@
 namespace devmgr::core {
 namespace {
 
+// This file is a byte-level FIPS 180-4 transcription: the shift amounts, block
+// sizes, and word indices ARE the specification (§4.1.2, §5.3.3, §6.2.2), and
+// naming each would obscure the line-by-line correspondence a reference
+// implementation is audited against. Scope-wide suppression instead of
+// per-line noise; the algorithm is pinned by the NIST test vectors in
+// tests/unit/test_sha256.cpp. (Stacked one-check-per-line: a suppression
+// marker's argument list must fit its single comment line — ColumnLimit 100.)
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays)
+// NOLINTBEGIN(modernize-avoid-c-arrays)
+// NOLINTBEGIN(bugprone-implicit-widening-of-multiplication-result)
+
 // FIPS 180-4 §4.2.2 round constants: fractional parts of the cube roots of
 // the first 64 primes.
 constexpr std::array<std::uint32_t, 64> kRoundConstants = {
@@ -95,5 +110,13 @@ std::string sha256Hex(std::string_view data) {
     }
     return out;
 }
+
+// NOLINTEND(bugprone-implicit-widening-of-multiplication-result)
+// NOLINTEND(modernize-avoid-c-arrays)
+// NOLINTEND(cppcoreguidelines-avoid-c-arrays)
+// NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+// NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 }  // namespace devmgr::core

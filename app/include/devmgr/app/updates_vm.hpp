@@ -86,6 +86,12 @@ class UpdatesVM {
     mutable std::mutex textMutex_;
     std::string requestBanner_;
     std::string progressText_;
+    // Last named progress stage of the in-flight install. fwupd sends
+    // Percentage and Status in separate PropertiesChanged frames; a
+    // percent-only frame decodes as stage "unknown" (fwupd::statusName(0)),
+    // so the VM retains the last named stage instead of flashing "unknown"
+    // (design "Risks": Phase 6 cosmetic carry-over). Guarded by textMutex_.
+    std::string lastNamedStage_;
     runtime::Subscription subRefreshed_;
     runtime::Subscription subChanged_;
     runtime::Subscription subRequest_;

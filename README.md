@@ -108,6 +108,72 @@ fwupd) and DKMS out-of-tree kernel module status.
   actually happens). The banner also carries the provider's availability
   line (e.g. `fwupd 2.0.20`) and the host's Secure Boot state.
 
+## Snapshots & rollback (Phase 7)
+
+Every mutating operation now has an automatic safety net. Before the daemon
+executes any mutating verb (device enable/disable, module load/unload, driver
+bind/unbind), it takes an **auto snapshot** of all devmgr-owned state: the
+`state.json` entry list (which carries each disable's mechanism, including
+driver unbind/override state) and the content of every devmgr-written
+`modprobe.d` file (`devmgr-*.conf`). Snapshot creation is **fail-closed**: if
+the snapshot cannot be written, the mutation is refused with an Io error —
+a change without an undo is worse than no change.
+
+- **Store.** One JSON file per snapshot under `/var/lib/devmgrd/snapshots/`,
+  identified by the SHA-256 of its payload and linked to its parent (a linear
+  history with a `HEAD` pointer). Unchanged state is deduplicated: two
+  mutations with no state change between them share one snapshot. Auto
+  snapshots are pruned to the newest 20; **manual** snapshots are exempt and
+  persist until deleted. A snapshot whose content no longer matches its hash
+  is quarantined (renamed `*.bad-<timestamp>`), listed as corrupt, and never
+  restored from or silently deleted.
+- **Restore.** Restoring a snapshot first takes its own auto safety snapshot
+  (so a restore is undoable), then atomically writes the payload back and
+  converges hardware: entries in the restored state are re-applied through
+  the existing enforcement path, and devices whose entries disappeared get a
+  re-enable attempt. The per-device criticality guard is re-checked and can
+  refuse individual items — refusals are reported in the per-item outcome
+  summary, never bypassed, so a restore may complete *partially converged*.
+- **Surfaces.** A **Snapshots** tab in both UIs (TUI: 4th tab, `s` create /
+  `r` restore / `x` delete with confirmation modals; GUI: same verbs as
+  toolbar actions with Qt confirmation dialogs) and a minimal recovery CLI:
+
+  ```sh
+  devmgr snapshot list [--json]        # one row per snapshot; --json for raw metadata
+  devmgr snapshot create [--label t]   # manual snapshot, prints its id
+  devmgr snapshot restore <id>         # id may be any unique prefix
+  devmgr snapshot delete <id>
+  ```
+
+  The CLI has zero UI dependencies — it is the recovery path when the UIs are
+  unusable. Exit codes are a stable contract: `0` ok, `1` usage, `2` not
+  found/ambiguous, `3` not authorized, `4` daemon unreachable, `5` operation
+  failed.
+
+### Restore limits
+
+- **Modules are restored at config level only.** A restore rewrites the
+  devmgr-owned `modprobe.d` files but never force-unloads a currently loaded
+  module — a removed blacklist takes effect on the next boot or hotplug of
+  the affected device.
+- **Firmware is never rolled back.** fwupd owns firmware; snapshots do not
+  capture or restore it.
+- **Guard refusals are final.** If convergence would disable a device the
+  guard now considers critical (e.g. it hosts the root disk), that item is
+  reported as refused and the device stays enabled.
+
+### Authorization (snapshot verbs)
+
+Create/restore/delete require the new polkit action
+`org.devmgr.manage-snapshots` (`auth_admin_keep`); `list` is unprivileged.
+**When upgrading a source install, re-install the polkit policy** — the file
+shipped before Phase 7 does not contain the new action, and every mutating
+snapshot verb will be refused until it is updated:
+
+```sh
+sudo install -m644 daemon/data/org.devmgr.policy /usr/share/polkit-1/actions/
+```
+
 ### VM smoke test
 
 `test/vm/phase6-smoke.sh` drives `FwupdUpdateProvider`/`DkmsStatusProvider`
@@ -116,7 +182,11 @@ directly (never `fwupdmgr`/`dkms` as a shortcut) against fwupd's built-in
 `fakedevice` upgrade is visible with a resolvable local cab, installs it
 end-to-end (`1.2.2` → `1.2.4`), and — where DKMS headers are available in the
 VM — registers a throwaway DKMS module and checks its status through
-`DkmsStatusProvider`. Run the whole rig (Phase 4 + 5 + 6) with:
+`DkmsStatusProvider`. `test/vm/phase7-smoke.sh` covers the snapshot engine:
+disable → auto snapshot exists → CLI restore re-enables the device, a module
+blacklist round-trip through a manual snapshot, undoing a restore via its
+safety snapshot, and the CLI's daemon-down exit code. Run the whole rig
+(Phase 4 + 5 + 6 + 7) with:
 
 ```sh
 ./test-vm.sh
@@ -124,6 +194,5 @@ VM — registers a throwaway DKMS module and checks its status through
 
 which provisions the disposable VM (now including the `fwupd` and `dkms`
 packages), builds the tree with `-DDEVMGR_WITH_SDBUS=ON`, and runs
-`test/vm/phase4-smoke.sh`, `test/vm/phase5-smoke.sh`, and
-`test/vm/phase6-smoke.sh` in sequence — expect `PHASE4 VM SMOKE OK`,
-`PHASE5 VM SMOKE OK`, and `PHASE6 VM SMOKE OK`.
+`test/vm/phase4-smoke.sh` through `test/vm/phase7-smoke.sh` in sequence —
+expect `PHASE4 VM SMOKE OK` … `PHASE7 VM SMOKE OK`.

@@ -261,6 +261,31 @@ TEST_F(UpdatesVmTest, InstallProgressTextFollowsTaskProgress) {
     EXPECT_TRUE(vm.installProgressText().empty());
 }
 
+TEST_F(UpdatesVmTest, PercentOnlyFrameRetainsLastNamedStage) {  // design "Risks" carry-over
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    // fwupd sends Percentage and Status in separate PropertiesChanged frames;
+    // a percent-only frame decodes as stage "unknown" and must NOT replace the
+    // last named stage in the progress text.
+    bus_.publish(core::TaskProgressEvent{
+        .taskId = "install-update:a1", .percent = kEarlierPercent, .stage = "device-write"});
+    bus_.publish(core::TaskProgressEvent{
+        .taskId = "install-update:a1", .percent = kProgressPercent, .stage = "unknown"});
+    EXPECT_NE(vm.installProgressText().find("42%"), std::string::npos);
+    EXPECT_NE(vm.installProgressText().find("device-write"), std::string::npos);
+    EXPECT_EQ(vm.installProgressText().find("unknown"), std::string::npos);
+    // A newly named stage takes over again.
+    bus_.publish(core::TaskProgressEvent{
+        .taskId = "install-update:a1", .percent = kProgressPercent, .stage = "device-verify"});
+    EXPECT_NE(vm.installProgressText().find("device-verify"), std::string::npos);
+    // Completion clears the retained stage: the next install must not inherit
+    // it, so its leading percent-only frame shows "unknown" honestly.
+    bus_.publish(
+        core::TaskCompletedEvent{.taskId = "install-update:a1", .ok = true, .message = "ok"});
+    bus_.publish(core::TaskProgressEvent{
+        .taskId = "install-update:b2", .percent = kEarlierPercent, .stage = "unknown"});
+    EXPECT_NE(vm.installProgressText().find("unknown"), std::string::npos);
+}
+
 TEST_F(UpdatesVmTest, TeardownStormNoPostAfterDrain) {  // review test 14 (VM level)
     refresh();
     QueuingUiDispatcher queuing;
