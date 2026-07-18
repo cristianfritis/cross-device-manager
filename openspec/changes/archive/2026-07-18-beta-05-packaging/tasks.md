@@ -29,6 +29,6 @@
 ## 6. Exit gate
 
 - [x] 6.1 `test/vm/install-smoke.sh` + rig wiring: fresh Ubuntu VM → install deb → bus activation → both UIs enumerate → snapshot/restore round-trip → uninstall residue check → `INSTALL SMOKE OK`
-- [ ] 6.2 Full standard gates (build/ctest both configs, format, gated tidy, purity greps) + tag `v0.5.0-beta.1` dry-run through the workflow (draft release verified, then discarded or kept per owner)
+- [x] 6.2 Full standard gates (build/ctest both configs, format, gated tidy, purity greps) + tag `v0.5.0-beta.1` dry-run through the workflow (draft release verified, then discarded or kept per owner)
   - [x] Gates: host ctest 395/395, nosdbus 379/379, clang-format clean, container clang-tidy clean (exit 0), Qt/FTXUI/GLib/sdbus purity greps 0 hits. Tidy needed four fixes — see below.
-  - [ ] Tag `v0.5.0-beta.1` dry-run — **owner action** (pushes a tag, triggers the release workflow)
+  - [x] Tag `v0.5.0-beta.1` dry-run — owner pushed tag 2026-07-18; tag object 46b9704 → commit 284ffd5 (main HEAD); draft release assets verified by owner; stale draft tags deleted.
