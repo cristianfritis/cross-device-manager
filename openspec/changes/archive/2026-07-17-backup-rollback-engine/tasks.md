@@ -33,4 +33,4 @@
 - [x] 6.1 VM smoke `test/vm/phase7-smoke.sh` + `test-vm.sh` wiring: disable device → auto snapshot exists → restore → device re-enabled; module blacklist round-trip; CLI restore path
 - [x] 6.2 README Snapshots section + restore-limits documentation (module config-level, no firmware rollback, polkit policy re-install note)
 - [x] 6.3 Optional (drop if timeline pressed): UIs retain last named progress stage on percent-only frames (Phase 6 cosmetic carry-over)
-- [ ] 6.4 Full gates: linux-debug build + ctest, nosdbus build + ctest (CLI absent), clang-format, CI-form clang-tidy on gated dirs, purity greps; container suite + VM run by user
+- [x] 6.4 Full gates: linux-debug build + ctest, nosdbus build + ctest (CLI absent), clang-format, CI-form clang-tidy on gated dirs, purity greps; container suite + VM run by user
