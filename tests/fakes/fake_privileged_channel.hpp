@@ -49,6 +49,13 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
         snapshotCalls.push_back("delete:" + id);
         return next;
     }
+    // Records the live-state form as "diff:<base>:<live>" so a test can tell a
+    // restore preview from a snapshot-to-snapshot comparison.
+    core::Result<core::SnapshotDiff> snapshotDiff(const std::string& baseId,
+                                                  const std::string& targetId) override {
+        snapshotCalls.push_back("diff:" + baseId + ":" + (targetId.empty() ? "live" : targetId));
+        return nextDiff;
+    }
     struct Call {
         std::string sysfsPath;
         bool enabled;
@@ -65,6 +72,7 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
     core::Result<std::vector<core::SnapshotMeta>> snapshotMetas = std::vector<core::SnapshotMeta>{};
     core::Result<std::string> nextCreate = std::string{"fake-snapshot-id"};
     core::Result<core::RestoreOutcome> nextRestore = core::RestoreOutcome{};
+    core::Result<core::SnapshotDiff> nextDiff = core::SnapshotDiff{};
 };
 
 }  // namespace devmgr::test

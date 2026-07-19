@@ -45,11 +45,15 @@ class FakeChannel final : public devmgr::pal::IPrivilegedChannel {
     std::optional<Error> createError;
     std::optional<Error> restoreError;
     std::optional<Error> deleteError;
+    std::optional<Error> diffError;
 
     std::optional<std::string> createdLabel;
     std::optional<std::string> restoredId;
     std::optional<std::string> deletedId;
     RestoreOutcome outcome;
+    std::optional<std::string> diffedBase;
+    std::optional<std::string> diffedTarget;
+    devmgr::core::SnapshotDiff diff;
     std::string createdId = id64("cafe");
 
     devmgr::core::Result<std::vector<SnapshotMeta>> snapshotList() override {
@@ -71,6 +75,13 @@ class FakeChannel final : public devmgr::pal::IPrivilegedChannel {
         deletedId = id;
         if (deleteError) return tl::unexpected(*deleteError);
         return {};
+    }
+    devmgr::core::Result<devmgr::core::SnapshotDiff> snapshotDiff(
+        const std::string& baseId, const std::string& targetId) override {
+        diffedBase = baseId;
+        diffedTarget = targetId;
+        if (diffError) return tl::unexpected(*diffError);
+        return diff;
     }
 
     // Unused Phase 4 verbs.

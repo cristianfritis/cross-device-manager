@@ -6,6 +6,7 @@
 
 #include "devmgr/core/models.hpp"
 #include "devmgr/core/result.hpp"
+#include "devmgr/core/snapshot_diff.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/update_models.hpp"
 #include "devmgr/pal/hotplug_event.hpp"
@@ -132,6 +133,12 @@ class IPrivilegedChannel {
     virtual core::Result<std::string> snapshotCreate(const std::string& label) = 0;
     virtual core::Result<core::RestoreOutcome> snapshotRestore(const std::string& id) = 0;
     virtual core::Result<void> snapshotDelete(const std::string& id) = 0;
+    // ApiVersion 4. Read-only and unprivileged like snapshotList — never
+    // prompts, so it is safe to call while composing a restore preview. An
+    // empty `targetId` diffs the snapshot against live system state.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — two snapshot ids
+    virtual core::Result<core::SnapshotDiff> snapshotDiff(const std::string& baseId,
+                                                          const std::string& targetId) = 0;
 };
 
 }  // namespace devmgr::pal

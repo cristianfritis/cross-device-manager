@@ -27,6 +27,9 @@ class DbusPrivilegedChannel final : public pal::IPrivilegedChannel {
     core::Result<std::string> snapshotCreate(const std::string& label) override;
     core::Result<core::RestoreOutcome> snapshotRestore(const std::string& id) override;
     core::Result<void> snapshotDelete(const std::string& id) override;
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — two snapshot ids
+    core::Result<core::SnapshotDiff> snapshotDiff(const std::string& baseId,
+                                                  const std::string& targetId) override;
 
    private:
     core::Result<void> ensureApi(std::uint32_t minVersion);

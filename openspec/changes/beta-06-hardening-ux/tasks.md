@@ -8,9 +8,9 @@
 
 ## 2. IPC v4 — diff verb & history core
 
-- [ ] 2.1 core: payload diff engine + per-entry diff JSON shape in `snapshot_json` (device/module/modprobe kinds, explicit no-differences marker) + parent-chain builder helper (pruned-parent chain starts, HEAD, last-good); unit tests
-- [ ] 2.2 daemon: `SnapshotDiff(baseId, targetId)` verb (empty target = live state; corrupt → Io, unknown → NotFound), `kApiVersion` 3→4, manager_adaptor + dbus_contract; polkit-free read parity with List; tests/ipc coverage (diff two snapshots, diff vs live, corrupt refusal, unauthorized-free access)
-- [ ] 2.3 `pal::IPrivilegedChannel` + DbusPrivilegedChannel + FakePrivilegedChannel grow the diff verb (v4 negotiation via `ensureApi(4)`); ipc round-trip tests
+- [x] 2.1 core: payload diff engine + per-entry diff JSON shape in `snapshot_json` (device/module/modprobe kinds, explicit no-differences marker) + parent-chain builder helper (pruned-parent chain starts, HEAD, last-good); unit tests
+- [x] 2.2 daemon: `SnapshotDiff(baseId, targetId)` verb (empty target = live state; corrupt → Io, unknown → NotFound), `kApiVersion` 3→4, manager_adaptor + dbus_contract; polkit-free read parity with List; tests/ipc coverage (diff two snapshots, diff vs live, corrupt refusal, unauthorized-free access)
+- [x] 2.3 `pal::IPrivilegedChannel` + DbusPrivilegedChannel + FakePrivilegedChannel grow the diff verb (v4 negotiation via `ensureApi(4)`); ipc round-trip tests
 
 ## 3. Snapshot UX & accessibility
 

@@ -186,6 +186,24 @@ core::Result<std::vector<core::SnapshotMeta>> DbusPrivilegedChannel::snapshotLis
     }
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — two snapshot ids
+core::Result<core::SnapshotDiff> DbusPrivilegedChannel::snapshotDiff(const std::string& baseId,
+                                                                     const std::string& targetId) {
+    if (auto api = ensureApi(4); !api) return tl::unexpected(api.error());
+    try {
+        auto proxy = makeProxy(bus_);
+        std::string json;
+        proxy->callMethod("SnapshotDiff")
+            .onInterface(sdbus::InterfaceName{kInterfaceName})
+            .withArguments(baseId, targetId)
+            .withTimeout(std::chrono::seconds(kListVerbTimeoutSeconds))
+            .storeResultsTo(json);
+        return core::snapshotDiffFromJson(json);
+    } catch (const sdbus::Error& e) {
+        return tl::unexpected(coreErrorFor(std::string{e.getName()}, std::string{e.getMessage()}));
+    }
+}
+
 core::Result<std::string> DbusPrivilegedChannel::snapshotCreate(const std::string& label) {
     if (auto api = ensureApi(3); !api) return tl::unexpected(api.error());
     try {

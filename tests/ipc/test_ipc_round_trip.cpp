@@ -7,12 +7,14 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 
 #include <gtest/gtest.h>
 
 #include "devmgr/core/models.hpp"
+#include "devmgr/core/snapshot_diff.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/platform/linux/dbus_privileged_channel.hpp"
 
@@ -353,6 +355,126 @@ TEST_F(IpcRoundTripTest, UnknownIdIsNotFoundWhileMalformedIdIsInvalidArgs) {
     ASSERT_FALSE(traversal.has_value());
     EXPECT_EQ(traversal.error().code, Error::Code::InvalidArgs);
     EXPECT_EQ(traversal.error().message, "invalid snapshot id");
+}
+
+// --- ApiVersion 4: SnapshotDiff ----------------------------------------------
+
+TEST_F(IpcRoundTripTest, DiffBetweenTwoSnapshotsNamesTheChangedDevice) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    // Disabling takes the pre-mutation auto snapshot (device still enabled);
+    // the manual one that follows captures the disabled state.
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+    auto before = channel.snapshotList();
+    ASSERT_TRUE(before.has_value()) << before.error().message;
+    ASSERT_EQ(before->size(), 1U);
+    const std::string enabledEra = (*before)[0].id;
+    auto disabledEra = channel.snapshotCreate("disabled-era");
+    ASSERT_TRUE(disabledEra.has_value()) << disabledEra.error().message;
+
+    auto diff = channel.snapshotDiff(enabledEra, *disabledEra);
+    ASSERT_TRUE(diff.has_value()) << diff.error().message;
+    EXPECT_EQ(diff->baseId, enabledEra);
+    EXPECT_EQ(diff->targetId, *disabledEra);
+    ASSERT_EQ(diff->entries.size(), 1U);
+    EXPECT_EQ(diff->entries[0].kind, devmgr::core::kDiffKindDevice);
+    EXPECT_EQ(diff->entries[0].before, devmgr::core::kDiffStateEnabled);
+    EXPECT_EQ(diff->entries[0].after, "disabled (authorized)");
+    EXPECT_FALSE(diff->identical());
+
+    // Same snapshot on both sides: the explicit no-differences result.
+    auto same = channel.snapshotDiff(enabledEra, enabledEra);
+    ASSERT_TRUE(same.has_value()) << same.error().message;
+    EXPECT_TRUE(same->identical());
+}
+
+TEST_F(IpcRoundTripTest, DiffAgainstLiveStateIsWhatARestoreWouldChange) {
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+    auto listed = channel.snapshotList();
+    ASSERT_TRUE(listed.has_value());
+    ASSERT_EQ(listed->size(), 1U);
+    const std::string enabledEra = (*listed)[0].id;  // captured before the disable
+
+    // Empty target = live state, which currently has the device disabled.
+    auto preview = channel.snapshotDiff(enabledEra, "");
+    ASSERT_TRUE(preview.has_value()) << preview.error().message;
+    EXPECT_TRUE(preview->targetId.empty());
+    ASSERT_EQ(preview->entries.size(), 1U);
+    EXPECT_EQ(preview->entries[0].after, "disabled (authorized)");
+
+    // After restoring, live state matches the snapshot again: nothing to show.
+    ASSERT_TRUE(channel.snapshotRestore(enabledEra).has_value());
+    auto converged = channel.snapshotDiff(enabledEra, "");
+    ASSERT_TRUE(converged.has_value()) << converged.error().message;
+    EXPECT_TRUE(converged->identical());
+}
+
+TEST_F(IpcRoundTripTest, DiffRefusesCorruptSnapshotsAndMalformedIds) {
+    startDaemon("allow-all");
+    std::string victim;
+    {
+        DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+        // A payload with content to tamper with: the disabled entry's serial.
+        ASSERT_TRUE(channel.setDeviceEnabled(deviceAt(device_.string()), false).has_value());
+        auto created = channel.snapshotCreate("victim");
+        ASSERT_TRUE(created.has_value()) << created.error().message;
+        victim = *created;
+    }
+    stopDaemon();
+    // Edit the payload without updating the id: the content hash no longer
+    // matches, so the store quarantines the file and reads fail with Io.
+    const fs::path file = root_ / "state/snapshots" / (victim + ".json");
+    ASSERT_TRUE(fs::exists(file));
+    std::string contents;
+    {
+        std::ifstream in(file);
+        contents.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto pos = contents.find("IPCSER");
+    ASSERT_NE(pos, std::string::npos);
+    contents.replace(pos, 6, "EVLSER");
+    std::ofstream(file, std::ios::trunc) << contents;
+
+    startDaemon("allow-all");
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    auto corrupt = channel.snapshotDiff(victim, "");
+    ASSERT_FALSE(corrupt.has_value());
+    EXPECT_EQ(corrupt.error().code, Error::Code::Io);
+
+    auto unknown = channel.snapshotDiff("deadbeef", "");  // valid hex, no such id
+    ASSERT_FALSE(unknown.has_value());
+    EXPECT_EQ(unknown.error().code, Error::Code::NotFound);
+
+    auto malformed = channel.snapshotDiff("../evil", "");
+    ASSERT_FALSE(malformed.has_value());
+    EXPECT_EQ(malformed.error().code, Error::Code::InvalidArgs);
+    auto malformedTarget = channel.snapshotDiff("deadbeef", "../evil");
+    ASSERT_FALSE(malformedTarget.has_value());
+    EXPECT_EQ(malformedTarget.error().code, Error::Code::InvalidArgs);
+}
+
+TEST_F(IpcRoundTripTest, DiffNeedsNoAuthorizationJustLikeList) {
+    startDaemon("allow-all");
+    std::string id;
+    {
+        DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+        auto created = channel.snapshotCreate("pre-lockdown");
+        ASSERT_TRUE(created.has_value()) << created.error().message;
+        id = *created;
+    }
+    stopDaemon();
+    startDaemon("deny-all");  // every polkit check now refuses
+
+    DbusPrivilegedChannel channel(DbusPrivilegedChannel::Bus::Session);
+    auto restore = channel.snapshotRestore(id);
+    ASSERT_FALSE(restore.has_value());
+    EXPECT_EQ(restore.error().code, Error::Code::Permission);
+    // Read parity with List: previewing a restore must never prompt.
+    auto diff = channel.snapshotDiff(id, "");
+    ASSERT_TRUE(diff.has_value()) << diff.error().message;
+    EXPECT_TRUE(diff->identical());
 }
 
 TEST_F(IpcRoundTripTest, RestorePartialConvergenceReportsGuardRefusal) {
