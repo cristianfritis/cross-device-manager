@@ -15,27 +15,61 @@ ExecStart=/usr/bin/devmgrd
 Restart=on-failure
 
 # State (snapshots + persisted device state) lives in /var/lib/devmgrd.
+# StateDirectory also grants it read-write through ProtectSystem=strict.
 StateDirectory=devmgrd
 
-# Sandboxing. Two protections must stay OFF for the daemon to work at all:
-# ProtectKernelTunables (would remount /sys read-only — we write sysfs to
-# enable/disable devices and bind/unbind drivers) and ProtectKernelModules
-# (we load/unload modules via libkmod). Everything else is locked down.
+# --- Sandboxing -------------------------------------------------------------
+# Every directive below maps to an entry in docs/PRIVILEGE-AUDIT.md; the audit
+# enumerates what the daemon actually reads, writes, and executes. Keep the two
+# in sync — an allowance here with no need documented there is a bug.
+
+# The daemon never fork/exec/popen/system()s anything (audit: "Executes"), so
+# both of these are free.
 NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+
+# Read-only everything, then open exactly the write surface:
+#   /sys/devices, /sys/bus  device attributes, driver bind/unbind, drivers_probe
+#   /etc/modprobe.d         snapshot restore write-back of devmgr-owned files
+# Device syspaths are dynamic, so these cannot be narrowed below subtree level.
+# /var/lib/devmgrd is covered by StateDirectory above.
 ProtectSystem=strict
-ReadWritePaths=/sys /etc/modprobe.d
+ReadWritePaths=/sys/devices /sys/bus /etc/modprobe.d
+
+# Two protections must stay OFF for the daemon to work at all — stated
+# explicitly rather than omitted so the unit audits line-for-line:
+#   ProtectKernelTunables would remount /sys read-only, killing every device
+#   enable/disable and driver bind/unbind (the core feature).
+#   ProtectKernelModules would block module load/unload, a spec'd capability
+#   with its own polkit action.
+ProtectKernelTunables=no
+ProtectKernelModules=no
+
 ProtectHome=yes
 PrivateTmp=yes
+# No device nodes are ever opened; sysfs and netlink are unaffected by this.
+PrivateDevices=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
-# AF_UNIX: D-Bus (bus itself, polkit, fwupd). AF_NETLINK: udev hotplug monitor.
+
+# AF_UNIX: system bus + polkit. AF_NETLINK: libudev hotplug monitor.
+# PrivateNetwork is deliberately NOT set — a private netns would cut the daemon
+# off from systemd-udevd's uevent broadcasts and silently kill hotplug.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
-MemoryDenyWriteExecute=yes
 LockPersonality=yes
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_SYS_MODULE CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER
+# @system-service excludes the module syscalls, which libkmod needs.
+SystemCallFilter=@system-service @module
+SystemCallErrorNumber=EPERM
+
+# Only libkmod's init_module/finit_module/delete_module need a capability.
+# Every write target is root-owned and owner-writable, so no CAP_DAC_*; the
+# daemon has no chown/chmod call, so no CAP_CHOWN/CAP_FOWNER; it mounts,
+# unshares, and kexecs nothing, so no CAP_SYS_ADMIN. See the audit's
+# "Capabilities" table for the per-capability reasoning.
+CapabilityBoundingSet=CAP_SYS_MODULE
