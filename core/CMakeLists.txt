@@ -12,6 +12,8 @@ add_library(devmgr_core
     src/models.cpp
     src/snapshot_models.cpp
     src/snapshot_json.cpp
+    src/snapshot_diff.cpp
+    src/snapshot_history.cpp
     src/sha256.cpp
     src/logging.cpp
     src/task_scheduler.cpp

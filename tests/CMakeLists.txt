@@ -7,6 +7,8 @@ add_executable(devmgr_tests
     unit/test_models.cpp
     unit/test_snapshot_models.cpp
     unit/test_snapshot_json.cpp
+    unit/test_snapshot_diff.cpp
+    unit/test_snapshot_history.cpp
     unit/test_sha256.cpp
     unit/test_event_bus.cpp
     unit/test_logging.cpp

@@ -70,6 +70,43 @@ std::string restoreOutcomeToJson(const RestoreOutcome& outcome) {
         .dump();
 }
 
+std::string snapshotDiffToJson(const SnapshotDiff& diff) {
+    json entries = json::array();
+    for (const auto& e : diff.entries) {
+        entries.push_back(
+            {{"kind", e.kind}, {"key", e.key}, {"before", e.before}, {"after", e.after}});
+    }
+    return json{{"baseId", diff.baseId},
+                {"targetId", diff.targetId},
+                {"differences", !diff.identical()},
+                {"entries", std::move(entries)}}
+        .dump();
+}
+
+Result<SnapshotDiff> snapshotDiffFromJson(const std::string& text) {
+    const json doc = json::parse(text, nullptr, /*allow_exceptions=*/false);
+    if (doc.is_discarded() || !doc.is_object())
+        return makeError(Error::Code::Io, "malformed snapshot diff JSON");
+    SnapshotDiff out;
+    try {
+        out.baseId = doc.at("baseId");
+        out.targetId = doc.at("targetId");
+        for (const auto& j : doc.at("entries")) {
+            out.entries.push_back({.kind = j.at("kind"),
+                                   .key = j.at("key"),
+                                   .before = j.at("before"),
+                                   .after = j.at("after")});
+        }
+    } catch (const nlohmann::json::exception& e) {
+        return makeError(Error::Code::Io, std::string("malformed snapshot diff JSON: ") + e.what());
+    }
+    // `differences` is redundant with the entry count on the read side; a
+    // document that disagrees with itself is malformed, not merely odd.
+    if (doc.value("differences", !out.entries.empty()) == out.entries.empty())
+        return makeError(Error::Code::Io, "snapshot diff JSON contradicts its differences marker");
+    return out;
+}
+
 Result<RestoreOutcome> restoreOutcomeFromJson(const std::string& text) {
     const json doc = json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (doc.is_discarded() || !doc.is_object())
