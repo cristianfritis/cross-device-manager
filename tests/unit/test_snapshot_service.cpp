@@ -253,3 +253,74 @@ TEST_F(SnapshotServiceTest, RestoreUnknownIdFailsWithoutTakingSnapshot) {
     ASSERT_TRUE(after.has_value());
     EXPECT_EQ(after->size(), before->size());  // no safety snapshot taken
 }
+
+// ApiVersion 4 diff verb. The service only wires store reads to the core diff
+// engine; these cover the wiring (which side is base, live capture, integrity)
+// rather than re-testing the engine.
+
+TEST_F(SnapshotServiceTest, DiffAgainstLiveStateSeesTheEntryAddedSinceTheSnapshot) {
+    auto s = service();
+    auto clean = s.create(SnapshotTrigger::Manual, {"", "clean"});
+    ASSERT_TRUE(clean.has_value());
+
+    const auto d = usbDevice("/sys/devices/usb2/2-1", "AB12");
+    ASSERT_TRUE(state_->upsert(entryFor(d)).has_value());
+    writeModprobeFile("devmgr-blacklist.conf", "blacklist pcspkr\n");
+
+    auto diff = s.diff(*clean, "");
+    ASSERT_TRUE(diff.has_value()) << diff.error().message;
+    EXPECT_EQ(diff->baseId, *clean);
+    EXPECT_TRUE(diff->targetId.empty());
+    ASSERT_EQ(diff->entries.size(), 3u);  // device + module + the file itself
+    EXPECT_EQ(diff->entries[0].kind, devmgr::core::kDiffKindDevice);
+    EXPECT_EQ(diff->entries[0].after, "disabled (authorized)");
+    EXPECT_EQ(diff->entries[1].key, "pcspkr");
+    EXPECT_EQ(diff->entries[1].after, devmgr::core::kDiffStateBlacklisted);
+    EXPECT_EQ(diff->entries[2].key, "devmgr-blacklist.conf");
+}
+
+TEST_F(SnapshotServiceTest, DiffBetweenTwoStoredSnapshotsIsDirectional) {
+    auto s = service();
+    auto before = s.create(SnapshotTrigger::Manual, {"", "before"});
+    ASSERT_TRUE(before.has_value());
+    const auto d = usbDevice("/sys/devices/usb2/2-1", "AB12");
+    ASSERT_TRUE(state_->upsert(entryFor(d)).has_value());
+    auto after = s.create(SnapshotTrigger::Manual, {"", "after"});
+    ASSERT_TRUE(after.has_value());
+
+    auto forward = s.diff(*before, *after);
+    ASSERT_TRUE(forward.has_value());
+    ASSERT_EQ(forward->entries.size(), 1u);
+    EXPECT_EQ(forward->entries[0].before, devmgr::core::kDiffStateEnabled);
+    EXPECT_EQ(forward->entries[0].after, "disabled (authorized)");
+
+    auto backward = s.diff(*after, *before);
+    ASSERT_TRUE(backward.has_value());
+    ASSERT_EQ(backward->entries.size(), 1u);
+    EXPECT_EQ(backward->entries[0].before, "disabled (authorized)");
+    EXPECT_EQ(backward->entries[0].after, devmgr::core::kDiffStateEnabled);
+}
+
+TEST_F(SnapshotServiceTest, DiffRefusesUnknownIdsOnEitherSide) {
+    auto s = service();
+    auto id = s.create(SnapshotTrigger::Manual, {"", "only"});
+    ASSERT_TRUE(id.has_value());
+    const std::string ghost(64, '0');
+
+    EXPECT_EQ(s.diff(ghost, "").error().code, Error::Code::NotFound);
+    EXPECT_EQ(s.diff(*id, ghost).error().code, Error::Code::NotFound);
+}
+
+TEST_F(SnapshotServiceTest, DiffIsReadOnly) {
+    auto s = service();
+    auto id = s.create(SnapshotTrigger::Manual, {"", "only"});
+    ASSERT_TRUE(id.has_value());
+    const auto d = usbDevice("/sys/devices/usb2/2-1", "AB12");
+    ASSERT_TRUE(state_->upsert(entryFor(d)).has_value());
+
+    ASSERT_TRUE(s.diff(*id, "").has_value());
+    auto listed = s.list();
+    ASSERT_TRUE(listed.has_value());
+    EXPECT_EQ(listed->size(), 1u);            // no safety snapshot
+    EXPECT_EQ(state_->entries().size(), 1u);  // live state untouched
+}

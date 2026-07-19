@@ -13,10 +13,14 @@ namespace devmgr::platform_linux {
 // ApiVersion 3 (Phase 7): additive snapshot verbs — SnapshotList() -> s,
 // SnapshotCreate(s label) -> s, SnapshotRestore(s id) -> s, SnapshotDelete(s
 // id). All v2 verbs unchanged; clients check ApiVersion >= required.
+// ApiVersion 4 (beta-06): one additive read verb — SnapshotDiff(s base_id,
+// s target_id) -> s, empty target_id meaning live system state — plus the
+// InvalidArgs error name below. Every v2/v3 verb is untouched, so a v3 client
+// keeps working against a v4 daemon.
 inline constexpr const char* kBusName = "org.devmgr.Manager1";
 inline constexpr const char* kObjectPath = "/org/devmgr/Manager1";
 inline constexpr const char* kInterfaceName = "org.devmgr.Manager1";
-inline constexpr std::uint32_t kApiVersion = 3;
+inline constexpr std::uint32_t kApiVersion = 4;
 
 inline constexpr const char* kErrCritical = "org.devmgr.Error.CriticalDevice";
 inline constexpr const char* kErrNotAuthorized = "org.devmgr.Error.NotAuthorized";

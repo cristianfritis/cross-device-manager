@@ -226,6 +226,23 @@ core::Result<std::vector<core::SnapshotMeta>> RequestProcessor::snapshotList() {
     return snapshots_.list();  // unprivileged: metadata only, no secrets
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — two snapshot ids
+core::Result<core::SnapshotDiff> RequestProcessor::snapshotDiff(const std::string& baseId,
+                                                                const std::string& targetId) {
+    if (auto v = validation::snapshotId(baseId); !v) return tl::unexpected(v.error());
+    // Empty target is the documented "diff against live state" form; anything
+    // else must be a well-formed id.
+    if (!targetId.empty())
+        if (auto v = validation::snapshotId(targetId); !v) return tl::unexpected(v.error());
+    // The live capture must not interleave with a mutating verb; a stored-vs-
+    // stored diff reads only the store, which locks itself.
+    if (targetId.empty()) {
+        const std::scoped_lock lock(applyMutex_);
+        return snapshots_.diff(baseId, targetId);
+    }
+    return snapshots_.diff(baseId, targetId);
+}
+
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
 core::Result<std::string> RequestProcessor::snapshotCreate(const CallerId& caller,
                                                            const std::string& label) {

@@ -91,6 +91,26 @@ core::Result<void> SnapshotService::remove(const std::string& id) {
     return store_.remove(id);
 }
 
+core::Result<core::SnapshotDiff> SnapshotService::diff(const std::string& baseId,
+                                                       const std::string& targetId) {
+    auto base = store_.read(baseId);  // integrity first: corrupt/unknown refuse here
+    if (!base) return tl::unexpected(base.error());
+
+    core::SnapshotPayload target;
+    if (targetId.empty()) {
+        target = capturePayload();  // live system state
+    } else {
+        auto stored = store_.read(targetId);
+        if (!stored) return tl::unexpected(stored.error());
+        target = std::move(stored->payload);
+    }
+
+    auto diff = core::diffPayloads(base->payload, target);
+    diff.baseId = baseId;
+    diff.targetId = targetId;
+    return diff;
+}
+
 core::Result<core::RestoreOutcome> SnapshotService::restore(const std::string& id) {
     auto snap = store_.read(id);  // (1) integrity: corrupt/unknown/future all refuse here
     if (!snap) return tl::unexpected(snap.error());

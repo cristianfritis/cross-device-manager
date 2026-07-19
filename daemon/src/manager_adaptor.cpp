@@ -96,6 +96,15 @@ ManagerAdaptor::ManagerAdaptor(sdbus::IConnection& connection, RequestProcessor&
                     return core::restoreOutcomeToJson(
                         valueOrThrow(processor_.snapshotRestore(sender(), id)));
                 }),
+            // ApiVersion 4, unprivileged like SnapshotList: no sender needed
+            // because nothing is authorized. Empty target_id = live state.
+            sdbus::registerMethod("SnapshotDiff")
+                .withInputParamNames("base_id", "target_id")
+                .withOutputParamNames("diff_json")
+                .implementedAs([this](const std::string& baseId, const std::string& targetId) {
+                    return core::snapshotDiffToJson(
+                        valueOrThrow(processor_.snapshotDiff(baseId, targetId)));
+                }),
             sdbus::registerMethod("SnapshotDelete")
                 .withInputParamNames("id")
                 .implementedAs([this, sender](const std::string& id) {

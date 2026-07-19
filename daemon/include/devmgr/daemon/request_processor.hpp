@@ -57,6 +57,14 @@ class RequestProcessor {
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — CallerId aliases std::string
     core::Result<void> snapshotDelete(const CallerId& caller, const std::string& id);
 
+    // ApiVersion 4. Unprivileged like List — a diff exposes configuration
+    // state the caller can already read, so requiring a password to preview a
+    // restore would train users to approve prompts. An empty `targetId` diffs
+    // against live state.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — two snapshot ids
+    core::Result<core::SnapshotDiff> snapshotDiff(const std::string& baseId,
+                                                  const std::string& targetId);
+
    private:
     core::Result<std::string> canonicalContained(const std::string& sysfsPath) const;
     core::Result<void> authorize(const CallerId& caller, const char* action);

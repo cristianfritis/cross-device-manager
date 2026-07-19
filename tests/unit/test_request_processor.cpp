@@ -548,3 +548,68 @@ TEST_F(RequestProcessorTest, UppercaseHexSnapshotIdRefused) {
               Error::Code::InvalidArgs);
     EXPECT_EQ(p.snapshotDelete(":1.9", "abc/../def").error().code, Error::Code::InvalidArgs);
 }
+
+// ApiVersion 4: SnapshotDiff. A read verb — unprivileged like List, validated
+// like every other verb, and never a mutation.
+
+TEST_F(RequestProcessorTest, SnapshotDiffNeedsNoAuthorization) {
+    auto p = processor();
+    auto created = p.snapshotCreate(":1.9", "base");
+    ASSERT_TRUE(created.has_value());
+
+    authority_.actions.clear();
+    authority_.answer = false;  // every polkit check now refuses
+    EXPECT_EQ(p.snapshotRestore(":1.9", *created).error().code, Error::Code::Permission);
+    authority_.actions.clear();
+
+    auto diff = p.snapshotDiff(*created, "");
+    ASSERT_TRUE(diff.has_value()) << diff.error().message;
+    EXPECT_TRUE(authority_.actions.empty());  // read parity with List
+}
+
+TEST_F(RequestProcessorTest, SnapshotDiffNamesTheDeviceDisabledSinceTheSnapshot) {
+    auto p = processor();
+    auto clean = p.snapshotCreate(":1.9", "clean");
+    ASSERT_TRUE(clean.has_value());
+    ASSERT_TRUE(p.setDeviceEnabled(":1.9", devicePath_, false).has_value());
+
+    auto diff = p.snapshotDiff(*clean, "");  // empty target = live state
+    ASSERT_TRUE(diff.has_value()) << diff.error().message;
+    EXPECT_EQ(diff->baseId, *clean);
+    EXPECT_TRUE(diff->targetId.empty());
+    ASSERT_EQ(diff->entries.size(), 1u);
+    EXPECT_EQ(diff->entries[0].kind, core::kDiffKindDevice);
+    EXPECT_EQ(diff->entries[0].before, core::kDiffStateEnabled);
+    EXPECT_EQ(diff->entries[0].after, "disabled (authorized)");
+}
+
+TEST_F(RequestProcessorTest, SnapshotDiffOfASnapshotAgainstItselfIsEmpty) {
+    auto p = processor();
+    auto id = p.snapshotCreate(":1.9", "same");
+    ASSERT_TRUE(id.has_value());
+    auto diff = p.snapshotDiff(*id, *id);
+    ASSERT_TRUE(diff.has_value());
+    EXPECT_TRUE(diff->identical());
+    EXPECT_EQ(diff->targetId, *id);
+}
+
+TEST_F(RequestProcessorTest, SnapshotDiffValidatesBothIdsAndRefusesUnknownOnes) {
+    auto p = processor();
+    EXPECT_EQ(p.snapshotDiff("../evil", "").error().code, Error::Code::InvalidArgs);
+    EXPECT_EQ(p.snapshotDiff(std::string(64, '0'), "../evil").error().code,
+              Error::Code::InvalidArgs);
+    EXPECT_EQ(p.snapshotDiff("", "").error().code, Error::Code::InvalidArgs);
+    // Well-formed but absent: NotFound, not InvalidArgs.
+    EXPECT_EQ(p.snapshotDiff(std::string(64, '0'), "").error().code, Error::Code::NotFound);
+}
+
+TEST_F(RequestProcessorTest, SnapshotDiffTakesNoSnapshotAndChangesNoState) {
+    auto p = processor();
+    auto id = p.snapshotCreate(":1.9", "only");
+    ASSERT_TRUE(id.has_value());
+    ASSERT_TRUE(p.snapshotDiff(*id, "").has_value());
+    auto metas = p.snapshotList();
+    ASSERT_TRUE(metas.has_value());
+    EXPECT_EQ(metas->size(), 1u);  // a read verb never creates a safety snapshot
+    EXPECT_TRUE(store_->entries().empty());
+}

@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "devmgr/core/result.hpp"
+#include "devmgr/core/snapshot_diff.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/daemon/snapshot_store.hpp"
 #include "devmgr/daemon/state_store.hpp"
@@ -46,6 +47,16 @@ class SnapshotService {
     // per-device failures are ITEMS in the returned outcome, never verb
     // errors; only integrity/safety-snapshot/write-back failures abort.
     core::Result<core::RestoreOutcome> restore(const std::string& id);
+
+    // ApiVersion 4 read verb. What-changed between two stored snapshots, or —
+    // when `targetId` is empty — between a snapshot and the live system, which
+    // is what a restore preview shows. Read-only: nothing is written, no
+    // safety snapshot is taken. Integrity failures propagate from the store
+    // unchanged (corrupt -> Io, unknown id -> NotFound), so a diff can never
+    // present the contents of a snapshot a restore would refuse.
+    // Call with the apply mutex held when `targetId` is empty, so the live
+    // capture is a consistent cut.
+    core::Result<core::SnapshotDiff> diff(const std::string& baseId, const std::string& targetId);
 
     // Current devmgr-owned state as a snapshot payload (entries + devmgr-*
     // modprobe.d files). Exposed for the restore path's pre/post diffing.
