@@ -132,9 +132,18 @@ int runTuiApp(bool selfTest) {
         std::string buffer;
     };
     std::optional<PendingText> textPrompt;
+    // Restore preview (snapshot-ui spec): replaces the plain y/n confirm for
+    // restore. Modal like the others — it renders over the tab body and
+    // swallows unrelated input — but multi-line, because it carries the diff,
+    // the selected/current/last-good markers and the convergence note.
+    struct PendingPreview {
+        std::function<void()> onConfirm;
+    };
+    std::optional<PendingPreview> preview;
     auto statusLine = [&]() -> std::string {
         if (textPrompt) return textPrompt->prompt + textPrompt->buffer + "_";
         if (confirm) return confirm->prompt;
+        if (preview) return "restore this snapshot? (y/n)";
         return statusVm.text();
     };
 
@@ -276,8 +285,15 @@ int runTuiApp(bool selfTest) {
     });
     auto updatesLayout = Container::Horizontal({updatesMenu, updatesDetail});
 
-    // Snapshots tab (backup-rollback-engine, snapshot-ui spec): no filter —
-    // mirrors the updates shape.
+    // Snapshots tab (backup-rollback-engine, snapshot-ui spec). beta-06 task
+    // 3.2 gives it the same filter interaction as Devices/Modules.
+    std::string snapshotFilter;
+    InputOption snapFilterOpt;
+    snapFilterOpt.content = &snapshotFilter;
+    snapFilterOpt.placeholder = "filter snapshots…";
+    snapFilterOpt.on_change = [&] { snapshotsVm.setFilter(snapshotFilter); };
+    auto snapshotFilterInput = Input(snapFilterOpt);
+
     auto snapshotsMenu =
         Menu(&snapshotsVm.rowsRef(), &snapshotsVm.selectedRef(), MenuOption::Vertical());
 
@@ -287,7 +303,22 @@ int runTuiApp(bool selfTest) {
     std::vector<std::string> snapDetailLines;
     bool snapDetailDirty = true;
 
+    // 'd' swaps the detail pane for the selected snapshot's diff against live
+    // state. Not cached: diffLines() reads the VM's already-fetched result and
+    // its content changes underneath us when the fetch lands.
+    bool snapDiffView = false;
+    std::string snapDiffForId;
+
     auto snapshotsDetail = Renderer([&] {
+        if (snapDiffView) {
+            Elements els;
+            els.push_back(
+                text("Differences: " + core::snapshotShortId(snapDiffForId) + " -> current state") |
+                bold);
+            els.push_back(separator());
+            for (const auto& line : snapshotsVm.diffLines()) els.push_back(text(line));
+            return vbox(std::move(els)) | flex;
+        }
         const int idx = snapshotsVm.selectedRef();
         if (snapDetailDirty || idx != snapDetailForIndex) {
             snapDetailLines = snapshotsVm.detailLines();
@@ -299,7 +330,8 @@ int runTuiApp(bool selfTest) {
         for (const auto& line : snapDetailLines) els.push_back(text(line));
         return vbox(std::move(els)) | flex;
     });
-    auto snapshotsLayout = Container::Horizontal({snapshotsMenu, snapshotsDetail});
+    auto snapshotsLayout =
+        Container::Horizontal({snapshotFilterInput, snapshotsMenu, snapshotsDetail});
 
     // Status/prompt line for the updates tab (DESIGN.md §3.2: one row, stable
     // edge): modal text wins, then the durable install-progress text (spec
@@ -373,21 +405,44 @@ int runTuiApp(bool selfTest) {
             return vbox(std::move(top)) | flex;
         }
         if (activeTab == 3) {
-            return vbox({
-                       tabTitles(),
-                       text(" Snapshots (s=create…  r=restore  x=delete  q=quit) ") | bold,
-                       text(" " + bannerText + " "),
-                       separator(),
-                       hbox({
-                           vbox({
-                               snapshotsMenu->Render() | vscroll_indicator | yframe | flex,
-                           }) | size(WIDTH, EQUAL, 72) |
-                               border,
-                           snapshotsDetail->Render() | border | flex,
-                       }) | flex,
-                       text(" " + statusLine() + " ") | inverted,
-                   }) |
-                   flex;
+            Elements top = {
+                tabTitles(),
+                text(" Snapshots (/=filter  s=create…  r=restore  d=diff  h=history  x=delete  "
+                     "q=quit) ") |
+                    bold,
+                text(" " + bannerText + " "),
+            };
+            top.push_back(separator());
+            if (preview) {
+                // Modal body: the preview owns the pane while it is open, so
+                // the list underneath cannot be mistaken for something the
+                // confirmation applies to.
+                Elements lines;
+                for (const auto& line : snapshotsVm.previewLines()) lines.push_back(text(line));
+                top.push_back(vbox(std::move(lines)) | border | flex);
+            } else {
+                top.push_back(hbox({
+                                  vbox({
+                                      snapshotFilterInput->Render(),
+                                      separator(),
+                                      snapshotsMenu->Render() | vscroll_indicator | yframe | flex,
+                                  }) | size(WIDTH, EQUAL, 72) |
+                                      border,
+                                  snapshotsDetail->Render() | border | flex,
+                              }) |
+                              flex);
+                // Recovery guidance for the last restore that did not fully
+                // converge (snapshot-ui spec): durable, not a transient status
+                // line — it carries the safety id and the exact command back.
+                const auto guidance = snapshotsVm.restoreGuidanceLines();
+                if (!guidance.empty()) {
+                    Elements g;
+                    for (const auto& line : guidance) g.push_back(text(line));
+                    top.push_back(vbox(std::move(g)) | border);
+                }
+            }
+            top.push_back(text(" " + statusLine() + " ") | inverted);
+            return vbox(std::move(top)) | flex;
         }
         // Legend is a full-width row like the other two tabs (it used to live
         // inside the 44-column left pane, where it truncated mid-shortcut).
@@ -491,6 +546,16 @@ int runTuiApp(bool selfTest) {
             }
             return true;
         }
+        if (preview) {  // restore preview modal — explicit confirm only
+            if (event == Event::Character('y')) {
+                auto go = std::move(preview->onConfirm);
+                preview.reset();
+                go();
+            } else if (event == Event::Character('n') || event == Event::Escape) {
+                preview.reset();  // dismissed without restoring
+            }
+            return true;  // swallow everything else while open (DESIGN.md §8)
+        }
         // While a filter Input owns focus, printable keys belong to the
         // filter, never to single-key commands (typing 'U' must not unbind a
         // driver mid-search). Enter hands focus back to the list keeping the
@@ -498,9 +563,12 @@ int runTuiApp(bool selfTest) {
         // clear the filter").
         const Component filterInput = activeTab == 0   ? searchInput
                                       : activeTab == 1 ? moduleFilterInput
+                                      : activeTab == 3 ? snapshotFilterInput
                                                        : nullptr;
         if (filterInput && filterInput->Focused()) {
-            const Component menu = activeTab == 0 ? deviceMenu : modulesMenu;
+            const Component menu = activeTab == 0   ? deviceMenu
+                                   : activeTab == 1 ? modulesMenu
+                                                    : snapshotsMenu;
             if (event == Event::Return) {
                 menu->TakeFocus();
                 return true;
@@ -509,9 +577,12 @@ int runTuiApp(bool selfTest) {
                 if (activeTab == 0) {
                     filter.clear();
                     listVm.setFilter(filter);
-                } else {
+                } else if (activeTab == 1) {
                     moduleFilter.clear();
                     modulesVm.setFilter(moduleFilter);
+                } else {
+                    snapshotFilter.clear();
+                    snapshotsVm.setFilter(snapshotFilter);
                 }
                 menu->TakeFocus();
                 return true;
@@ -519,8 +590,11 @@ int runTuiApp(bool selfTest) {
             return false;  // characters, backspace, arrows, mouse → the Input
         }
         if (event == Event::Character('/') &&
-            (activeTab == 0 || activeTab == 1)) {  // updates/snapshots have no filter
-            (activeTab == 0 ? searchInput : moduleFilterInput)->TakeFocus();
+            (activeTab == 0 || activeTab == 1 || activeTab == 3)) {  // updates has no filter
+            (activeTab == 0   ? searchInput
+             : activeTab == 1 ? moduleFilterInput
+                              : snapshotFilterInput)
+                ->TakeFocus();
             return true;
         }
         if (event == Event::Character('m')) {
@@ -629,7 +703,7 @@ int runTuiApp(bool selfTest) {
                                          .buffer = ""};
                 return true;
             }
-            if (event == Event::Character('r')) {  // restore selected (confirm modal)
+            if (event == Event::Character('r')) {  // restore selected (preview modal)
                 const auto args = snapshotsVm.selectedRestore();
                 if (!args) {
                     // Refused locally: placeholder row or corrupt/unsupported
@@ -641,12 +715,41 @@ int runTuiApp(bool selfTest) {
                         .message = "cannot restore: no healthy snapshot selected"});
                     return true;
                 }
-                confirm = PendingConfirm{.onYes =
-                                             [&, a = *args] {
-                                                 prunePending();
-                                                 pending.push_back(facade.restoreSnapshot(a.id));
-                                             },
-                                         .prompt = args->confirmText + " (y/n)"};
+                // Preview first, restore only on explicit confirm from it
+                // (snapshot-ui spec). The diff fetch is async — the modal opens
+                // immediately in its loading state and fills in when it lands.
+                snapshotsVm.requestPreview(args->id);
+                preview = PendingPreview{.onConfirm = [&, a = *args] {
+                    prunePending();
+                    pending.push_back(facade.restoreSnapshot(a.id));
+                }};
+                return true;
+            }
+            if (event == Event::Character('d')) {  // toggle diff against live state
+                if (snapDiffView) {
+                    snapDiffView = false;
+                    snapDetailDirty = true;
+                    return true;
+                }
+                const auto id = snapshotsVm.selectedSnapshotId();
+                if (!id) {
+                    bus.publish(
+                        core::TaskCompletedEvent{.taskId = "guard",
+                                                 .ok = false,
+                                                 .message = "cannot diff: no snapshot selected"});
+                    return true;
+                }
+                snapshotsVm.requestPreview(*id);
+                // Remember which snapshot this diff describes: the selection
+                // can move while the pane is open, and a diff silently
+                // re-labelled to the newly selected row would be a lie.
+                snapDiffForId = *id;
+                snapDiffView = true;
+                return true;
+            }
+            if (event == Event::Character('h')) {  // toggle parent-chain history
+                snapshotsVm.setHistoryView(!snapshotsVm.historyView());
+                snapDetailDirty = true;
                 return true;
             }
             if (event == Event::Character('x')) {  // delete selected (confirm modal)
