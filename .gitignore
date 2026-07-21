@@ -68,3 +68,6 @@ ui_*.h
 __pycache__/
 *.py[cod]
 dist/
+
+# Private keys
+*.key

@@ -29,9 +29,9 @@
 ## 5. Release supply chain
 
 - [x] 5.1 SBOM generation in the release workflow (syft SPDX + hand-maintained overlay for sdbus-c++/FTXUI/in-tree sha256) + dependency/license audit doc in the repo
-- [ ] 5.2 Artifact signing: minisign detached signatures for all assets (private key in GH secrets, public key committed), documented one-line verification in README/BETA-TESTING; provenance via GitHub artifact attestation + documented `gh attestation verify` check
-- [ ] 5.3 Reproducibility job: double build with `SOURCE_DATE_EPOCH`, checksum diff report, known-deviations doc; unexplained diffs block release
-- [ ] 5.4 Release workflow asset set extended (deb, rpm, tarball, SHA256SUMS covering SBOM, signatures) + release-notes template updated
+- [x] 5.2 Artifact signing: minisign detached signatures for all assets (private key in GH secrets, public key committed), documented one-line verification in README/BETA-TESTING; provenance via GitHub artifact attestation + documented `gh attestation verify` check
+- [x] 5.3 Reproducibility job: double build with `SOURCE_DATE_EPOCH`, checksum diff report, known-deviations doc; unexplained diffs block release
+- [x] 5.4 Release workflow asset set extended (deb, rpm, tarball, SHA256SUMS covering SBOM, signatures) + release-notes template updated
 
 ## 6. Acceptance suite & exit gate
 

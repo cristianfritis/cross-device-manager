@@ -1,7 +1,9 @@
-# Release pipeline (release-pipeline spec): tag v* → container build with the
-# tag==version guard, full ctest (fail = no artifacts), cpack DEB+TGZ,
-# SHA256SUMS, draft prerelease with the 3 assets and a template-filled body.
-# Publishing stays a manual owner action (paired with the repo-public flip).
+# Release pipeline (release-pipeline + release-supply-chain specs): tag v* →
+# container build with the tag==version guard, full ctest (fail = no artifacts),
+# cpack DEB+TGZ (ubuntu) and RPM (fedora), SBOM, SHA256SUMS over the whole set,
+# minisign signatures + provenance attestation, draft prerelease with the full
+# asset set (deb, rpm, tarball, SHA256SUMS, SBOM, .minisig) and a template-filled
+# body. Publishing stays a manual owner action (paired with the repo-public flip).
 name: release
 on:
   push:
@@ -18,8 +20,8 @@ jobs:
   # RPM gate (packaging-rpm spec): build the full stack in a Fedora container,
   # cut the rpm with `cpack -G RPM`, dnf-install it, and `rpm -V`-verify — the
   # container analogue of the deb's VM install-smoke. Independent of the deb
-  # release job; the owner confirms both green before publishing the draft.
-  # Asset wiring into the release (rpm in SHA256SUMS + upload) lands with 5.4.
+  # release job; the owner confirms every gate job green before publishing the
+  # draft. Asset wiring into the release (rpm in SHA256SUMS + upload) lands with 5.4.
   rpm-verify:
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +30,27 @@ jobs:
         run: docker compose -f test/docker-compose.yml build pkg-rpm
       - name: Build + install + rpm -V verify the RPM (Fedora container)
         run: docker compose -f test/docker-compose.yml run --rm pkg-rpm
+
+  # Reproducibility gate (release-supply-chain spec, task 5.3): build the tagged
+  # source twice in the packaging container with a pinned SOURCE_DATE_EPOCH and
+  # diff the four shipped binaries. Any UNEXPLAINED difference fails the job and
+  # blocks the release; known, explained deviations are recorded in
+  # docs/REPRODUCIBILITY.md. Independent of the deb/rpm jobs; the owner confirms
+  # every gate job green before publishing the draft.
+  reproducibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build packaging container (ubuntu:22.04 base)
+        run: docker compose -f test/docker-compose.yml build pkg
+      - name: Double-build + binary checksum diff
+        run: |
+          # Pin the embedded build timestamp to the tagged commit (HEAD after
+          # checkout) so __DATE__/__TIME__ match across both builds.
+          SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+          docker compose -f test/docker-compose.yml run --rm \
+            -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            pkg bash test/container/reproducibility-check.sh
 
   release:
     runs-on: ubuntu-latest
@@ -54,11 +77,31 @@ jobs:
             fi
             ctest --test-dir build/linux-packaged --output-on-failure
             cpack --config build/linux-packaged/CPackConfig.cmake -B /dist
-            cd /dist && rm -rf _CPack_Packages && sha256sum *.deb *.tar.gz > SHA256SUMS
+            rm -rf /dist/_CPack_Packages
           '
 
-      - name: Verify checksums
-        run: cd dist && sha256sum -c SHA256SUMS
+      # RPM asset (packaging-rpm spec, task 5.4): the shipped .rpm is cut in the
+      # SAME Fedora container the rpm-verify gate uses, so its Requires/scriptlets
+      # match what was verified there. Built into dist/ to join the asset set.
+      # SHA256SUMS (below, after the SBOM) covers it.
+      - name: Build Fedora packaging image
+        run: docker compose -f test/docker-compose.yml build pkg-rpm
+
+      - name: Build the RPM (Fedora container) into dist
+        run: |
+          docker compose -f test/docker-compose.yml run --rm \
+            -e TAG="$GITHUB_REF_NAME" -v "$PWD/dist:/dist" pkg-rpm bash -c '
+            set -e
+            cmake --preset linux-packaged
+            cmake --build build/linux-packaged -j"$(nproc)"
+            ver=$(./build/linux-packaged/daemon/devmgrd --version | cut -d" " -f2)
+            if [ "v$ver" != "$TAG" ]; then
+              echo "tag $TAG does not match built version $ver" >&2
+              exit 1
+            fi
+            cpack --config build/linux-packaged/CPackConfig.cmake -G RPM -B /dist
+            rm -rf /dist/_CPack_Packages
+          '
 
       # SBOM (release-supply-chain spec, task 5.1): syft catalogs the shipped
       # artifacts, then merge-sbom.py folds in the vendored/static deps syft
@@ -84,6 +127,16 @@ jobs:
             sbom.syft.spdx.json packaging/sbom/overlay.spdx.json dist/SBOM.spdx.json \
             --require sdbus-c++,ftxui,spdlog,fmt,nlohmann-json,tl-expected,devmgr-sha256
           rm -f sbom.syft.spdx.json
+
+      # Checksums over every shipped artifact (release-supply-chain spec, task
+      # 5.4): deb, rpm, tarball, and the SBOM. Generated here — after the rpm and
+      # SBOM exist — so SHA256SUMS covers the full set, then it is itself signed
+      # below. The .minisig signatures are verified with minisign, not listed here.
+      - name: Checksums over all release artifacts
+        run: cd dist && sha256sum *.deb *.rpm *.tar.gz SBOM.spdx.json > SHA256SUMS
+
+      - name: Verify checksums
+        run: cd dist && sha256sum -c SHA256SUMS
 
       # minisign detached signatures (release-supply-chain spec, task 5.2): sign
       # every asset a tester downloads. The self-verify against the COMMITTED
@@ -138,5 +191,6 @@ jobs:
           sed "s/@VERSION@/$ver/g; s/@TAG@/$GITHUB_REF_NAME/g" \
             docs/RELEASE-NOTES-TEMPLATE.md > /tmp/notes.md
           gh release create "$GITHUB_REF_NAME" \
-            dist/*.deb dist/*.tar.gz dist/SHA256SUMS \
+            dist/*.deb dist/*.rpm dist/*.tar.gz \
+            dist/SHA256SUMS dist/SBOM.spdx.json dist/*.minisig \
             --draft --prerelease --title "devmgr $ver" --notes-file /tmp/notes.md

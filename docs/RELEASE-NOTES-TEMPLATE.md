@@ -7,26 +7,47 @@ devmgr manages devices, drivers, firmware, and state snapshots on Linux: a
 polkit-gated daemon (D-Bus activated), a Qt 6 GUI, a terminal UI, and a
 recovery CLI.
 
-## Highlights (0.5)
+## Highlights (0.6)
 
-- Universal device enable/disable with persistent enforcement across replug
-  and daemon restarts, guarded against disabling critical devices.
-- Kernel module load/unload/blacklist with Secure Boot & lockdown awareness.
-- Firmware visibility and local-cab installs via fwupd; DKMS status.
-- **Snapshots & rollback**: automatic pre-mutation snapshots (fail-closed),
-  manual snapshots, restore with its own safety snapshot, recovery CLI.
+- **Snapshot history & diff**: browse the snapshot chain (HEAD / last-good
+  markers), diff any two snapshots or against live state, and preview a restore
+  before applying it — across the GUI, TUI, and `devmgr snapshot` CLI.
+- **Accessibility pass**: GUI accessible names, keyboard shortcuts, tab order,
+  a minimum window size, and full-value detail for elided rows; TUI minimum-size
+  guard; shared loading/empty/error wording across UIs.
+- **Fedora RPM packages** alongside the Debian/Ubuntu `.deb` and the portable
+  tarball, plus documented upgrade/removal behavior for every format.
+- **Hardened supply chain**: an SPDX SBOM, minisign signatures, and GitHub
+  provenance attestation on every artifact, a reproducibility double-build check,
+  and a dependency/license audit in the repo.
+- Daemon hardening: a central IPC validation layer and a tightened systemd unit.
+
+Carried from 0.5: device enable/disable with persistent enforcement, kernel
+module load/unload/blacklist (Secure Boot & lockdown aware), fwupd firmware +
+DKMS status, and fail-closed automatic snapshots with rollback.
 
 ## Install
 
 See the [README Install section](https://github.com/cristianfritis/cross-device-manager/blob/@TAG@/README.md#install-beta).
-Ubuntu 22.04/24.04: download the `.deb` below; other distros: the tarball with
-its bundled `install.sh`.
+Ubuntu 22.04/24.04: download the `.deb`; Fedora: the `.rpm`; other distros: the
+tarball with its bundled `install.sh`.
 
-**Verify your download** (both artifacts are covered):
+**Verify your download.** Every artifact below is covered by `SHA256SUMS`, which
+is itself signed and attested. Full step-by-step instructions are in the
+[README](https://github.com/cristianfritis/cross-device-manager/blob/@TAG@/README.md#verifying-a-download);
+the quick path:
 
 ```sh
+# 1. checksums — covers deb, rpm, tarball, and the SBOM
 sha256sum -c SHA256SUMS --ignore-missing
+# 2. minisign signature on the checksum list (public key committed in the repo)
+minisign -Vm SHA256SUMS -p devmgr.pub
+# 3. provenance — confirms this repo's release workflow built the asset
+gh attestation verify <artifact> --repo cristianfritis/cross-device-manager
 ```
+
+An SPDX SBOM (`SBOM.spdx.json`) enumerating every shipped and vendored
+dependency is attached and covered by `SHA256SUMS`.
 
 ## Known limitations (beta)
 
