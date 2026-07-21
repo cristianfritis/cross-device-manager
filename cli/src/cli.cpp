@@ -3,11 +3,14 @@
 #include <array>
 #include <cstdio>
 #include <ctime>
+#include <functional>
 #include <optional>
 #include <ostream>
 
+#include "devmgr/core/snapshot_history.hpp"
 #include "devmgr/core/snapshot_json.hpp"
 #include "devmgr/core/snapshot_models.hpp"
+#include "devmgr/core/snapshot_presentation.hpp"
 
 namespace devmgr::cli {
 namespace {
@@ -20,10 +23,14 @@ constexpr const char* kHelperUnavailable = "helper devmgrd is not available";
 
 constexpr const char* kUsageText =
     "usage: devmgr [--bus system|session] snapshot <command>\n"
-    "  list [--json]            list snapshots (short id, date, trigger, reason)\n"
-    "  create [--label <text>]  take a manual snapshot, print its id\n"
-    "  restore <id>             restore a snapshot (id may be any unique prefix)\n"
-    "  delete <id>              delete a snapshot (id may be any unique prefix)\n";
+    "  list [--json]              list snapshots (short id, date, trigger, reason)\n"
+    "  history [--json]           list snapshots as a parent chain (HEAD, last good marked)\n"
+    "  create [--label <text>]    take a manual snapshot, print its id\n"
+    "  diff <a> [<b>] [--json]    show what changed between <a> and <b> (<b> omitted = live "
+    "state)\n"
+    "  restore [--preview] <id>   restore a snapshot, or --preview to show the change without "
+    "restoring\n"
+    "  delete <id>                delete a snapshot (id may be any unique prefix)\n";
 
 int usage(std::ostream& err) {
     err << kUsageText;
@@ -136,6 +143,39 @@ int doList(pal::IPrivilegedChannel& channel, const std::vector<std::string>& res
     return kOk;
 }
 
+// Parent-chain listing (snapshot-history spec). Order and markers come from the
+// same core::buildSnapshotChain the GUI/TUI use, so the three surfaces agree on
+// chain order, HEAD, and last-good. Rows stay flat (no indentation): chain
+// position is carried by the word markers, which read unambiguously in a
+// pipe/redirect where indentation would not. `--json` yields the raw metadata
+// array — id + parent are all a script needs to rebuild the chain itself
+// (design decision 2: no new IPC, chain is derived).
+int doHistory(pal::IPrivilegedChannel& channel, const std::vector<std::string>& rest,
+              std::ostream& out, std::ostream& err) {
+    bool json = false;
+    for (const auto& a : rest) {
+        if (a == "--json") {
+            json = true;
+        } else {
+            err << "devmgr: unexpected argument '" << a << "'\n";
+            return usage(err);
+        }
+    }
+    auto metas = channel.snapshotList();
+    if (!metas) return reportError(err, metas.error());
+    if (json) {
+        out << core::snapshotListToJson(*metas) << "\n";
+        return kOk;
+    }
+    if (metas->empty()) {
+        out << "(no snapshots)\n";
+        return kOk;
+    }
+    for (const auto& row : core::buildSnapshotChain(*metas))
+        out << listRow(row.meta) << core::chainMarkers(row) << "\n";
+    return kOk;
+}
+
 int doCreate(pal::IPrivilegedChannel& channel, const std::vector<std::string>& rest,
              std::ostream& out, std::ostream& err) {
     std::string label;
@@ -171,15 +211,93 @@ void printOutcome(std::ostream& out, const core::RestoreOutcome& o) {
     }
 }
 
-int doRestore(pal::IPrivilegedChannel& channel, const std::vector<std::string>& rest,
-              std::ostream& out, std::ostream& err) {
-    if (rest.size() != 1 || rest.front().empty()) {
-        err << "usage: devmgr snapshot restore <id>\n";
+// Splits `rest` into positional ids and a set of recognized flags. Ids are hex
+// prefixes and never start with "--", so a leading-dash token that is not a
+// known flag is a usage error rather than an id.
+struct ParsedArgs {
+    std::vector<std::string> positionals;
+    bool ok = true;
+};
+ParsedArgs splitArgs(const std::vector<std::string>& rest, std::ostream& err,
+                     const std::function<bool(const std::string&)>& takeFlag) {
+    ParsedArgs parsed;
+    for (const auto& a : rest) {
+        if (takeFlag(a)) continue;
+        if (a.starts_with("--")) {
+            err << "devmgr: unexpected argument '" << a << "'\n";
+            parsed.ok = false;
+            return parsed;
+        }
+        parsed.positionals.push_back(a);
+    }
+    return parsed;
+}
+
+// diff <a> [<b>] [--json]: <b> omitted diffs <a> against live state. Read-only
+// and polkit-free (parity with list). Identical payloads print the explicit
+// "No differences." line core::diffLines emits — not an empty result.
+int doDiff(pal::IPrivilegedChannel& channel, const std::vector<std::string>& rest,
+           std::ostream& out, std::ostream& err) {
+    bool json = false;
+    auto args = splitArgs(rest, err, [&](const std::string& a) {
+        if (a != "--json") return false;
+        json = true;
+        return true;
+    });
+    if (!args.ok) return usage(err);
+    if (args.positionals.empty() || args.positionals.size() > 2) {
+        err << "usage: devmgr snapshot diff <a> [<b>]\n";
         return kUsage;
     }
     int code = kOk;
-    auto full = resolveId(channel, rest.front(), err, code);
+    auto baseFull = resolveId(channel, args.positionals[0], err, code);
+    if (!baseFull) return code;
+    std::string targetFull;  // empty ⇒ diff against live state
+    if (args.positionals.size() == 2) {
+        auto t = resolveId(channel, args.positionals[1], err, code);
+        if (!t) return code;
+        targetFull = *t;
+    }
+    auto diff = channel.snapshotDiff(*baseFull, targetFull);
+    if (!diff) return reportError(err, diff.error());
+    if (json) {
+        out << core::snapshotDiffToJson(*diff) << "\n";
+        return kOk;
+    }
+    for (const auto& line : core::diffLines(*diff)) out << line << "\n";
+    return kOk;
+}
+
+// restore --preview: the diff against live state plus the partial-convergence
+// note, sharing core wording with the GUI/TUI preview. Restores nothing and
+// exits 0, so it is safe to run before a scripted recovery.
+int printRestorePreview(pal::IPrivilegedChannel& channel, const std::string& id, std::ostream& out,
+                        std::ostream& err) {
+    auto diff = channel.snapshotDiff(id, "");  // "" ⇒ live state
+    if (!diff) return reportError(err, diff.error());
+    out << "Restore preview for " << core::snapshotShortId(id) << " (nothing is restored):\n";
+    for (const auto& line : core::restorePreviewChangeLines(*diff)) out << line << "\n";
+    out << "\n" << core::restorePreviewConvergenceNote() << "\n";
+    return kOk;
+}
+
+int doRestore(pal::IPrivilegedChannel& channel, const std::vector<std::string>& rest,
+              std::ostream& out, std::ostream& err) {
+    bool preview = false;
+    auto args = splitArgs(rest, err, [&](const std::string& a) {
+        if (a != "--preview") return false;
+        preview = true;
+        return true;
+    });
+    if (!args.ok) return usage(err);
+    if (args.positionals.size() != 1 || args.positionals.front().empty()) {
+        err << "usage: devmgr snapshot restore [--preview] <id>\n";
+        return kUsage;
+    }
+    int code = kOk;
+    auto full = resolveId(channel, args.positionals.front(), err, code);
     if (!full) return code;
+    if (preview) return printRestorePreview(channel, *full, out, err);
     auto outcome = channel.snapshotRestore(*full);
     if (!outcome) return reportError(err, outcome.error());
     printOutcome(out, *outcome);
@@ -212,7 +330,9 @@ int run(pal::IPrivilegedChannel& channel, const std::vector<std::string>& args, 
     const std::string& verb = args[1];
     const std::vector<std::string> rest(args.begin() + 2, args.end());
     if (verb == "list") return doList(channel, rest, out, err);
+    if (verb == "history") return doHistory(channel, rest, out, err);
     if (verb == "create") return doCreate(channel, rest, out, err);
+    if (verb == "diff") return doDiff(channel, rest, out, err);
     if (verb == "restore") return doRestore(channel, rest, out, err);
     if (verb == "delete") return doDelete(channel, rest, out, err);
     err << "devmgr: unknown snapshot command '" << verb << "'\n";

@@ -7,6 +7,7 @@
 
 #include "cli/src/cli.hpp"
 #include "devmgr/core/result.hpp"
+#include "devmgr/core/snapshot_diff.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 
 using devmgr::core::Error;
@@ -309,4 +310,137 @@ TEST(CliErrors, GenericIoFailureMapsToExitFive) {
     FakeChannel ch;
     ch.listError = Error{Error::Code::Io, "snapshots dir is not writable"};
     EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kFailed);
+}
+
+// ---- history ----
+
+TEST(CliHistory, EmptyPrintsPlaceholder) {
+    FakeChannel ch;
+    auto r = invoke(ch, {"snapshot", "history"});
+    EXPECT_EQ(r.code, cli::kOk);
+    EXPECT_EQ(r.out, "(no snapshots)\n");
+}
+
+TEST(CliHistory, MarksHeadLastGoodAndChainStart) {
+    FakeChannel ch;
+    // Newest first: the child (HEAD) then its parent (a chain start).
+    auto child = meta(id64("bb22"), SnapshotTrigger::Manual, "", "newest");
+    child.parent = id64("aa11");
+    ch.list.push_back(child);
+    ch.list.push_back(meta(id64("aa11"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    auto r = invoke(ch, {"snapshot", "history"});
+    EXPECT_EQ(r.code, cli::kOk);
+    // The child tip carries HEAD + last good; the parent, whose own parent is
+    // absent from the list, is a chain start.
+    EXPECT_NE(r.out.find(id64("bb22").substr(0, 12)), std::string::npos);
+    EXPECT_NE(r.out.find("[HEAD, last good]"), std::string::npos);
+    EXPECT_NE(r.out.find("[chain start]"), std::string::npos);
+}
+
+TEST(CliHistory, JsonEmitsRawMetadata) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("aa11"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    auto r = invoke(ch, {"snapshot", "history", "--json"});
+    EXPECT_EQ(r.code, cli::kOk);
+    EXPECT_NE(r.out.find(id64("aa11")), std::string::npos);  // full id
+    EXPECT_NE(r.out.find("\"trigger\":\"auto\""), std::string::npos);
+}
+
+TEST(CliHistory, UnknownArgumentIsUsageError) {
+    FakeChannel ch;
+    EXPECT_EQ(invoke(ch, {"snapshot", "history", "--wat"}).code, cli::kUsage);
+}
+
+// ---- diff ----
+
+devmgr::core::SnapshotDiffEntry deviceEntry() {
+    return {.kind = devmgr::core::kDiffKindDevice,
+            .key = "usb 1d6b:0002 @2-1",
+            .before = devmgr::core::kDiffStateEnabled,
+            .after = devmgr::core::kDiffStateAbsent};
+}
+
+TEST(CliDiff, TwoSnapshotsResolveBothAndPrintEntries) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    ch.list.push_back(meta(id64("beef1"), SnapshotTrigger::Manual, "", "keep"));
+    ch.diff.entries.push_back(deviceEntry());
+    auto r = invoke(ch, {"snapshot", "diff", "dead", "beef"});
+    EXPECT_EQ(r.code, cli::kOk);
+    ASSERT_TRUE(ch.diffedBase.has_value());
+    ASSERT_TRUE(ch.diffedTarget.has_value());
+    EXPECT_EQ(*ch.diffedBase, id64("dead0"));    // resolved from prefix
+    EXPECT_EQ(*ch.diffedTarget, id64("beef1"));  // resolved from prefix
+    EXPECT_NE(r.out.find("usb 1d6b:0002 @2-1: enabled -> absent"), std::string::npos);
+}
+
+TEST(CliDiff, OneArgDiffsAgainstLiveState) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    // No entries ⇒ identical: the explicit no-differences line, not an empty result.
+    auto r = invoke(ch, {"snapshot", "diff", "dead0"});
+    EXPECT_EQ(r.code, cli::kOk);
+    ASSERT_TRUE(ch.diffedTarget.has_value());
+    EXPECT_EQ(*ch.diffedTarget, "");  // empty target ⇒ live state
+    EXPECT_NE(r.out.find("No differences."), std::string::npos);
+}
+
+TEST(CliDiff, JsonEmitsDiffShape) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    ch.diff.entries.push_back(deviceEntry());
+    auto r = invoke(ch, {"snapshot", "diff", "dead0", "--json"});
+    EXPECT_EQ(r.code, cli::kOk);
+    EXPECT_NE(r.out.find("\"kind\":\"device\""), std::string::npos);
+    EXPECT_NE(r.out.find("\"differences\":true"), std::string::npos);
+}
+
+TEST(CliDiff, NoArgsIsUsageError) {
+    FakeChannel ch;
+    EXPECT_EQ(invoke(ch, {"snapshot", "diff"}).code, cli::kUsage);
+}
+
+TEST(CliDiff, UnknownPrefixIsNotFound) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    auto r = invoke(ch, {"snapshot", "diff", "ffff"});
+    EXPECT_EQ(r.code, cli::kNotFound);
+    EXPECT_FALSE(ch.diffedBase.has_value());  // never reached the daemon
+}
+
+TEST(CliDiff, CorruptSnapshotMapsToExitFive) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    ch.diffError = Error{Error::Code::Io, "snapshot dead0 is corrupt"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "diff", "dead0"}).code, cli::kFailed);
+}
+
+// ---- restore --preview ----
+
+TEST(CliRestorePreview, PrintsChangeAndNoteWithoutRestoring) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    ch.diff.entries.push_back(deviceEntry());
+    auto r = invoke(ch, {"snapshot", "restore", "--preview", "dead0"});
+    EXPECT_EQ(r.code, cli::kOk);
+    EXPECT_FALSE(ch.restoredId.has_value());   // nothing restored
+    ASSERT_TRUE(ch.diffedTarget.has_value());  // previewed against live state
+    EXPECT_EQ(*ch.diffedTarget, "");
+    EXPECT_NE(r.out.find("Restore preview for " + id64("dead0").substr(0, 12)), std::string::npos);
+    EXPECT_NE(r.out.find("Differences (snapshot -> current state):"), std::string::npos);
+    EXPECT_NE(r.out.find("Convergence may be partial"), std::string::npos);
+}
+
+TEST(CliRestorePreview, IdenticalSnapshotSaysNothingWouldChange) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    auto r = invoke(ch, {"snapshot", "restore", "--preview", "dead0"});
+    EXPECT_EQ(r.code, cli::kOk);
+    EXPECT_FALSE(ch.restoredId.has_value());
+    EXPECT_NE(r.out.find("already matches the current state"), std::string::npos);
+}
+
+TEST(CliRestorePreview, MissingIdIsUsageError) {
+    FakeChannel ch;
+    EXPECT_EQ(invoke(ch, {"snapshot", "restore", "--preview"}).code, cli::kUsage);
 }

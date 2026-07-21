@@ -14,10 +14,10 @@
 
 ## 3. Snapshot UX & accessibility
 
-- [ ] 3.1 SnapshotsVM: history presentation (chain view rows, HEAD/last-good markers), `previewLines(id)` (diff vs live + selected/current/last-good + partial-convergence note), restore-failure guidance composition (failed items, safety id, CLI recovery command), filter support; VM tests with byte-freeze
-- [ ] 3.2 TUI: `/` filter extended to Snapshots tab, `d` diff view, `h` history toggle, restore preview modal replacing plain confirm, failure guidance surface; DESIGN.md conventions
-- [ ] 3.3 GUI: Snapshots filter field, Diff/History actions + views, restore preview dialog, failure guidance via StatusLine; SnapshotListModel/main_window tests updated for parity
-- [ ] 3.4 CLI: `devmgr snapshot history`, `devmgr snapshot diff <a> [<b>]`, `devmgr snapshot restore --preview <id>` (default restore unchanged/non-interactive); `--json` + prefix rules + exit codes; tests
+- [x] 3.1 SnapshotsVM: history presentation (chain view rows, HEAD/last-good markers), `previewLines(id)` (diff vs live + selected/current/last-good + partial-convergence note), restore-failure guidance composition (failed items, safety id, CLI recovery command), filter support; VM tests with byte-freeze
+- [x] 3.2 TUI: `/` filter extended to Snapshots tab, `d` diff view, `h` history toggle, restore preview modal replacing plain confirm, failure guidance surface; DESIGN.md conventions
+- [x] 3.3 GUI: Snapshots filter field, Diff/History actions + views, restore preview dialog, failure guidance via StatusLine; SnapshotListModel/main_window tests updated for parity
+- [x] 3.4 CLI: `devmgr snapshot history`, `devmgr snapshot diff <a> [<b>]`, `devmgr snapshot restore --preview <id>` (default restore unchanged/non-interactive); `--json` + prefix rules + exit codes; tests
 - [ ] 3.5 Accessibility pass: GUI accessible names, tab order, shortcuts, minimum window size, row elision with full-value detail; TUI minimum-size guard; loading/empty/error state wording from VMs shared across UIs; tests where the harness allows
 - [ ] 3.6 docs/DESIGN.md: add restore-preview modal conventions, the loading/empty/error state matrix, accessibility rules, and `displayBus()` unification + modalias cosmetic fix in both UIs
 
