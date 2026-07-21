@@ -49,6 +49,34 @@ Uninstall with `packaging/uninstall.sh`; add `--purge` to also delete the
 daemon state in `/var/lib/devmgrd`. (`apt remove` / plain uninstall preserve
 that state for reinstalls.)
 
+## Verifying a download
+
+Every release asset is **signed** (minisign) and carries a **build-provenance
+attestation**, in addition to `SHA256SUMS`. Verifying the signature on
+`SHA256SUMS` and then checking your files against it is enough to trust the whole
+set.
+
+**Signature** — download the public key
+[`packaging/signing/devmgr.pub`](packaging/signing/devmgr.pub) once, then:
+
+```sh
+# verify the checksum file's signature, then trust the checksums it contains
+minisign -Vm SHA256SUMS -p devmgr.pub
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+Each asset also ships its own `<file>.minisig`, so you can verify one file
+directly: `minisign -Vm devmgr_*_amd64.deb -p devmgr.pub`.
+
+**Provenance** (optional, needs the [GitHub CLI](https://cli.github.com/))
+confirms the asset was built by this repo's release workflow from the tagged
+commit:
+
+```sh
+gh attestation verify devmgr_*_amd64.deb \
+  --repo cristianfritis/cross-device-manager
+```
+
 ## Removing & upgrading
 
 **State is preserved by default.** `/var/lib/devmgrd` — every snapshot and all

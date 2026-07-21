@@ -22,6 +22,14 @@ each step, plus how to report anything that doesn't match.
   needs a desktop agent. The first privileged action prompts; the grant is
   cached for ~5 minutes.
 
+## Verify before installing
+
+The release assets are signed and carry a provenance attestation. Before
+installing, verify the download — the copy-paste commands (minisign signature +
+`gh attestation verify`) are in the README under
+[Verifying a download](README.md#verifying-a-download). A failed signature check
+means: do not install, and please report it.
+
 ## The test loop
 
 Run these in order; each mutation is followed by a snapshot-restore round-trip

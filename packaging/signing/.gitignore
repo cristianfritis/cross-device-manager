@@ -1,0 +1,4 @@
+# Never commit a minisign SECRET key. The public key (devmgr.pub) IS committed.
+*.key
+devmgr.sec
+minisign.key
