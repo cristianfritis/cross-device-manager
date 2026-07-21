@@ -2,7 +2,7 @@
 # Reproducibility check (release-supply-chain spec, task 5.3) — runs INSIDE the
 # pkg packaging container (Dockerfile / the pkg compose service). It builds the
 # SAME source twice into the SAME build path with a pinned SOURCE_DATE_EPOCH,
-# then compares the sha256 of the four shipped binaries.
+# then compares the sha256 of the five shipped binaries.
 #
 # Building into ONE path (not two side-by-side dirs) is deliberate: it removes
 # build-directory-derived nondeterminism, so a surviving diff means a real
@@ -33,7 +33,8 @@ if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
 fi
 export SOURCE_DATE_EPOCH
 
-BINARIES=(daemon/devmgrd cli/devmgr tui/devmgr-tui gui/devmgr-gui)
+BINARIES=(daemon/devmgrd cli/devmgr tui/devmgr-tui gui/devmgr-gui
+          tests/smoke/devmgr-fwupd-smoke)
 BUILD=build/linux-packaged
 
 build_once() {

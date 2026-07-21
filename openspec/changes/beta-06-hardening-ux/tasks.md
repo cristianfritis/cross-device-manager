@@ -35,7 +35,7 @@
 
 ## 6. Acceptance suite & exit gate
 
-- [ ] 6.1 VM acceptance script against installed artifacts: enumeration both UIs, hotplug, disable+restore, blacklist round-trip, firmware check, CLI recovery, journal sandbox-denial scan; ends `ACCEPTANCE OK`; rig wiring beside existing smokes
+- [x] 6.1 VM acceptance script against installed artifacts: enumeration both UIs, hotplug, disable+restore, blacklist round-trip, firmware check, CLI recovery, journal sandbox-denial scan; ends `ACCEPTANCE OK`; rig wiring beside existing smokes
 - [ ] 6.2 Upgrade matrix scripts: 0.5→0.6 upgrade preserving config+snapshots (`--previous <path>` pinned artifact, loud failure if absent), downgrade outcome, interrupted install recovery, tarball→package replacement, purge residue — DEB path and RPM path
 - [ ] 6.3 Version bump to 0.6.0 + full standard gates (build/ctest both configs, format, gated tidy, purity greps) + acceptance suite green
 - [ ] 6.4 Tag `v0.6.0-beta.1` through the extended pipeline — **owner action**; draft release verified (full asset set incl. signatures + SBOM, attestation verify passes), owner publishes

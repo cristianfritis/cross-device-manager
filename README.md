@@ -228,6 +228,12 @@ fwupd) and DKMS out-of-tree kernel module status.
   until fwupd's own history reports it resolved (e.g. after the reboot
   actually happens). The banner also carries the provider's availability
   line (e.g. `fwupd 2.0.20`) and the host's Secure Boot state.
+- **`devmgr-fwupd-smoke` diagnostic.** The package ships a small headless tool
+  at `/usr/bin/devmgr-fwupd-smoke` that drives the same `FwupdUpdateProvider`
+  path from the command line — no GUI or daemon needed. The release acceptance
+  suite uses it to verify firmware end to end on the installed package, and it
+  is handy for debugging: `devmgr-fwupd-smoke --device <name-or-id>` prints the
+  resolved release and whether its cab is locally installable.
 
 ## Snapshots & rollback (Phase 7)
 
@@ -317,6 +323,23 @@ which provisions the disposable VM (now including the `fwupd` and `dkms`
 packages), builds the tree with `-DDEVMGR_WITH_SDBUS=ON`, and runs
 `test/vm/phase4-smoke.sh` through `test/vm/phase7-smoke.sh` in sequence —
 expect `PHASE4 VM SMOKE OK` … `PHASE7 VM SMOKE OK`.
+
+**Acceptance suite (installed artifact).** Unlike the phase smokes above — which
+run against the build tree — `test/vm/acceptance.sh` is the release exit gate and
+runs end to end against the *installed* release deb, the way a tester receives it.
+It installs the package, checks D-Bus activation, enumerates both UIs, verifies a
+firmware update through the shipped `devmgr-fwupd-smoke` against fwupd's test
+remote, exercises a disable + snapshot-restore round-trip, a driver-blacklist
+round-trip, a hot-remove reaction, the recovery CLI's daemon-down exit code, and
+scans the journal for sandbox denials — ending `ACCEPTANCE OK`. Run it in the same
+disposable VM after building the deb:
+
+```sh
+sudo ./test/vm/acceptance.sh ./devmgr_*_amd64.deb /sys/bus/usb/devices/3-1
+```
+
+It joins `test/vm/install-smoke.sh` (packaging lifecycle) and
+`test/vm/deb-upgrade-smoke.sh` (upgrade behavior) as the installed-artifact gates.
 
 ## License
 

@@ -1,7 +1,7 @@
 # Build reproducibility
 
 The release pipeline builds each tag **twice** in the packaging container and
-compares the four shipped binaries. This is a defense against a compromised or
+compares the five shipped binaries. This is a defense against a compromised or
 drifting build environment: if the same source and toolchain stop producing the
 same bytes, either something nondeterministic crept into the build or the
 environment changed underneath it — both worth knowing before a release ships.
@@ -19,7 +19,8 @@ here**. An unexplained difference is a release blocker.
    binaries, then **removes that build dir and rebuilds into the same path**.
    Using one path for both builds removes build-directory-derived noise (an
    absolute path baked into a binary), so a surviving diff is a real problem.
-2. Compares the `sha256` of `devmgrd`, `devmgr`, `devmgr-tui`, `devmgr-gui`.
+2. Compares the `sha256` of `devmgrd`, `devmgr`, `devmgr-tui`, `devmgr-gui`, and
+   `devmgr-fwupd-smoke` (the shipped firmware-acceptance diagnostic).
 3. Prints a `MATCH`/`DIFFER` line per binary and ends `REPRODUCIBILITY OK`, or
    exits non-zero listing any **UNEXPLAINED** differing binary.
 

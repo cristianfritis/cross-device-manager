@@ -17,11 +17,11 @@ if ! fwupd_test_device_discover; then
 fi
 
 echo "== read side: fakedevice upgrade visible via FwupdUpdateProvider =="
-SMOKE=./build/tests/smoke/devmgr_fwupd_smoke
-[ -x "$SMOKE" ] || SMOKE=./build/linux-debug/tests/smoke/devmgr_fwupd_smoke
-[ -x "$SMOKE" ] || SMOKE=./build/tests/devmgr_fwupd_smoke
+SMOKE=./build/tests/smoke/devmgr-fwupd-smoke
+[ -x "$SMOKE" ] || SMOKE=./build/linux-debug/tests/smoke/devmgr-fwupd-smoke
+[ -x "$SMOKE" ] || SMOKE=./build/tests/devmgr-fwupd-smoke
 if [ ! -x "$SMOKE" ]; then
-    echo "PHASE6 VM SMOKE FAILED: devmgr_fwupd_smoke binary not found" >&2
+    echo "PHASE6 VM SMOKE FAILED: devmgr-fwupd-smoke binary not found" >&2
     find ./build -name '*fwupd*smoke*' 2>/dev/null >&2 || true
     exit 1
 fi

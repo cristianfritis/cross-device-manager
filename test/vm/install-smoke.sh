@@ -27,6 +27,7 @@ systemctl daemon-reload
 echo "==> [1/6] apt install"
 apt-get install -y "$DEB"
 for f in /usr/bin/devmgrd /usr/bin/devmgr /usr/bin/devmgr-tui /usr/bin/devmgr-gui \
+         /usr/bin/devmgr-fwupd-smoke \
          /usr/lib/systemd/system/devmgrd.service \
          /usr/share/dbus-1/system-services/org.devmgr.Manager1.service \
          /usr/share/dbus-1/system.d/org.devmgr.Manager1.conf \
@@ -61,6 +62,7 @@ echo "round-trip OK (id $sid)"
 echo "==> [5/6] apt remove: residue-free, state preserved"
 apt-get remove -y devmgr
 for f in /usr/bin/devmgrd /usr/bin/devmgr /usr/bin/devmgr-tui /usr/bin/devmgr-gui \
+         /usr/bin/devmgr-fwupd-smoke \
          /usr/lib/systemd/system/devmgrd.service \
          /usr/share/dbus-1/system-services/org.devmgr.Manager1.service \
          /usr/share/dbus-1/system.d/org.devmgr.Manager1.conf \

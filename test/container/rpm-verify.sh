@@ -41,6 +41,7 @@ dnf install -y --setopt=tsflags= "$RPM"
 
 echo "==> [3/6] every file at its /usr path"
 for f in /usr/bin/devmgrd /usr/bin/devmgr /usr/bin/devmgr-tui /usr/bin/devmgr-gui \
+         /usr/bin/devmgr-fwupd-smoke \
          /usr/lib/systemd/system/devmgrd.service \
          /usr/share/dbus-1/system-services/org.devmgr.Manager1.service \
          /usr/share/dbus-1/system.d/org.devmgr.Manager1.conf \
@@ -65,6 +66,7 @@ echo "==> [5/6] packaged binaries run --version"
 echo "==> [6/6] rpm -e removes package files"
 rpm -e devmgr
 for f in /usr/bin/devmgrd /usr/bin/devmgr /usr/bin/devmgr-tui /usr/bin/devmgr-gui \
+         /usr/bin/devmgr-fwupd-smoke \
          /usr/lib/systemd/system/devmgrd.service \
          /usr/share/dbus-1/system-services/org.devmgr.Manager1.service \
          /usr/share/dbus-1/system.d/org.devmgr.Manager1.conf \

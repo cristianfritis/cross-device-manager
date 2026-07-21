@@ -13,18 +13,21 @@ this table *and* the overlay in the same change, before the release that ships
 it. gtest is the one dependency deliberately excluded — it is test-only and
 never linked into a shipped binary.
 
-Audited at beta-06 (task 5.1). Shipped binaries: `devmgrd`, `devmgr` (CLI),
-`devmgr-gui`, `devmgr-tui`.
+Audited at beta-06 (task 5.1; `devmgr-fwupd-smoke` added task 6.1). Shipped
+binaries: `devmgrd`, `devmgr` (CLI), `devmgr-gui`, `devmgr-tui`, and
+`devmgr-fwupd-smoke` — the headless firmware-acceptance diagnostic. The latter
+links only `devmgr_core` + the Linux PAL (sdbus-c++, nlohmann-json, tl-expected,
+in-tree sha256), so it introduces **no new dependency**.
 
 ## Shipped dependencies
 
 | Dependency | Version | License | Linkage | In binary | MIT-compatible? |
 |---|---|---|---|---|---|
-| sdbus-c++ | 2.3.1 | LGPL-2.1-or-later | static | devmgrd, devmgr | Yes — see LGPL note below |
+| sdbus-c++ | 2.3.1 | LGPL-2.1-or-later | static | devmgrd, devmgr, devmgr-fwupd-smoke | Yes — see LGPL note below |
 | ftxui | 6.1.9 | MIT | static | devmgr-tui | Yes (permissive) |
 | spdlog | 1.17.0 | MIT | static | devmgrd | Yes (permissive) |
 | fmt | 12.1.0 | MIT | static (via spdlog) | devmgrd | Yes (permissive) |
-| nlohmann-json | 3.12.0 | MIT | header-only | devmgrd, devmgr | Yes (permissive) |
+| nlohmann-json | 3.12.0 | MIT | header-only | devmgrd, devmgr, devmgr-fwupd-smoke | Yes (permissive) |
 | tl-expected | 1.3.1 | CC0-1.0 | header-only | all | Yes (public domain) |
 | devmgr-sha256 (in-tree) | — | MIT | in-tree source | daemon + core | Yes (own code) |
 | Qt 6 (Widgets, Gui, Core) | distro-provided | LGPL-3.0-only | dynamic | devmgr-gui | Yes — dynamic LGPL, no relink obligation |

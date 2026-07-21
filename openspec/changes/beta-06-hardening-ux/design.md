@@ -54,6 +54,9 @@ v0.5.0-beta.1 shipped deb + tarball with a tag-triggered draft-release pipeline.
 11. **Accessibility implementation.**
     GUI: pass over every control for `setAccessibleName`, explicit tab order per tab, `QKeySequence` shortcuts for tab switching + primary verbs, minimum window size, elide-with-full-value-in-detail. TUI: minimum-size guard with graceful message, hotkey coverage for new views. Loading/empty/error strings come from the VMs so both UIs share wording; DESIGN.md records the state matrix.
 
+12. **Acceptance checks firmware through a shipped `devmgr-fwupd-smoke` binary.**
+    The acceptance suite must exercise firmware on the *installed* package, but the daemon exposes no firmware verb and the CLI is snapshot-only — the only firmware-capable code (`FwupdUpdateProvider`) lives in the app layer behind the interactive UIs, whose `--self-test` enumerates devices only. Rather than grow `--self-test` into a headless update-enumeration mode in both UIs, the Phase 6 smoke tool (already drives `FwupdUpdateProvider`/`DkmsStatusProvider` through our stack, never shelling out to `fwupdmgr`) is promoted to a **shipped diagnostic**: `tests/smoke/devmgr_fwupd_smoke` gains `OUTPUT_NAME devmgr-fwupd-smoke` + an install rule in the `runtime` component, so it lands in the deb, rpm, and tarball alike. `test/vm/acceptance.sh` runs it against fwupd's test remote. It links only `devmgr_core` + the Linux PAL, so it adds **no new dependency**; the reproducibility check, the install-smoke/rpm-verify file sets, and `docs/DEPENDENCY-AUDIT.md` are updated to cover the fifth binary.
+
 ## Risks / Trade-offs
 
 - [Scope is large — hardening + UX in one change] → tasks are ordered so each track lands independently (hardening tasks don't depend on UX tasks); if the change must ship early, either track can be deferred by unchecking its tasks and re-scoping, and the proposal's optional items are pre-agreed droppable.
