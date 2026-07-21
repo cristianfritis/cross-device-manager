@@ -12,6 +12,8 @@
 
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/core/models.hpp"
+#include "devmgr/core/snapshot_diff.hpp"
+#include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/update_models.hpp"
 #include "devmgr/pal/criticality.hpp"
 #include "devmgr/pal/interfaces.hpp"
@@ -126,6 +128,25 @@ class ApplicationFacade {
     std::future<void> restoreSnapshot(std::string id);
     std::future<void> deleteSnapshot(std::string id);
 
+    // ---- beta-06: diff + restore outcome (snapshot-history/-ui specs) ----
+    // Fetches SnapshotDiff(base, target) on the scheduler and caches it, then
+    // publishes SnapshotDiffRefreshedEvent. Empty `target` = the live system,
+    // which is what a restore preview diffs against. Deliberately async into a
+    // cache like refreshSnapshots(), NOT a blocking accessor: the UIs call this
+    // from the UI thread when a preview or diff view opens, and docs/DESIGN.md
+    // forbids blocking I/O there. Null channel degrades to a cleared diff; a
+    // channel error clears the diff and publishes ErrorEvent, so a stale diff
+    // is never mistaken for the current one.
+    std::future<void> refreshSnapshotDiff(std::string baseId, std::string targetId);
+    // The last successfully fetched diff, or nullopt when none is cached / the
+    // last fetch failed. Mutex-guarded copy.
+    std::optional<core::SnapshotDiff> snapshotDiff() const;
+    // The outcome of the most recent restore, retained so the UIs can compose
+    // recovery guidance after the fact (the TaskCompletedEvent message alone
+    // cannot carry per-item detail). Cleared by a failed restore, which has no
+    // outcome to report on.
+    std::optional<core::RestoreOutcome> lastRestoreOutcome() const;
+
    private:
     std::future<void> runChannelTask(
         std::string taskId, std::string okMessage, bool modulesChanged,
@@ -170,8 +191,10 @@ class ApplicationFacade {
     std::map<std::pair<std::string, std::string>, core::PendingAction> pending_;
     std::atomic<bool> installActive_{false};  // serialization gate (spec §5.4)
 
-    mutable std::mutex snapshotsMutex_;  // guards snapshots_
+    mutable std::mutex snapshotsMutex_;  // guards snapshots_, diff_ and lastRestore_
     std::vector<core::SnapshotMeta> snapshots_;
+    std::optional<core::SnapshotDiff> diff_;
+    std::optional<core::RestoreOutcome> lastRestore_;
 };
 
 }  // namespace devmgr::app

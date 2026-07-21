@@ -38,6 +38,10 @@ struct UpdatesRefreshedEvent {};
 struct SnapshotsChangedEvent {};
 // facade snapshot list replaced → VMs rebuild via dispatcher
 struct SnapshotsRefreshedEvent {};
+// facade cached diff replaced → the VM rebuilds its preview/diff lines. Kept
+// separate from SnapshotsRefreshedEvent because a diff is fetched on demand
+// (opening a preview or a diff view) and must not force a list rebuild.
+struct SnapshotDiffRefreshedEvent {};
 struct UpdateRequestEvent {  // fwupd DeviceRequest: durable until dismissed/resolved (spec §9)
     std::string providerId;
     std::string deviceId;

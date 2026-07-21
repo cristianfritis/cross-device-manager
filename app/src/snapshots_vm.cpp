@@ -2,14 +2,28 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <ctime>
 #include <utility>
+
+#include "devmgr/core/snapshot_history.hpp"
+#include "devmgr/core/snapshot_presentation.hpp"
 
 namespace devmgr::app {
 namespace {
 
 constexpr const char* kPlaceholderRow = "(no snapshots)";
+// Depth indent for the chain view, capped so a long chain cannot push the
+// fixed row columns off a narrow terminal (docs/DESIGN.md §3.2).
+constexpr std::size_t kIndentPerLevel = 2;
+constexpr std::size_t kMaxIndentLevels = 4;
+
+std::string toLower(std::string s) {
+    std::ranges::transform(s, s.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+}
 
 // Local date-time cell (snapshot-ui spec row format). Fixed 16-char shape so
 // the byte-frozen row columns stay aligned.
@@ -50,6 +64,68 @@ std::string formatRow(const core::SnapshotMeta& m) {
     return {row.data()};
 }
 
+// Filter haystack (snapshot-ui spec): id, trigger and reason, lowercased.
+std::string filterHaystack(const core::SnapshotMeta& m) {
+    return toLower(m.id + " " + to_string(m.trigger) + " " + reasonCell(m));
+}
+
+// Indent level per row for the chain view. core::buildSnapshotChain measures
+// depth from the chain START (oldest = 0), but rows are rendered newest-first,
+// so indenting by that directly would push the NEWEST rows deepest and — past
+// the cap — flatten every recent row to the same indent, killing the
+// distinction exactly where the eye lands first. Indent from the chain TIP
+// instead: the newest sits at the left margin and each ancestor steps right,
+// which also matches the top-down reading order ("this, and what it came
+// from"). The cap then only degrades the oldest ancestors.
+// A chainStart row ends its group: the next row begins a new chain, back at
+// the margin, which is how a pruned ancestor reads as an absent chain start.
+std::vector<std::size_t> chainIndents(const std::vector<core::SnapshotChainRow>& chain) {
+    std::vector<std::size_t> indents(chain.size(), 0);
+    std::size_t tipDepth = 0;
+    bool groupOpen = false;
+    for (std::size_t i = 0; i < chain.size(); ++i) {
+        if (!groupOpen) {
+            tipDepth = chain[i].depth;
+            groupOpen = true;
+        }
+        // Guard the subtraction: depth is only monotonic within a group, and a
+        // corrupt store could in principle order rows otherwise.
+        indents[i] = tipDepth > chain[i].depth ? tipDepth - chain[i].depth : 0;
+        if (chain[i].chainStart) groupOpen = false;
+    }
+    return indents;
+}
+
+// Which snapshot is selected, which is current HEAD, which is last good
+// (snapshot-ui spec). HEAD and last-good come from the same chain builder the
+// history view uses, so the preview and the list cannot disagree about which
+// row is which.
+std::vector<std::string> previewContextLines(const std::vector<core::SnapshotMeta>& metas,
+                                             const std::string& previewId) {
+    const auto chain = core::buildSnapshotChain(metas);
+    std::string headId;
+    std::string goodId;
+    std::string createdCell;
+    for (std::size_t i = 0; i < chain.size(); ++i) {
+        if (chain[i].head) headId = metas[i].id;
+        if (chain[i].lastGood) goodId = metas[i].id;
+        if (metas[i].id == previewId) createdCell = localDateTime(metas[i].createdAtUtc);
+    }
+    const auto mark = [&previewId](const std::string& id) {
+        return !id.empty() && id == previewId ? " — this snapshot" : "";
+    };
+    std::vector<std::string> out;
+    out.push_back("Selected:     " + core::snapshotShortId(previewId) +
+                  (createdCell.empty() ? "" : " (created " + createdCell + ")"));
+    out.push_back("Current HEAD: " + (headId.empty() ? "(none)" : core::snapshotShortId(headId)) +
+                  mark(headId));
+    out.push_back(
+        "Last good:    " +
+        (goodId.empty() ? "(none — no healthy snapshot)" : core::snapshotShortId(goodId)) +
+        mark(goodId));
+    return out;
+}
+
 // Restores the highlighted snapshot by id after a rebuild, then clamps.
 int restoreSelection(const std::vector<std::optional<std::size_t>>& refs,
                      const std::vector<core::SnapshotMeta>& metas,
@@ -76,6 +152,18 @@ SnapshotsVM::SnapshotsVM(ApplicationFacade& facade, runtime::EventBus& bus,
         [this](const core::SnapshotsRefreshedEvent&) { queueRebuild(); });
     subChanged_ = bus_.subscribe<core::SnapshotsChangedEvent>(
         [this](const core::SnapshotsChangedEvent&) { queueRefresh(); });
+    // The diff landed: drop the loading state and let the open surface redraw.
+    // Not coalesced — one preview is in flight at a time — but marshalled to
+    // the UI thread like every other model mutation.
+    subDiff_ = bus_.subscribe<core::SnapshotDiffRefreshedEvent>(
+        [this](const core::SnapshotDiffRefreshedEvent&) {
+            auto alive = alive_;
+            dispatcher_.post([this, alive] {
+                if (!alive->load()) return;
+                previewPending_ = false;
+                if (diffReady_) diffReady_();
+            });
+        });
 }
 
 SnapshotsVM::~SnapshotsVM() {
@@ -88,6 +176,7 @@ SnapshotsVM::~SnapshotsVM() {
     // outstanding handle must be waited before the composition root tears the
     // facade down — that wait is here.
     if (lastRefresh_.valid()) lastRefresh_.wait();
+    if (lastDiff_.valid()) lastDiff_.wait();
 }
 
 void SnapshotsVM::queueRebuild() {
@@ -119,22 +208,57 @@ void SnapshotsVM::setRebuildHooks(std::function<void()> before, std::function<vo
     afterRebuild_ = std::move(after);
 }
 
+void SnapshotsVM::setDiffReadyHook(std::function<void()> hook) {
+    diffReady_ = std::move(hook);
+}
+
 void SnapshotsVM::rebuild() {
     if (beforeRebuild_) beforeRebuild_();
     const auto keep = selectedId();
     metas_ = facade_.snapshots();
     rows_.clear();
     rowRefs_.clear();
+    // Chain over the FULL list, so HEAD/last-good stay true regardless of what
+    // the filter hides (see the header note).
+    const auto chain =
+        historyView_ ? core::buildSnapshotChain(metas_) : std::vector<core::SnapshotChainRow>{};
+    const auto indents = chainIndents(chain);
+    const std::string needle = toLower(filter_);
     for (std::size_t i = 0; i < metas_.size(); ++i) {
-        rows_.push_back(formatRow(metas_[i]));
+        if (!needle.empty() && filterHaystack(metas_[i]).find(needle) == std::string::npos)
+            continue;
+        std::string row;
+        if (historyView_) {
+            const auto& chainRow = chain[i];
+            row.append(std::min(indents[i], kMaxIndentLevels) * kIndentPerLevel, ' ');
+            row += formatRow(metas_[i]);
+            row += core::chainMarkers(chainRow);
+        } else {
+            row = formatRow(metas_[i]);
+        }
+        rows_.push_back(std::move(row));
         rowRefs_.emplace_back(i);
     }
     if (rows_.empty()) {
-        rows_.emplace_back(kPlaceholderRow);
+        // Name the filter that hid everything and keep the clear-filter path
+        // discoverable (docs/DESIGN.md §5.1); an unfiltered empty store is a
+        // different state and says so.
+        rows_.push_back(needle.empty() ? kPlaceholderRow
+                                       : "No snapshots match \"" + filter_ + "\"");
         rowRefs_.emplace_back(std::nullopt);
     }
     selected_ = restoreSelection(rowRefs_, metas_, keep, selected_, static_cast<int>(rows_.size()));
     if (afterRebuild_) afterRebuild_();
+}
+
+void SnapshotsVM::setFilter(std::string filter) {
+    filter_ = std::move(filter);
+    rebuild();
+}
+
+void SnapshotsVM::setHistoryView(bool on) {
+    historyView_ = on;
+    rebuild();
 }
 
 const core::SnapshotMeta* SnapshotsVM::selectedMeta() const {
@@ -183,6 +307,53 @@ std::vector<std::string> SnapshotsVM::detailLines() const {
         out.push_back(std::string("Health:  ") + to_string(m->health) +
                       " — restore disabled for this snapshot");
     return out;
+}
+
+std::shared_future<void> SnapshotsVM::requestPreview(std::string id) {
+    previewId_ = id;
+    previewPending_ = true;
+    // Custody, same rule as queueRefresh(): the worker captures the facade, so
+    // the previous handle is waited before its future is dropped. Bounded —
+    // one preview is in flight at a time because the surface is modal.
+    if (lastDiff_.valid()) lastDiff_.wait();
+    // Empty target = live system state: what the machine looks like right now
+    // (design decision 1).
+    lastDiff_ = facade_.refreshSnapshotDiff(std::move(id), "").share();
+    return lastDiff_;
+}
+
+std::vector<std::string> SnapshotsVM::diffLines() const {
+    if (!previewId_) return {"(no diff requested)"};
+    if (previewPending_) return {"Computing differences..."};
+    const auto diff = facade_.snapshotDiff();
+    // Cleared cache after a completed fetch means the fetch failed; the reason
+    // reached the user through ErrorEvent, so this states the consequence
+    // rather than repeating a raw error (docs/DESIGN.md §6).
+    if (!diff) return {"Differences are unavailable for this snapshot."};
+    return core::diffLines(*diff);
+}
+
+std::vector<std::string> SnapshotsVM::previewLines() const {
+    if (!previewId_) return {"Select a snapshot to preview its restore."};
+    std::vector<std::string> out;
+    out.push_back("Restore snapshot " + core::snapshotShortId(*previewId_) + "?");
+    for (auto& line : previewContextLines(metas_, *previewId_)) out.push_back(std::move(line));
+    out.emplace_back("");
+    if (previewPending_) {
+        out.emplace_back("Computing what will change...");
+        return out;
+    }
+    for (auto& line : core::restorePreviewChangeLines(facade_.snapshotDiff()))
+        out.push_back(std::move(line));
+    out.emplace_back("");
+    out.emplace_back(core::restorePreviewConvergenceNote());
+    return out;
+}
+
+std::vector<std::string> SnapshotsVM::restoreGuidanceLines() const {
+    const auto outcome = facade_.lastRestoreOutcome();
+    if (!outcome) return {};
+    return core::restoreGuidanceLines(*outcome);
 }
 
 std::optional<SnapshotsVM::RestoreArgs> SnapshotsVM::selectedRestore() const {

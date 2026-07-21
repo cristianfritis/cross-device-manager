@@ -6,39 +6,11 @@
 
 #include "devmgr/app/disabled_overlay.hpp"
 #include "devmgr/core/events.hpp"
+#include "devmgr/core/snapshot_presentation.hpp"
 
 namespace devmgr::app {
 
 namespace {
-// One line for the status surfaces (snapshot-ui spec: partial-convergence
-// summary): per-status item counts, zero counts omitted, "ok" always shown.
-std::string restoreSummary(const core::RestoreOutcome& outcome) {
-    std::size_t ok = 0;
-    std::size_t refused = 0;
-    std::size_t failed = 0;
-    std::size_t absent = 0;
-    for (const auto& item : outcome.items) {
-        if (item.status == "ok")
-            ++ok;
-        else if (item.status == "guard-refused")
-            ++refused;
-        else if (item.status == "failed")
-            ++failed;
-        else if (item.status == "device-absent")
-            ++absent;
-    }
-    std::string text = "Restored " + core::snapshotShortId(outcome.snapshotId) + ": ";
-    if (outcome.items.empty()) {
-        text += "no changes needed";
-    } else {
-        text += std::to_string(ok) + " ok";
-        if (refused > 0) text += ", " + std::to_string(refused) + " guard-refused";
-        if (failed > 0) text += ", " + std::to_string(failed) + " failed";
-        if (absent > 0) text += ", " + std::to_string(absent) + " device-absent";
-    }
-    text += "; safety snapshot " + core::snapshotShortId(outcome.safetySnapshotId);
-    return text;
-}
 
 // Releases the serialization gate on EVERY worker exit path (spec §5.4).
 struct InstallActiveGuard {
@@ -378,6 +350,50 @@ std::vector<core::SnapshotMeta> ApplicationFacade::snapshots() const {
     return snapshots_;
 }
 
+std::future<void> ApplicationFacade::refreshSnapshotDiff(std::string baseId, std::string targetId) {
+    return scheduler_.submit([this, baseId = std::move(baseId), targetId = std::move(targetId)] {
+        if (channel_ == nullptr) {
+            // Read degradation, same shape as refreshSnapshots(): clear and
+            // publish so the view leaves its loading state.
+            {
+                std::scoped_lock lock(snapshotsMutex_);
+                diff_.reset();
+            }
+            bus_.publish(core::SnapshotDiffRefreshedEvent{});
+            return;
+        }
+        auto result = channel_->snapshotDiff(baseId, targetId);
+        if (!result) {
+            // Unlike the list, a failed diff clears the cache: a preview that
+            // silently showed the previous pair's diff would misdescribe what
+            // a restore is about to do.
+            {
+                std::scoped_lock lock(snapshotsMutex_);
+                diff_.reset();
+            }
+            bus_.publish(
+                core::ErrorEvent{.source = "snapshot-diff", .message = result.error().message});
+            bus_.publish(core::SnapshotDiffRefreshedEvent{});
+            return;
+        }
+        {
+            std::scoped_lock lock(snapshotsMutex_);
+            diff_ = std::move(*result);
+        }
+        bus_.publish(core::SnapshotDiffRefreshedEvent{});
+    });
+}
+
+std::optional<core::SnapshotDiff> ApplicationFacade::snapshotDiff() const {
+    std::scoped_lock lock(snapshotsMutex_);
+    return diff_;
+}
+
+std::optional<core::RestoreOutcome> ApplicationFacade::lastRestoreOutcome() const {
+    std::scoped_lock lock(snapshotsMutex_);
+    return lastRestore_;
+}
+
 std::future<void> ApplicationFacade::runSnapshotMutation(
     std::string taskId, std::function<core::Result<std::string>(pal::IPrivilegedChannel&)> call) {
     return scheduler_.submit([this, taskId = std::move(taskId), call = std::move(call)] {
@@ -415,10 +431,17 @@ std::future<void> ApplicationFacade::restoreSnapshot(std::string id) {
     std::string taskId = "snapshot-restore:" + id;
     return runSnapshotMutation(
         std::move(taskId),
-        [id = std::move(id)](pal::IPrivilegedChannel& c) -> core::Result<std::string> {
+        [this, id = std::move(id)](pal::IPrivilegedChannel& c) -> core::Result<std::string> {
             auto outcome = c.snapshotRestore(id);
+            {
+                // Retained for the UIs' recovery guidance. A failed restore
+                // clears it: there is no outcome to compose guidance from, and
+                // a stale one would name the wrong safety snapshot.
+                std::scoped_lock lock(snapshotsMutex_);
+                lastRestore_ = outcome ? std::optional{*outcome} : std::nullopt;
+            }
             if (!outcome) return tl::unexpected(outcome.error());
-            return restoreSummary(*outcome);
+            return core::restoreSummary(*outcome);
         });
 }
 

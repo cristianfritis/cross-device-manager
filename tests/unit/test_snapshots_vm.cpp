@@ -217,3 +217,262 @@ TEST_F(SnapshotsVmTest, TeardownStormNoPostAfterDrain) {  // review test 14 (VM 
     for (auto& fn : orphans) fn();  // must not crash; must be a no-op (alive token)
     EXPECT_EQ(rebuilds.load(), 0);  // never drained while alive → never rebuilt
 }
+
+// ---- beta-06 task 3.1: filter, history chain, preview, recovery guidance ----
+
+namespace {
+
+// A third meta so a chain has an interior row, and a pruned-parent row that
+// must render as a chain start rather than an error.
+core::SnapshotMeta childMeta() {
+    core::SnapshotMeta m;
+    m.id = std::string(64, 'c');
+    m.parent = std::string(64, 'b');
+    m.createdAtUtc = kFixedInstant;
+    m.trigger = core::SnapshotTrigger::Manual;
+    m.reason = {.verb = "", .subject = "before nvidia swap"};
+    return m;
+}
+
+core::SnapshotMeta prunedParentMeta() {
+    core::SnapshotMeta m;
+    m.id = std::string(64, 'd');
+    m.parent = std::string(64, 'f');  // never present in the list — pruned
+    m.createdAtUtc = kFixedInstant;
+    m.trigger = core::SnapshotTrigger::Auto;
+    m.reason = {.verb = "UnloadModule", .subject = "nouveau"};
+    return m;
+}
+
+core::SnapshotDiff oneDeviceDiff() {
+    core::SnapshotDiff d;
+    d.baseId = std::string(64, 'a');
+    d.entries.push_back({.kind = core::kDiffKindDevice,
+                         .key = "usb 1d6b:0002 @2-1",
+                         .before = "disabled (authorized)",
+                         .after = core::kDiffStateAbsent});
+    return d;
+}
+
+}  // namespace
+
+TEST_F(SnapshotsVmTest, FilterMatchesIdTriggerAndReasonCaseInsensitively) {
+    seedAndRefresh({autoMeta(), manualCorruptMeta()});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+
+    vm.setFilter("AUTO");  // trigger, upper-case → matches the auto row only
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_NE(vm.rowsRef()[0].find("aaaaaaaaaaaa"), std::string::npos);
+
+    vm.setFilter("pre-upgrade");  // reason
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_NE(vm.rowsRef()[0].find("bbbbbbbbbbbb"), std::string::npos);
+
+    vm.setFilter("bbbb");  // id prefix
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_NE(vm.rowsRef()[0].find("bbbbbbbbbbbb"), std::string::npos);
+
+    vm.setFilter("");
+    EXPECT_EQ(vm.rowsRef().size(), 2U);
+}
+
+TEST_F(SnapshotsVmTest, FilterWithNoMatchesNamesTheFilterAndStaysNonActionable) {
+    seedAndRefresh({autoMeta()});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    vm.setFilter("zzz");
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    // Names the filter (docs/DESIGN.md §5.1) and is distinct from the empty-store row.
+    EXPECT_EQ(vm.rowsRef()[0], "No snapshots match \"zzz\"");
+    EXPECT_FALSE(vm.selectedRestore().has_value());
+    EXPECT_FALSE(vm.selectedDelete().has_value());
+}
+
+TEST_F(SnapshotsVmTest, HistoryViewMarksHeadLastGoodAndChainStartsByteFrozen) {
+    // Newest first: c -> b -> a is the chain; d's parent was pruned.
+    seedAndRefresh({childMeta(), manualCorruptMeta(), autoMeta(), prunedParentMeta()});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.setHistoryView(true);
+    ASSERT_EQ(vm.rowsRef().size(), 4U);
+    // Byte-frozen: these strings ARE what both UIs render. Indent runs from the
+    // chain TIP, so the newest sits at the margin and each ancestor steps right.
+    EXPECT_EQ(vm.rowsRef()[0],
+              "cccccccccccc 2020-09-13 12:26 manual before nvidia swap             "
+              "  [HEAD, last good]");
+    // The corrupt interior row is one step in and carries no chain marker.
+    EXPECT_EQ(vm.rowsRef()[1],
+              "  bbbbbbbbbbbb 1970-01-01 00:00 manual pre-upgrade                    corrupt");
+    // Oldest of the chain: two steps in, and its own parent is absent.
+    EXPECT_EQ(vm.rowsRef()[2],
+              "    aaaaaaaaaaaa 2020-09-13 12:26 auto   DisableDevice /sys/devices/usb "
+              "  [chain start]");
+    // Pruned parent restarts at the left margin as a chain start, not an error.
+    EXPECT_EQ(vm.rowsRef()[3],
+              "dddddddddddd 2020-09-13 12:26 auto   UnloadModule nouveau           "
+              "  [chain start]");
+}
+
+TEST_F(SnapshotsVmTest, HistoryMarkersStayTrueWhenTheFilterHidesHead) {
+    seedAndRefresh({childMeta(), manualCorruptMeta(), autoMeta()});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.setHistoryView(true);
+    // Hide the real HEAD (c). The surviving rows must NOT be relabelled HEAD —
+    // markers describe the store, not the visible subset (docs/DESIGN.md §2.1).
+    vm.setFilter("pre-upgrade");
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_EQ(vm.rowsRef()[0].find("[HEAD"), std::string::npos);
+    EXPECT_EQ(vm.rowsRef()[0].find("last good"), std::string::npos);
+}
+
+TEST_F(SnapshotsVmTest, PreviewReportsLoadingThenTheDiffAgainstLiveState) {
+    seedAndRefresh({autoMeta()});
+    channel_.nextDiff = oneDeviceDiff();
+    QueuingUiDispatcher queuing;
+    app::SnapshotsVM vm(facade_, bus_, queuing);
+    vm.rebuild();
+
+    auto handle = vm.requestPreview(std::string(64, 'a'));
+    // Before the diff lands the surface states the loading condition; it never
+    // shows an empty or falsely-identical result.
+    auto loading = vm.previewLines();
+    EXPECT_NE(std::find(loading.begin(), loading.end(), "Computing what will change..."),
+              loading.end());
+
+    handle.wait();
+    for (auto& fn : queuing.drain()) fn();  // deliver SnapshotDiffRefreshedEvent
+
+    const auto lines = vm.previewLines();
+    ASSERT_GE(lines.size(), 4U);
+    EXPECT_EQ(lines[0], "Restore snapshot aaaaaaaaaaaa?");
+    EXPECT_EQ(lines[1], "Selected:     aaaaaaaaaaaa (created 2020-09-13 12:26)");
+    EXPECT_EQ(lines[2], "Current HEAD: aaaaaaaaaaaa — this snapshot");
+    EXPECT_EQ(lines[3], "Last good:    aaaaaaaaaaaa — this snapshot");
+    // The diff row, its direction labelled, and the partial-convergence note.
+    const auto joined = [&lines] {
+        std::string s;
+        for (const auto& l : lines) s += l + "\n";
+        return s;
+    }();
+    EXPECT_NE(joined.find("Differences (snapshot -> current state):"), std::string::npos);
+    EXPECT_NE(joined.find("device   usb 1d6b:0002 @2-1: disabled (authorized) -> absent"),
+              std::string::npos);
+    EXPECT_NE(joined.find("Restoring re-applies the snapshot side"), std::string::npos);
+    EXPECT_NE(joined.find("Convergence may be partial"), std::string::npos);
+    // Live-state form: empty target id (design decision 1).
+    EXPECT_NE(std::find(channel_.snapshotCalls.begin(), channel_.snapshotCalls.end(),
+                        "diff:" + std::string(64, 'a') + ":live"),
+              channel_.snapshotCalls.end());
+}
+
+TEST_F(SnapshotsVmTest, PreviewOfIdenticalPayloadsSaysNothingWouldChange) {
+    seedAndRefresh({autoMeta()});
+    channel_.nextDiff = core::SnapshotDiff{};  // no entries == identical
+    QueuingUiDispatcher queuing;
+    app::SnapshotsVM vm(facade_, bus_, queuing);
+    vm.rebuild();
+    vm.requestPreview(std::string(64, 'a')).wait();
+    for (auto& fn : queuing.drain()) fn();
+
+    const auto lines = vm.previewLines();
+    const auto joined = [&lines] {
+        std::string s;
+        for (const auto& l : lines) s += l + "\n";
+        return s;
+    }();
+    // Explicit "no differences", never an empty section or a failure.
+    EXPECT_NE(joined.find("already matches the current state; nothing would change"),
+              std::string::npos);
+    EXPECT_EQ(joined.find("Differences (snapshot"), std::string::npos);
+}
+
+TEST_F(SnapshotsVmTest, FailedDiffFetchSaysUnavailableRatherThanShowingAStaleDiff) {
+    seedAndRefresh({autoMeta(), manualCorruptMeta()});
+    channel_.nextDiff = oneDeviceDiff();
+    QueuingUiDispatcher queuing;
+    app::SnapshotsVM vm(facade_, bus_, queuing);
+    vm.rebuild();
+    vm.requestPreview(std::string(64, 'a')).wait();
+    for (auto& fn : queuing.drain()) fn();
+    ASSERT_NE(vm.previewLines().size(), 0U);
+
+    // Second preview fails: the first diff must NOT be shown for it.
+    channel_.nextDiff = tl::unexpected(
+        core::Error{.code = core::Error::Code::Io, .message = "snapshot payload unreadable"});
+    vm.requestPreview(std::string(64, 'b')).wait();
+    for (auto& fn : queuing.drain()) fn();
+
+    const auto lines = vm.previewLines();
+    const auto joined = [&lines] {
+        std::string s;
+        for (const auto& l : lines) s += l + "\n";
+        return s;
+    }();
+    EXPECT_NE(joined.find("What will change is unavailable"), std::string::npos);
+    EXPECT_EQ(joined.find("usb 1d6b:0002"), std::string::npos);  // no stale rows
+}
+
+TEST_F(SnapshotsVmTest, RestoreGuidanceNamesFailedItemsSafetyIdAndRecoveryCommand) {
+    seedAndRefresh({autoMeta()});
+    core::RestoreOutcome outcome;
+    outcome.snapshotId = std::string(64, 'a');
+    outcome.safetySnapshotId = std::string(64, 'e');
+    outcome.items.push_back(
+        {.subject = "/sys/devices/usb1/1-4", .action = "re-enable", .status = "ok", .detail = ""});
+    outcome.items.push_back({.subject = "/sys/devices/usb1/1-2",
+                             .action = "re-apply-disable",
+                             .status = "guard-refused",
+                             .detail = "only remaining keyboard"});
+    channel_.nextRestore = outcome;
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    facade_.restoreSnapshot(std::string(64, 'a')).get();
+
+    const auto lines = vm.restoreGuidanceLines();
+    ASSERT_EQ(lines.size(), 4U);
+    EXPECT_EQ(lines[0], "Restore of aaaaaaaaaaaa left 1 item unconverged:");
+    EXPECT_EQ(lines[1],
+              "  guard-refused  /sys/devices/usb1/1-2 (re-apply-disable): only remaining keyboard");
+    EXPECT_EQ(lines[2],
+              "The state from before this restore is kept as safety snapshot eeeeeeeeeeee.");
+    // The exact command to fall back to — never a bare error with no next step.
+    EXPECT_EQ(lines[3], "To go back, run: devmgr snapshot restore eeeeeeeeeeee");
+}
+
+TEST_F(SnapshotsVmTest, FullyConvergedRestoreOffersNoGuidance) {
+    seedAndRefresh({autoMeta()});
+    core::RestoreOutcome outcome;
+    outcome.snapshotId = std::string(64, 'a');
+    outcome.safetySnapshotId = std::string(64, 'e');
+    outcome.items.push_back(
+        {.subject = "/sys/devices/usb1/1-4", .action = "re-enable", .status = "ok", .detail = ""});
+    channel_.nextRestore = outcome;
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    facade_.restoreSnapshot(std::string(64, 'a')).get();
+    // Nothing to recover from → nothing to show, not an empty box.
+    EXPECT_TRUE(vm.restoreGuidanceLines().empty());
+}
+
+TEST_F(SnapshotsVmTest, FailedRestoreLeavesNoStaleGuidanceFromAnEarlierOne) {
+    seedAndRefresh({autoMeta()});
+    core::RestoreOutcome outcome;
+    outcome.snapshotId = std::string(64, 'a');
+    outcome.safetySnapshotId = std::string(64, 'e');
+    outcome.items.push_back({.subject = "/sys/devices/usb1/1-2",
+                             .action = "re-apply-disable",
+                             .status = "failed",
+                             .detail = "write error"});
+    channel_.nextRestore = outcome;
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    facade_.restoreSnapshot(std::string(64, 'a')).get();
+    ASSERT_FALSE(vm.restoreGuidanceLines().empty());
+
+    // A restore that fails outright has no outcome — guidance naming the OLD
+    // safety snapshot would send the user to the wrong recovery point.
+    channel_.nextRestore = tl::unexpected(
+        core::Error{.code = core::Error::Code::NotFound, .message = "no such snapshot"});
+    facade_.restoreSnapshot(std::string(64, 'b')).get();
+    EXPECT_TRUE(vm.restoreGuidanceLines().empty());
+}
