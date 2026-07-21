@@ -18,6 +18,7 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/string.hpp>
+#include <ftxui/screen/terminal.hpp>
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_detail_vm.hpp"
@@ -166,6 +167,11 @@ int runTuiApp(bool selfTest) {
         });
 
     static constexpr int kLeftPaneWidth = 44;
+    // Below this the side-by-side panes cannot render without writing outside
+    // the screen; DESIGN.md §3.2 asks for a concise minimum-size message that
+    // still honors quit and resize instead of a broken layout.
+    static constexpr int kMinCols = 80;
+    static constexpr int kMinRows = 24;
 
     std::string filter;
     InputOption inputOpt;
@@ -365,6 +371,19 @@ int runTuiApp(bool selfTest) {
 
     auto ui = Renderer(tabs, [&] {
         marqueeNeeded = false;  // re-set by the menu transform while an overflowing row is selected
+        // Minimum-size guard (DESIGN.md §3.2): below 80x24 the list/detail split
+        // would overflow the screen, so show a concise message instead. 'q'
+        // still quits (the CatchEvent wrapper is unaffected) and a resize
+        // re-renders straight back into the full UI.
+        const Dimensions term = Terminal::Size();
+        if (term.dimx < kMinCols || term.dimy < kMinRows) {
+            return vbox({
+                       text("Terminal too small") | bold | center,
+                       text("Minimum size is 80x24.") | center,
+                       text("Resize the window, or press q to quit.") | center,
+                   }) |
+                   flex;
+        }
         if (activeTab == 1) {
             return vbox({
                        tabTitles(),

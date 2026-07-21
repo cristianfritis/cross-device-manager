@@ -13,12 +13,14 @@
 #include <QFontDatabase>
 #include <QInputDialog>
 #include <QItemSelectionModel>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
 #include <QMessageBox>
 #include <QPalette>
 #include <QRegularExpression>
+#include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -83,8 +85,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
 
     auto* toolbar = addToolBar(QStringLiteral("main"));
     toolbar->setMovable(false);
-    auto* refreshAction = toolbar->addAction(QStringLiteral("Refresh"));
-    connect(refreshAction, &QAction::triggered, this, [this] { actions_.onRefresh(); });
+    refreshAction_ = toolbar->addAction(QStringLiteral("Refresh"));
+    connect(refreshAction_, &QAction::triggered, this, [this] { actions_.onRefresh(); });
 
     toggleAction_ = toolbar->addAction(QStringLiteral("Disable"));
     toggleAction_->setEnabled(false);
@@ -449,6 +451,70 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     tabs_->addTab(updatesSplitter, tr("Updates"));
     tabs_->addTab(snapshotsPage, tr("Snapshots"));
     setCentralWidget(tabs_);
+
+    // Accessibility pass (beta-06 task 3.5, DESIGN.md §10 + design decision 11).
+    // Everything below is presentation-only: names for assistive tech, keyboard
+    // shortcuts, a coherent tab order, a minimum window size, and explicit row
+    // elision. No behavior or wording changes — the VMs stay the source of truth.
+
+    // Minimum window size: DESIGN.md §3.1 requires the GUI to remain usable at
+    // 800x520 (labels may wrap, secondary metadata may elide, but selection,
+    // primary actions, and status stay reachable). Qt refuses to shrink below.
+    constexpr int kMinWindowWidth = 800;
+    constexpr int kMinWindowHeight = 520;
+    setMinimumSize(kMinWindowWidth, kMinWindowHeight);
+
+    // Accessible names for the focusable, otherwise-unlabelled controls so
+    // assistive technology announces a meaningful name (DESIGN.md §10; the
+    // toolbar QActions already carry their visible text as their name). The
+    // snapshot filter/diff/guidance names were set at task 3.3 and are kept.
+    tabs_->setAccessibleName(QStringLiteral("Views"));
+    filterEdit_->setAccessibleName(QStringLiteral("Filter devices"));
+    listView_->setAccessibleName(QStringLiteral("Devices"));
+    detailTree_->setAccessibleName(QStringLiteral("Device details"));
+    moduleFilterEdit_->setAccessibleName(QStringLiteral("Filter modules"));
+    modulesView_->setAccessibleName(QStringLiteral("Modules"));
+    moduleDetailTree_->setAccessibleName(QStringLiteral("Module details"));
+    updatesView_->setAccessibleName(QStringLiteral("Updates"));
+    updatesDetailTree_->setAccessibleName(QStringLiteral("Update details"));
+    snapshotsView_->setAccessibleName(QStringLiteral("Snapshots"));
+    snapshotsDetailTree_->setAccessibleName(QStringLiteral("Snapshot details"));
+
+    // Rows elide long values so a wide name/reason/path never pushes the layout
+    // (DESIGN.md §2.4); the full value stays reachable in the detail pane, which
+    // renders the VM's complete lines. Explicit here so intent is testable even
+    // though ElideRight is the item-view default.
+    for (QListView* view : {listView_, modulesView_, updatesView_, snapshotsView_}) {
+        view->setTextElideMode(Qt::ElideRight);
+        view->setWordWrap(false);
+    }
+
+    // Keyboard shortcuts (DESIGN.md §10 keyboard-complete operation): tab
+    // switching plus the per-view primary verb. The verb actions are gated to
+    // their tab in updateActionEnablement(), so a shortcut fired off-tab is
+    // inert rather than acting on the wrong view.
+    refreshAction_->setShortcut(QKeySequence::Refresh);              // F5
+    toggleAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));  // enable/disable
+    loadModuleAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
+    createSnapshotAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    for (int i = 0; i < tabs_->count(); ++i) {
+        // Ctrl+1..Ctrl+4 jump straight to a tab. Parented to the window so Qt
+        // owns them; the functor drives the same currentChanged path as a click.
+        auto* jump =
+            new QShortcut(QKeySequence(Qt::CTRL | static_cast<Qt::Key>(Qt::Key_1 + i)), this);
+        connect(jump, &QShortcut::activated, this, [this, i] { tabs_->setCurrentIndex(i); });
+    }
+
+    // Explicit tab order per page follows the visual reading order — filter,
+    // list, detail (DESIGN.md §10). Qt scopes focus traversal to the current
+    // page's subtree, so each page's chain is set independently.
+    setTabOrder(filterEdit_, listView_);
+    setTabOrder(listView_, detailTree_);
+    setTabOrder(moduleFilterEdit_, modulesView_);
+    setTabOrder(modulesView_, moduleDetailTree_);
+    setTabOrder(updatesView_, updatesDetailTree_);
+    setTabOrder(snapshotFilterEdit_, snapshotsView_);
+    setTabOrder(snapshotsView_, snapshotsDetailStack_);
 
     // Tab entry mirrors the TUI's 'm'/'u' cycle: banner(s) recomputed (they
     // read sysfs/the PAL — never per frame), fresh snapshot, async work

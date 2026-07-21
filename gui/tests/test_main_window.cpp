@@ -9,9 +9,11 @@
 
 #include <QAction>
 #include <QCoreApplication>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QShortcut>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -1060,4 +1062,75 @@ TEST(MainWindowTest, RepeatedTabFlipsStayCoalescedAndConsistent) {
     QCoreApplication::processEvents();
     EXPECT_EQ(window.modulesView()->model()->rowCount(),
               static_cast<int>(f.modulesVm.rowsRef().size()));
+}
+
+// ---- Accessibility pass (beta-06 task 3.5, DESIGN.md §10) ----
+
+// The window enforces the DESIGN.md §3.1 usable-at-800x520 floor so primary
+// controls can never be squeezed off-screen.
+TEST(MainWindowTest, MinimumWindowSizeMeetsDesignFloor) {
+    Fixture f;
+    auto window = f.makeWindow();
+    EXPECT_EQ(window.minimumSize(), QSize(800, 520));
+}
+
+// Every focusable, otherwise-unlabelled control announces a meaningful name to
+// assistive technology (DESIGN.md §10 accessible names).
+TEST(MainWindowTest, FocusableControlsCarryAccessibleNames) {
+    Fixture f;
+    auto window = f.makeWindow();
+    EXPECT_FALSE(window.filterEdit()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.listView()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.detailTree()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.moduleFilterEdit()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.modulesView()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.moduleDetailTree()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.updatesView()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.updatesDetailTree()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.snapshotsView()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.snapshotsDetailTree()->accessibleName().isEmpty());
+    EXPECT_FALSE(window.snapshotFilterEdit()->accessibleName().isEmpty());
+}
+
+// Primary verbs carry keyboard shortcuts and each tab is reachable by Ctrl+N;
+// keyboard-only operation (DESIGN.md §10) does not depend on the toolbar.
+TEST(MainWindowTest, PrimaryVerbsAndTabSwitchingHaveShortcuts) {
+    Fixture f;
+    auto window = f.makeWindow();
+    EXPECT_EQ(window.refreshAction()->shortcut(), QKeySequence(QKeySequence::Refresh));
+    EXPECT_EQ(window.toggleAction()->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_E));
+    EXPECT_EQ(window.loadModuleAction()->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_L));
+    EXPECT_EQ(window.createSnapshotAction()->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_N));
+
+    // One Ctrl+<n> tab-jump per tab, wired as window-owned QShortcuts.
+    const auto shortcuts = window.findChildren<QShortcut*>();
+    QList<QKeySequence> keys;
+    for (const QShortcut* s : shortcuts) keys.push_back(s->key());
+    EXPECT_EQ(window.tabs()->count(), 4);
+    for (int i = 0; i < window.tabs()->count(); ++i)
+        EXPECT_TRUE(keys.contains(QKeySequence(Qt::CTRL | static_cast<Qt::Key>(Qt::Key_1 + i))))
+            << "missing Ctrl+" << (i + 1) << " tab shortcut";
+}
+
+// A device name too wide for the row elides in the list (ElideRight, no wrap),
+// but the full value stays reachable in the detail pane (DESIGN.md §2.4).
+TEST(MainWindowTest, ListRowsElideLongValuesButDetailKeepsFullText) {
+    Fixture f;
+    const std::string longName(120, 'X');
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, longName));
+    auto window = f.makeWindow();
+    f.refreshAndPump();
+
+    for (QListView* view :
+         {window.listView(), window.modulesView(), window.updatesView(), window.snapshotsView()}) {
+        EXPECT_EQ(view->textElideMode(), Qt::ElideRight);
+        EXPECT_FALSE(view->wordWrap());
+    }
+
+    const int row = f.firstDeviceRow();
+    ASSERT_GE(row, 0);
+    window.listView()->setCurrentIndex(window.listView()->model()->index(row, 0));
+    ASSERT_GE(window.detailTree()->topLevelItemCount(), 1);
+    EXPECT_EQ(window.detailTree()->topLevelItem(0)->text(1),
+              QString::fromStdString(longName));  // full value, not elided
 }

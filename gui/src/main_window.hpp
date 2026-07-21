@@ -77,6 +77,7 @@ class MainWindow final : public QMainWindow {
     QListView* listView() const { return listView_; }
     QTreeWidget* detailTree() const { return detailTree_; }
     QLineEdit* filterEdit() const { return filterEdit_; }
+    QAction* refreshAction() const { return refreshAction_; }
     QAction* toggleAction() const { return toggleAction_; }
     QTabWidget* tabs() const { return tabs_; }
     QListView* modulesView() const { return modulesView_; }
@@ -134,6 +135,7 @@ class MainWindow final : public QMainWindow {
     QListView* listView_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;
     QTreeWidget* detailTree_ = nullptr;
+    QAction* refreshAction_ = nullptr;
     QAction* toggleAction_ = nullptr;
     ModuleListModel* moduleModel_ = nullptr;  // Qt-parented to this window
     QTabWidget* tabs_ = nullptr;
