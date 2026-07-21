@@ -56,6 +56,31 @@ jobs:
       - name: Verify checksums
         run: cd dist && sha256sum -c SHA256SUMS
 
+      # SBOM (release-supply-chain spec, task 5.1): syft catalogs the shipped
+      # artifacts, then merge-sbom.py folds in the vendored/static deps syft
+      # cannot see once they are linked away — sdbus-c++, ftxui, spdlog, fmt,
+      # nlohmann-json, tl-expected, and the in-tree sha256. Source of truth for
+      # those rows: packaging/sbom/overlay.spdx.json + docs/DEPENDENCY-AUDIT.md.
+      # --require fails the release if any vendored dep is missing from the SBOM.
+      # Folding SBOM.spdx.json into SHA256SUMS and uploading it are task 5.4.
+      - name: Install syft
+        env:
+          # Pinned for reproducibility; owner bumps deliberately. The release job
+          # only runs on an owner-pushed tag, so a bad pin surfaces at release.
+          SYFT_VERSION: v1.18.1
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin "$SYFT_VERSION"
+          syft version
+
+      - name: Generate SBOM (syft SPDX + vendored overlay)
+        run: |
+          syft scan dir:dist -o spdx-json=sbom.syft.spdx.json
+          python3 packaging/sbom/merge-sbom.py \
+            sbom.syft.spdx.json packaging/sbom/overlay.spdx.json dist/SBOM.spdx.json \
+            --require sdbus-c++,ftxui,spdlog,fmt,nlohmann-json,tl-expected,devmgr-sha256
+          rm -f sbom.syft.spdx.json
+
       - name: Draft prerelease
         env:
           GH_TOKEN: ${{ github.token }}

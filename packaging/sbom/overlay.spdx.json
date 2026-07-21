@@ -1,0 +1,111 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "devmgr-vendored-overlay",
+  "documentNamespace": "https://github.com/cristianfritis/cross-device-manager/sbom/overlay",
+  "comment": "Hand-maintained SBOM overlay for statically-linked / vendored / header-only dependencies that syft cannot see in the shipped binaries (they carry no package metadata once linked). merge-sbom.py folds these packages into the syft-generated SPDX document at release time. Keep this file and docs/DEPENDENCY-AUDIT.md in sync: every package here has a row there, and any version/license bump lands in both. Versions are the ones the release containers pin (sdbus-c++ via the Dockerfile --branch, the rest via vcpkg.json resolution captured in vcpkg_installed/**/vcpkg.spdx.json).",
+  "creationInfo": {
+    "created": "2026-07-21T00:00:00Z",
+    "creators": ["Tool: devmgr-sbom-overlay", "Organization: cross-device-manager"]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-overlay-sdbus-cpp",
+      "name": "sdbus-c++",
+      "versionInfo": "2.3.1",
+      "supplier": "Organization: Kistler-Group",
+      "downloadLocation": "git+https://github.com/Kistler-Group/sdbus-cpp@v2.3.1",
+      "homepage": "https://github.com/Kistler-Group/sdbus-cpp",
+      "licenseConcluded": "LGPL-2.1-or-later",
+      "licenseDeclared": "LGPL-2.1-or-later",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "comment": "Statically linked into devmgrd and devmgr (CLI). Built from source in Dockerfile / Dockerfile.fedora with BUILD_SHARED_LIBS=OFF, pinned to tag v2.3.1. LGPL-2.1 static-link obligation is met by publishing the full MIT source and the pinned build recipe, which lets a recipient relink — see docs/DEPENDENCY-AUDIT.md."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-overlay-ftxui",
+      "name": "ftxui",
+      "versionInfo": "6.1.9",
+      "supplier": "Person: Arthur Sonzogni",
+      "downloadLocation": "git+https://github.com/ArthurSonzogni/FTXUI",
+      "homepage": "https://github.com/ArthurSonzogni/FTXUI",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "comment": "Statically linked into devmgr-tui. Resolved by vcpkg (vcpkg.json); version tracks vcpkg_installed/x64-linux/share/ftxui/vcpkg.spdx.json."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-overlay-spdlog",
+      "name": "spdlog",
+      "versionInfo": "1.17.0",
+      "supplier": "Person: Gabi Melman",
+      "downloadLocation": "git+https://github.com/gabime/spdlog",
+      "homepage": "https://github.com/gabime/spdlog",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "comment": "Statically linked into devmgrd (logging). Resolved by vcpkg."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-overlay-fmt",
+      "name": "fmt",
+      "versionInfo": "12.1.0",
+      "supplier": "Person: Victor Zverovich",
+      "downloadLocation": "git+https://github.com/fmtlib/fmt",
+      "homepage": "https://github.com/fmtlib/fmt",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "comment": "Transitive dependency of spdlog, statically linked into devmgrd. Resolved by vcpkg."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-overlay-nlohmann-json",
+      "name": "nlohmann-json",
+      "versionInfo": "3.12.0",
+      "supplier": "Person: Niels Lohmann",
+      "downloadLocation": "git+https://github.com/nlohmann/json",
+      "homepage": "https://github.com/nlohmann/json",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "comment": "Header-only, compiled into devmgrd and devmgr (snapshot/state JSON). Resolved by vcpkg (3.12.0#2)."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-overlay-tl-expected",
+      "name": "tl-expected",
+      "versionInfo": "1.3.1",
+      "supplier": "Person: Sy Brand",
+      "downloadLocation": "git+https://github.com/TartanLlama/expected",
+      "homepage": "https://github.com/TartanLlama/expected",
+      "licenseConcluded": "CC0-1.0",
+      "licenseDeclared": "CC0-1.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "comment": "Header-only, compiled into the core error type used by every shipped binary. Resolved by vcpkg."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-overlay-devmgr-sha256",
+      "name": "devmgr-sha256",
+      "versionInfo": "in-tree",
+      "supplier": "Organization: cross-device-manager",
+      "downloadLocation": "NOASSERTION",
+      "homepage": "https://github.com/cristianfritis/cross-device-manager",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "2583c30a33ddb1d8285a6973a1337f99f2bf7904411b25193e55278141b42cda"
+        }
+      ],
+      "comment": "In-tree FIPS 180-4 SHA-256 (core/src/sha256.cpp + core/include/devmgr/core/sha256.hpp), used for snapshot content ids. Zero-dependency implementation under the project's own MIT license. The checksum above is of core/src/sha256.cpp; header sha256 is 1999616fa1b0c274fb15a7a2c913625a7e9dfceea925524a52da61a9fe21a424. Update both here and in docs/DEPENDENCY-AUDIT.md if the implementation changes."
+    }
+  ]
+}
