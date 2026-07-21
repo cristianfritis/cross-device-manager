@@ -4,7 +4,7 @@
 
 - [x] 1.1 EventBus unsubscribe barrier: generation-counted in-flight tracking, condition_variable drain in `unsubscribe()`, thread-id re-entrancy detection with deferred removal; unit tests including re-entrant unsubscribe-from-callback and cross-thread teardown race
 - [x] 1.2 Central IPC validation layer at RequestProcessor entry (string length caps, JSON size caps, id hex charset, label rules — consolidate Phase 7 checks); InvalidArgs on violation, no state change; tests with oversized/malformed/hostile inputs on every verb
-- [ ] 1.3 Privilege audit doc (reads/writes/executes enumeration) + hardened `devmgrd.service` per design decision 5 with per-directive justification comments; verify manually in the VM that privileged flows still work
+- [x] 1.3 Privilege audit doc (reads/writes/executes enumeration) + hardened `devmgrd.service` per design decision 5 with per-directive justification comments; verify manually in the VM that privileged flows still work
 
 ## 2. IPC v4 — diff verb & history core
 
@@ -36,8 +36,8 @@
 ## 6. Acceptance suite & exit gate
 
 - [x] 6.1 VM acceptance script against installed artifacts: enumeration both UIs, hotplug, disable+restore, blacklist round-trip, firmware check, CLI recovery, journal sandbox-denial scan; ends `ACCEPTANCE OK`; rig wiring beside existing smokes
-- [ ] 6.2 Upgrade matrix scripts: 0.5→0.6 upgrade preserving config+snapshots (`--previous <path>` pinned artifact, loud failure if absent), downgrade outcome, interrupted install recovery, tarball→package replacement, purge residue — DEB path and RPM path
-- [ ] 6.3 Version bump to 0.6.0 + full standard gates (build/ctest both configs, format, gated tidy, purity greps) + acceptance suite green
+- [x] 6.2 Upgrade matrix scripts: 0.5→0.6 upgrade preserving config+snapshots (`--previous <path>` pinned artifact, loud failure if absent), downgrade outcome, interrupted install recovery, tarball→package replacement, purge residue — DEB path and RPM path
+- [x] 6.3 Version bump to 0.6.0 + full standard gates (build/ctest both configs, format, gated tidy, purity greps) + acceptance suite green
 - [ ] 6.4 Tag `v0.6.0-beta.1` through the extended pipeline — **owner action**; draft release verified (full asset set incl. signatures + SBOM, attestation verify passes), owner publishes
 
 ## 7. Stretch (optional — droppable by pre-agreement)

@@ -1,6 +1,6 @@
 # devmgr beta testing guide
 
-Thanks for testing the v0.5.0 beta. This guide walks a loop of scenarios that
+Thanks for testing the v0.6.0 beta. This guide walks a loop of scenarios that
 exercises the whole stack — device control, modules, firmware visibility, and
 the snapshot/rollback safety net — and tells you what "working" looks like at
 each step, plus how to report anything that doesn't match.

@@ -341,6 +341,22 @@ sudo ./test/vm/acceptance.sh ./devmgr_*_amd64.deb /sys/bus/usb/devices/3-1
 It joins `test/vm/install-smoke.sh` (packaging lifecycle) and
 `test/vm/deb-upgrade-smoke.sh` (upgrade behavior) as the installed-artifact gates.
 
+**Upgrade matrix (both formats).** `test/vm/upgrade-matrix.sh` runs the full
+package lifecycle for one format against a *pinned* previous release — upgrade
+preserving config + snapshots, downgrade (forward-compatible state still lists),
+interrupted-install recovery (deb; N/A for rpm's atomic transactions),
+tarball → package replacement, and purge/erase residue — ending `UPGRADE MATRIX
+OK`. The previous artifact is passed explicitly and a missing one fails loudly:
+
+```sh
+# deb path (in an Ubuntu VM):
+sudo ./test/vm/upgrade-matrix.sh --previous ./devmgr_0.5.0-beta.1_amd64.deb \
+    --candidate ./devmgr_0.6.0-beta.1_amd64.deb --previous-tarball ./devmgr-0.5.0-beta.1-Linux.tar.gz
+# rpm path (in a Fedora VM):
+sudo ./test/vm/upgrade-matrix.sh --previous ./devmgr-0.5.0.x86_64.rpm \
+    --candidate ./devmgr-0.6.0.x86_64.rpm
+```
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The `.deb` installs it as

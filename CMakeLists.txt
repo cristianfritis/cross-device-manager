@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 # Single-source version (release-versioning spec): this project() call is the
 # only place the semver lives; everything else reads the generated version.hpp.
-project(devmgr VERSION 0.5.0 LANGUAGES CXX)
+project(devmgr VERSION 0.6.0 LANGUAGES CXX)
 
 # Prerelease suffix appended to the semver ("" for a final release).
 set(DEVMGR_PRERELEASE "beta.1" CACHE STRING "Prerelease suffix (e.g. beta.1); empty for a final release")
