@@ -14,6 +14,7 @@
 #include <QListView>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTextEdit>
 #include <QToolBar>
 #include <QTreeWidget>
 
@@ -123,8 +124,9 @@ struct Fixture {
     std::vector<std::string> unbindDriverCalls;
     bool confirmAnswer = true;
     bool confirmQuitAnswer = true;
-    QString textAnswer;       // returned by the injected textInput seam
-    QString lastTextPrefill;  // captured prefill the dialog would have shown
+    QString textAnswer;         // returned by the injected textInput seam
+    QString lastTextPrefill;    // captured prefill the dialog would have shown
+    QString lastConfirmPrompt;  // captured prompt — the restore preview body
 
     gui::MainWindow makeWindow() {
         gui::MainWindow::Actions actions;
@@ -142,8 +144,9 @@ struct Fixture {
         actions.onUnbindDriver = [this](const core::DeviceId& id) {
             unbindDriverCalls.push_back(id.value);
         };
-        actions.confirm = [this](const QString&) {
+        actions.confirm = [this](const QString& prompt) {
             ++confirmCalls;
+            lastConfirmPrompt = prompt;
             return confirmAnswer;
         };
         actions.textInput = [this](const QString&, const QString& prefill) {
@@ -197,6 +200,19 @@ struct Fixture {
     // TaskCompletedEvent fires, so the channel's snapshotCalls write
     // happens-before the assertion reads it (the mutation records into the
     // channel before publishing completion — no data race).
+    // The restore preview and the diff pane both wait on an async
+    // SnapshotDiffRefreshedEvent that arrives via the dispatcher, so tests pump
+    // the Qt loop until the VM reports the fetch finished. Bounded so a genuine
+    // failure fails the test instead of hanging it.
+    void pumpUntilDiffLanded() {
+        for (int i = 0; i < 1000 && channel.snapshotCalls.empty(); ++i)
+            QCoreApplication::processEvents();
+        for (int i = 0; i < 1000; ++i) QCoreApplication::processEvents();
+    }
+    // Same pump, named for the restore path: it ends with the confirm seam
+    // having been called (or not, if the diff never landed).
+    void pumpUntilPreviewDialog() { pumpUntilDiffLanded(); }
+
     void triggerAndAwaitMutation(QAction* action) {
         std::atomic<bool> done{false};
         auto sub = bus.subscribe<core::TaskCompletedEvent>(
@@ -739,10 +755,12 @@ TEST(MainWindowTest, SnapshotsTabAddedAndVerbsGatedToTab) {
     ASSERT_EQ(window.tabs()->count(), 4);
     EXPECT_EQ(window.tabs()->tabText(3), QStringLiteral("Snapshots"));
 
-    // Off the Snapshots tab (Devices): all three verbs disabled.
+    // Off the Snapshots tab (Devices): every verb disabled.
     EXPECT_FALSE(window.createSnapshotAction()->isEnabled());
     EXPECT_FALSE(window.restoreSnapshotAction()->isEnabled());
     EXPECT_FALSE(window.deleteSnapshotAction()->isEnabled());
+    EXPECT_FALSE(window.diffSnapshotAction()->isEnabled());
+    EXPECT_FALSE(window.historySnapshotAction()->isEnabled());
 
     window.tabs()->setCurrentIndex(3);
     // On the tab, the verbs are live; the per-selection refusal is enforced on
@@ -750,6 +768,8 @@ TEST(MainWindowTest, SnapshotsTabAddedAndVerbsGatedToTab) {
     EXPECT_TRUE(window.createSnapshotAction()->isEnabled());
     EXPECT_TRUE(window.restoreSnapshotAction()->isEnabled());
     EXPECT_TRUE(window.deleteSnapshotAction()->isEnabled());
+    EXPECT_TRUE(window.diffSnapshotAction()->isEnabled());
+    EXPECT_TRUE(window.historySnapshotAction()->isEnabled());
 }
 
 TEST(MainWindowTest, SnapshotsTabEntrySetsBannerAndRows) {
@@ -800,10 +820,13 @@ TEST(MainWindowTest, RestoreConfirmedInvokesFacadeWithSelectedId) {
     window.tabs()->setCurrentIndex(3);
     window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
 
+    // Restore now goes through the preview: trigger fetches the diff, and the
+    // confirmation dialog opens only once it has landed (beta-06 task 3.3).
     f.triggerAndAwaitMutation(window.restoreSnapshotAction());
     EXPECT_EQ(f.confirmCalls, 1);
-    ASSERT_EQ(f.channel.snapshotCalls.size(), 1u);
-    EXPECT_EQ(f.channel.snapshotCalls[0], "restore:" + std::string(64, 'a'));
+    ASSERT_EQ(f.channel.snapshotCalls.size(), 2u);
+    EXPECT_EQ(f.channel.snapshotCalls[0], "diff:" + std::string(64, 'a') + ":live");
+    EXPECT_EQ(f.channel.snapshotCalls[1], "restore:" + std::string(64, 'a'));
 }
 
 TEST(MainWindowTest, DeclinedRestoreSendsNothing) {
@@ -815,9 +838,135 @@ TEST(MainWindowTest, DeclinedRestoreSendsNothing) {
 
     f.confirmAnswer = false;
     window.restoreSnapshotAction()->trigger();
-    QCoreApplication::processEvents();
+    f.pumpUntilPreviewDialog();
     EXPECT_EQ(f.confirmCalls, 1);
-    EXPECT_TRUE(f.channel.snapshotCalls.empty());
+    // The diff read happened; the restore did not.
+    EXPECT_EQ(f.channel.snapshotCalls.size(), 1u);
+    EXPECT_EQ(f.channel.snapshotCalls[0], "diff:" + std::string(64, 'a') + ":live");
+}
+
+// The preview carries what the spec requires before a restore can be confirmed:
+// the pending change, which snapshot is selected/HEAD/last-good, and the
+// partial-convergence note — all of it the VM's wording, rendered verbatim.
+TEST(MainWindowTest, RestorePreviewDialogShowsDiffMarkersAndConvergenceNote) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    core::SnapshotDiff diff;
+    diff.baseId = std::string(64, 'a');
+    diff.entries.push_back({.kind = core::kDiffKindDevice,
+                            .key = "usb 1d6b:0002 @2-1",
+                            .before = "disabled (authorized)",
+                            .after = core::kDiffStateAbsent});
+    f.channel.nextDiff = diff;
+
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+    f.confirmAnswer = false;
+    window.restoreSnapshotAction()->trigger();
+    f.pumpUntilPreviewDialog();
+
+    ASSERT_EQ(f.confirmCalls, 1);
+    const QString prompt = f.lastConfirmPrompt;
+    EXPECT_TRUE(prompt.contains(QStringLiteral("Restore snapshot aaaaaaaaaaaa?")));
+    EXPECT_TRUE(prompt.contains(QStringLiteral("Current HEAD:")));
+    EXPECT_TRUE(prompt.contains(QStringLiteral("Last good:")));
+    EXPECT_TRUE(prompt.contains(QStringLiteral("usb 1d6b:0002 @2-1")));
+    EXPECT_TRUE(prompt.contains(QStringLiteral("Convergence may be partial")));
+}
+
+// Parity with the TUI 'd' key: the diff pane names the snapshot it describes
+// and renders the VM's lines verbatim.
+TEST(MainWindowTest, DiffActionShowsDiffPaneForSelectedSnapshot) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    core::SnapshotDiff diff;
+    diff.baseId = std::string(64, 'a');
+    diff.entries.push_back({.kind = core::kDiffKindModule,
+                            .key = "nouveau",
+                            .before = core::kDiffStateBlacklisted,
+                            .after = core::kDiffStateAbsent});
+    f.channel.nextDiff = diff;
+
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+    window.diffSnapshotAction()->trigger();
+    f.pumpUntilDiffLanded();
+
+    const QString shown = window.snapshotDiffView()->toPlainText();
+    EXPECT_TRUE(shown.contains(QStringLiteral("Differences: aaaaaaaaaaaa -> current state")));
+    EXPECT_TRUE(shown.contains(QStringLiteral("nouveau")));
+    // Toggling off returns to the detail pane.
+    window.diffSnapshotAction()->trigger();
+    EXPECT_GE(window.snapshotsDetailTree()->topLevelItemCount(), 1);
+}
+
+// Parity with the TUI 'h' key: history markers reach the Qt model verbatim.
+TEST(MainWindowTest, HistoryActionTogglesChainMarkersInTheRows) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+
+    // trigger() toggles a checkable action and delivers the new state, so the
+    // single call is what turns history on.
+    window.historySnapshotAction()->trigger();
+    ASSERT_TRUE(window.historySnapshotAction()->isChecked());
+    QCoreApplication::processEvents();
+    auto* model = window.snapshotsView()->model();
+    ASSERT_GE(model->rowCount(), 1);
+    EXPECT_TRUE(model->data(model->index(0, 0), Qt::DisplayRole)
+                    .toString()
+                    .contains(QStringLiteral("[chain start, HEAD, last good]")));
+}
+
+// The filter field is the Devices/Modules interaction, applied to Snapshots.
+TEST(MainWindowTest, SnapshotFilterNarrowsRowsAndNamesAnEmptyResult) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+
+    window.snapshotFilterEdit()->setText(QStringLiteral("zzz"));
+    QCoreApplication::processEvents();
+    auto* model = window.snapshotsView()->model();
+    ASSERT_EQ(model->rowCount(), 1);
+    EXPECT_EQ(model->data(model->index(0, 0), Qt::DisplayRole).toString(),
+              QStringLiteral("No snapshots match \"zzz\""));
+}
+
+// A restore that leaves items unconverged must surface the way back — failed
+// item, safety id and the exact CLI command — not a bare error.
+TEST(MainWindowTest, UnconvergedRestoreShowsRecoveryGuidance) {
+    Fixture f;
+    f.seedSnapshotsAndRefresh({snapMeta('a')});
+    core::RestoreOutcome outcome;
+    outcome.snapshotId = std::string(64, 'a');
+    outcome.safetySnapshotId = std::string(64, 'e');
+    outcome.items.push_back({.subject = "/sys/devices/usb1/1-2",
+                             .action = "re-apply-disable",
+                             .status = "guard-refused",
+                             .detail = "only remaining keyboard"});
+    f.channel.nextRestore = outcome;
+
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(3);
+    window.snapshotsView()->setCurrentIndex(window.snapshotsView()->model()->index(0, 0));
+    EXPECT_FALSE(window.snapshotGuidanceLabel()->isVisible());
+
+    f.triggerAndAwaitMutation(window.restoreSnapshotAction());
+    // The guidance surfaces on the post-restore rebuild
+    // (SnapshotsChangedEvent → refresh → refreshed → modelReset), several
+    // dispatcher hops after the mutation's completion event.
+    for (int i = 0; i < 1000 && !window.snapshotGuidanceLabel()->isVisible(); ++i)
+        QCoreApplication::processEvents();
+
+    const QString guidance = window.snapshotGuidanceLabel()->text();
+    EXPECT_TRUE(guidance.contains(QStringLiteral("guard-refused")));
+    EXPECT_TRUE(guidance.contains(QStringLiteral("only remaining keyboard")));
+    EXPECT_TRUE(guidance.contains(QStringLiteral("eeeeeeeeeeee")));
+    EXPECT_TRUE(guidance.contains(QStringLiteral("devmgr snapshot restore eeeeeeeeeeee")));
 }
 
 TEST(MainWindowTest, DeleteConfirmedInvokesFacadeWithSelectedId) {

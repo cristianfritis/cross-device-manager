@@ -20,8 +20,10 @@
 #include <QPalette>
 #include <QRegularExpression>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTextEdit>
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -210,7 +212,9 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (ok) pruneAndPushPending(facade_.createSnapshot(label.toStdString()));
     });
 
-    restoreSnapshotAction_ = toolbar->addAction(QStringLiteral("Restore Snapshot"));
+    // The ellipsis marks the preview step (DESIGN.md §5.3): restore now opens a
+    // preview and only runs on explicit confirmation from it.
+    restoreSnapshotAction_ = toolbar->addAction(QStringLiteral("Restore Snapshot…"));
     connect(restoreSnapshotAction_, &QAction::triggered, this, [this] {
         const auto args = snapshotsVm_.selectedRestore();
         if (!args) {
@@ -225,9 +229,44 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
                 .message = "cannot restore: no healthy snapshot selected"});
             return;
         }
-        if (askConfirm(QString::fromStdString(args->confirmText)))
-            pruneAndPushPending(facade_.restoreSnapshot(args->id));
+        // Async by construction: the preview's diff is an IPC round trip, so
+        // the dialog is opened by the diff-ready hook rather than here. Opening
+        // it now would either block the GUI thread or show a modal whose
+        // content rewrites itself under the user.
+        pendingPreviewRestoreId_ = args->id;
+        snapshotsVm_.requestPreview(args->id);
+        // In-progress affordance (DESIGN.md §6): block a duplicate submission
+        // while the diff is in flight. Deliberately NOT a TaskCompletedEvent —
+        // nothing has completed, and StatusLineVM's completion path is not a
+        // progress channel.
+        restoreSnapshotAction_->setEnabled(false);
     });
+
+    diffSnapshotAction_ = toolbar->addAction(QStringLiteral("Diff Snapshot"));
+    connect(diffSnapshotAction_, &QAction::triggered, this, [this] {
+        if (snapshotDiffPaneRequested_) {  // toggle back to the detail pane
+            snapshotDiffPaneRequested_ = false;
+            updateSnapshotsDetailPane();
+            return;
+        }
+        const auto id = snapshotsVm_.selectedSnapshotId();
+        if (!id) {
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard", .ok = false, .message = "cannot diff: no snapshot selected"});
+            return;
+        }
+        // Remember which snapshot the pane describes: the selection can move
+        // while it is open, and a silently re-labelled diff would be a lie.
+        snapshotDiffForId_ = *id;
+        snapshotDiffPaneRequested_ = true;
+        snapshotsVm_.requestPreview(*id);
+        updateSnapshotsDetailPane();
+    });
+
+    historySnapshotAction_ = toolbar->addAction(QStringLiteral("History"));
+    historySnapshotAction_->setCheckable(true);
+    connect(historySnapshotAction_, &QAction::triggered, this,
+            [this](bool on) { snapshotsVm_.setHistoryView(on); });
 
     deleteSnapshotAction_ = toolbar->addAction(QStringLiteral("Delete Snapshot"));
     connect(deleteSnapshotAction_, &QAction::triggered, this, [this] {
@@ -339,9 +378,9 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     updatesSplitter->setStretchFactor(1, 1);
 
     // Snapshots page: counts banner + fixed-column snapshot list left, snapshot
-    // detail pane right — the Phase 7 TUI Snapshots screen, in widgets. No
-    // filter input and no request banner: SnapshotsVM exposes neither (mirrors
-    // the TUI shape).
+    // detail pane right — the Phase 7 TUI Snapshots screen, in widgets. beta-06
+    // task 3.3 adds the filter field, the Diff/History views and the durable
+    // recovery-guidance surface, keeping parity with the TUI tab.
     snapshotsBannerLabel_ = new QLabel;
     snapshotModel_ = new SnapshotListModel(snapshotsVm_, this);
     snapshotsView_ = new QListView;
@@ -349,9 +388,16 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     snapshotsView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     snapshotsView_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
 
-    // Restore/Delete double as the list's context menu (the Updates page idiom).
+    snapshotFilterEdit_ = new QLineEdit;
+    snapshotFilterEdit_->setPlaceholderText(QStringLiteral("filter snapshots…"));
+    snapshotFilterEdit_->setAccessibleName(QStringLiteral("Filter snapshots"));
+    connect(snapshotFilterEdit_, &QLineEdit::textChanged, this,
+            [this](const QString& text) { snapshotsVm_.setFilter(text.toStdString()); });
+
+    // Restore/Delete/Diff double as the list's context menu (the Updates page idiom).
     snapshotsView_->addAction(restoreSnapshotAction_);
     snapshotsView_->addAction(deleteSnapshotAction_);
+    snapshotsView_->addAction(diffSnapshotAction_);
     snapshotsView_->setContextMenuPolicy(Qt::ActionsContextMenu);
 
     snapshotsDetailTree_ = new QTreeWidget;
@@ -360,21 +406,48 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     snapshotsDetailTree_->setRootIsDecorated(false);
     snapshotsDetailTree_->setSelectionMode(QAbstractItemView::NoSelection);
 
+    // Read-only diff view, fixed font so the shared fixed-column diff rows line
+    // up exactly as they do in the terminal.
+    snapshotDiffView_ = new QTextEdit;
+    snapshotDiffView_->setReadOnly(true);
+    snapshotDiffView_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    snapshotDiffView_->setAccessibleName(QStringLiteral("Snapshot differences"));
+
+    snapshotsDetailStack_ = new QStackedWidget;
+    snapshotsDetailStack_->addWidget(snapshotsDetailTree_);
+    snapshotsDetailStack_->addWidget(snapshotDiffView_);
+
     auto* snapshotsLeft = new QWidget;
     auto* snapshotsLeftLayout = new QVBoxLayout(snapshotsLeft);
     snapshotsLeftLayout->setContentsMargins(0, 0, 0, 0);
     snapshotsLeftLayout->addWidget(snapshotsBannerLabel_);
+    snapshotsLeftLayout->addWidget(snapshotFilterEdit_);
     snapshotsLeftLayout->addWidget(snapshotsView_);
+
+    // Guidance sits under both panes: it belongs to the last restore, not to
+    // the current selection. Hidden until there is something to recover from.
+    snapshotGuidanceLabel_ = new QLabel;
+    snapshotGuidanceLabel_->setWordWrap(true);
+    snapshotGuidanceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    snapshotGuidanceLabel_->setAccessibleName(QStringLiteral("Restore recovery guidance"));
+    snapshotGuidanceLabel_->hide();
+
     auto* snapshotsSplitter = new QSplitter;
     snapshotsSplitter->addWidget(snapshotsLeft);
-    snapshotsSplitter->addWidget(snapshotsDetailTree_);
+    snapshotsSplitter->addWidget(snapshotsDetailStack_);
     snapshotsSplitter->setStretchFactor(1, 1);
+
+    auto* snapshotsPage = new QWidget;
+    auto* snapshotsPageLayout = new QVBoxLayout(snapshotsPage);
+    snapshotsPageLayout->setContentsMargins(0, 0, 0, 0);
+    snapshotsPageLayout->addWidget(snapshotsSplitter);
+    snapshotsPageLayout->addWidget(snapshotGuidanceLabel_);
 
     tabs_ = new QTabWidget;
     tabs_->addTab(splitter, QStringLiteral("Devices"));
     tabs_->addTab(modulesSplitter, QStringLiteral("Modules"));
     tabs_->addTab(updatesSplitter, tr("Updates"));
-    tabs_->addTab(snapshotsSplitter, tr("Snapshots"));
+    tabs_->addTab(snapshotsPage, tr("Snapshots"));
     setCentralWidget(tabs_);
 
     // Tab entry mirrors the TUI's 'm'/'u' cycle: banner(s) recomputed (they
@@ -451,6 +524,22 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
                 updateSnapshotsDetailPane();
                 updateActionEnablement();
             });
+    // A requested diff landed. Two consumers: the diff pane repaints, and a
+    // pending restore preview finally has content to show — which is when its
+    // dialog opens, never before (a modal whose text rewrites itself under the
+    // user is worse than a brief wait).
+    snapshotsVm_.setDiffReadyHook([this] {
+        updateSnapshotsDetailPane();
+        if (!pendingPreviewRestoreId_) return;
+        const std::string id = *pendingPreviewRestoreId_;
+        pendingPreviewRestoreId_.reset();
+        updateActionEnablement();  // release the duplicate-submission block
+        QString prompt;
+        for (const std::string& line : snapshotsVm_.previewLines())
+            prompt += QString::fromStdString(line) + QLatin1Char('\n');
+        if (askConfirm(prompt.trimmed())) pruneAndPushPending(facade_.restoreSnapshot(id));
+    });
+
     connect(snapshotModel_, &QAbstractItemModel::modelReset, this, [this] {
         updateSnapshotsDetailPane();
         // A snapshot-side reset also lands on the cross-frontend refresh path
@@ -570,6 +659,28 @@ void MainWindow::updateUpdatesDetailPane() {
 }
 
 void MainWindow::updateSnapshotsDetailPane() {
+    // Diff pane wins while it is open; it names the snapshot it belongs to so
+    // moving the selection cannot silently re-label it.
+    snapshotsDetailStack_->setCurrentWidget(snapshotDiffPaneRequested_
+                                                ? static_cast<QWidget*>(snapshotDiffView_)
+                                                : static_cast<QWidget*>(snapshotsDetailTree_));
+    if (snapshotDiffPaneRequested_) {
+        QString text = QStringLiteral("Differences: %1 -> current state\n\n")
+                           .arg(QString::fromStdString(core::snapshotShortId(snapshotDiffForId_)));
+        for (const std::string& line : snapshotsVm_.diffLines())
+            text += QString::fromStdString(line) + QLatin1Char('\n');
+        snapshotDiffView_->setPlainText(text);
+    }
+
+    // Durable recovery guidance for the last unconverged restore (snapshot-ui
+    // spec). Empty ⇒ hidden, so a converged restore leaves no empty box.
+    const auto guidance = snapshotsVm_.restoreGuidanceLines();
+    QString guidanceText;
+    for (const std::string& line : guidance)
+        guidanceText += QString::fromStdString(line) + QLatin1Char('\n');
+    snapshotGuidanceLabel_->setText(guidanceText.trimmed());
+    snapshotGuidanceLabel_->setVisible(!guidance.empty());
+
     snapshotsDetailTree_->clear();
     for (const std::string& line : snapshotsVm_.detailLines()) {
         // Parented to snapshotsDetailTree_ — the tree deletes its items.
@@ -638,6 +749,8 @@ void MainWindow::updateActionEnablement() {
     createSnapshotAction_->setEnabled(onSnapshots);
     restoreSnapshotAction_->setEnabled(onSnapshots);
     deleteSnapshotAction_->setEnabled(onSnapshots);
+    diffSnapshotAction_->setEnabled(onSnapshots);
+    historySnapshotAction_->setEnabled(onSnapshots);
 
     // Devices probe only when tab == 0 (T1 F-1 gating, extended to the
     // Updates tab): findById()/canDisable() below are Devices-tab-only work.

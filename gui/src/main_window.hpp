@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <future>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -25,7 +26,9 @@ class QCloseEvent;
 class QLabel;
 class QLineEdit;
 class QListView;
+class QStackedWidget;
 class QTabWidget;
+class QTextEdit;
 class QTreeWidget;
 
 namespace devmgr::gui {
@@ -97,6 +100,11 @@ class MainWindow final : public QMainWindow {
     QAction* createSnapshotAction() const { return createSnapshotAction_; }
     QAction* restoreSnapshotAction() const { return restoreSnapshotAction_; }
     QAction* deleteSnapshotAction() const { return deleteSnapshotAction_; }
+    QAction* diffSnapshotAction() const { return diffSnapshotAction_; }
+    QAction* historySnapshotAction() const { return historySnapshotAction_; }
+    QLineEdit* snapshotFilterEdit() const { return snapshotFilterEdit_; }
+    QTextEdit* snapshotDiffView() const { return snapshotDiffView_; }
+    QLabel* snapshotGuidanceLabel() const { return snapshotGuidanceLabel_; }
 
    protected:
     void closeEvent(QCloseEvent* event) override;  // spec §5.5 quit guard: installActive()
@@ -152,6 +160,22 @@ class MainWindow final : public QMainWindow {
     QAction* createSnapshotAction_ = nullptr;
     QAction* restoreSnapshotAction_ = nullptr;
     QAction* deleteSnapshotAction_ = nullptr;
+    QAction* diffSnapshotAction_ = nullptr;
+    QAction* historySnapshotAction_ = nullptr;
+    QLineEdit* snapshotFilterEdit_ = nullptr;
+    // Diff pane, stacked with the detail tree: one is visible at a time, the
+    // TUI's 'd' toggle in widget form.
+    QTextEdit* snapshotDiffView_ = nullptr;
+    QStackedWidget* snapshotsDetailStack_ = nullptr;
+    // Durable recovery guidance for the last unconverged restore. Hidden when
+    // there is nothing to recover from, so no empty box is left behind.
+    QLabel* snapshotGuidanceLabel_ = nullptr;
+    // Set while a restore preview is being fetched; the dialog opens only once
+    // the diff lands, so the modal never changes content under the user.
+    std::optional<std::string> pendingPreviewRestoreId_;
+    // True while the diff pane (not a restore preview) is what was requested.
+    bool snapshotDiffPaneRequested_ = false;
+    std::string snapshotDiffForId_;
     // Future custody for Updates actions (refreshUpdates/installUpdate), called
     // directly on facade_ rather than through an injected Actions callback:
     // ApplicationFacade's documented lifetime contract requires every handle be
