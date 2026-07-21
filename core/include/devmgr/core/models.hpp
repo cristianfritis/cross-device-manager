@@ -23,6 +23,13 @@ const char* to_string(DeviceStatus status);
 const char* to_string(BusType bus);
 const char* to_string(DriverKind kind);
 
+// User-facing bus label: acronyms upper-cased (USB, PCI), proper nouns
+// title-cased (Platform, Virtio, Other). The single source of truth for how a
+// bus reads to a user, so lists, details, and status prose never disagree on
+// casing (DESIGN.md §10 "Consistent device presentation"). Distinct from
+// to_string(BusType), which is the enum-name form used for keys and haystacks.
+const char* displayBus(BusType bus);
+
 struct Device {
     DeviceId id;
     BusType bus = BusType::Other;

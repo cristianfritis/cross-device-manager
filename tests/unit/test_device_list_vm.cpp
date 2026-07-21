@@ -53,6 +53,27 @@ TEST(DeviceListVmTest, RowsGroupedByBusAfterRefresh) {
     EXPECT_LT(idxGpu, idxMouse);
 }
 
+// Bus group headers render through the shared core::displayBus() casing
+// (beta-06 task 3.6): acronyms upper-cased, proper nouns title-cased — not the
+// old blanket toUpper() that printed "── PLATFORM ──".
+TEST(DeviceListVmTest, BusHeadersUseSharedDisplayCasing) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    f.pal.seedDevice(dev("pl1", core::BusType::Platform, "Fan"));
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+
+    const auto& rows = vm.rowsRef();
+    bool usbHeader = false, platformHeader = false;
+    for (const auto& r : rows) {
+        if (r == "── USB ──") usbHeader = true;
+        if (r == "── Platform ──") platformHeader = true;
+        EXPECT_EQ(r.find("PLATFORM"), std::string::npos);  // never blanket upper-cased
+    }
+    EXPECT_TRUE(usbHeader);
+    EXPECT_TRUE(platformHeader);
+}
+
 TEST(DeviceListVmTest, FilterNarrowsCaseInsensitivelyAndClampsSelection) {
     Fixture f;
     f.pal.seedDevice(dev("u1", core::BusType::Usb, "Logitech Mouse"));

@@ -1,10 +1,24 @@
 #include "devmgr/app/device_detail_vm.hpp"
 
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace devmgr::app {
 namespace {
+
+// One "Label:   value" detail row. The label column is a fixed width so every
+// value starts in the same place and no value abuts its colon — the widest
+// label ("Modalias:") sets the width, which is what the pre-3.6 hand-padded
+// literals got wrong for that one row (DESIGN.md §10 consistent presentation).
+constexpr std::size_t kLabelWidth = 10;
+std::string kv(const char* label, std::string_view value) {
+    std::string row(label);
+    if (row.size() < kLabelWidth) row.resize(kLabelWidth, ' ');
+    row += value;
+    return row;
+}
 
 std::string joinDeps(const std::vector<std::string>& deps) {
     std::string joined;
@@ -48,17 +62,17 @@ std::vector<std::string> DeviceDetailVM::lines(const std::optional<core::DeviceI
 
     const core::Device& d = *dev;
     std::vector<std::string> out;
-    out.push_back(std::string("Name:    ") + d.name);
-    out.push_back(std::string("Id:      ") + d.id.value);
-    out.push_back(std::string("Bus:     ") + core::to_string(d.bus));
-    out.push_back(std::string("Status:  ") + core::to_string(d.status));
-    out.push_back(std::string("Sysfs:   ") + d.sysfsPath);
-    out.push_back(std::string("VID:PID: ") + d.vendorId + ":" + d.productId);
-    out.push_back(std::string("Serial:  ") + d.serial);
-    out.push_back(std::string("Driver:  ") + d.boundDriver.value_or("(none)"));
-    out.push_back(std::string("Modalias:") + d.modalias);
-    if (d.parent.has_value()) out.push_back(std::string("Parent:  ") + d.parent->value);
-    if (d.errorNote.has_value()) out.push_back(std::string("Error:   ") + *d.errorNote);
+    out.push_back(kv("Name:", d.name));
+    out.push_back(kv("Id:", d.id.value));
+    out.push_back(kv("Bus:", core::displayBus(d.bus)));
+    out.push_back(kv("Status:", core::to_string(d.status)));
+    out.push_back(kv("Sysfs:", d.sysfsPath));
+    out.push_back(kv("VID:PID:", d.vendorId + ":" + d.productId));
+    out.push_back(kv("Serial:", d.serial));
+    out.push_back(kv("Driver:", d.boundDriver.value_or("(none)")));
+    out.push_back(kv("Modalias:", d.modalias));
+    if (d.parent.has_value()) out.push_back(kv("Parent:", d.parent->value));
+    if (d.errorNote.has_value()) out.push_back(kv("Error:", *d.errorNote));
     appendDriverSection(out, d, facade_.driverInfo(d.id));
     return out;
 }

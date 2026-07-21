@@ -34,6 +34,22 @@ const char* to_string(BusType bus) {
     return "Other";
 }
 
+const char* displayBus(BusType bus) {
+    switch (bus) {
+        case BusType::Pci:
+            return "PCI";
+        case BusType::Usb:
+            return "USB";
+        case BusType::Platform:
+            return "Platform";
+        case BusType::Virtio:
+            return "Virtio";
+        case BusType::Other:
+            return "Other";
+    }
+    return "Other";
+}
+
 const char* to_string(DriverKind kind) {
     switch (kind) {
         case DriverKind::KernelModule:

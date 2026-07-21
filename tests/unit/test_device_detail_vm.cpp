@@ -87,3 +87,33 @@ TEST(DeviceDetailVmTest, DriverSectionListsBoundFirstWithSignature) {
     EXPECT_NE(all.find("— signed: Build key"), std::string::npos);
     EXPECT_NE(all.find("  dummy"), std::string::npos);  // candidate, unmarked
 }
+
+// Bus casing comes from the shared core::displayBus() ("USB", not "Usb"), and
+// the fixed-width label column gives every value a gap after its colon — the
+// modalias line in particular gains the separating space it used to lack
+// (beta-06 task 3.6 consistent presentation).
+TEST(DeviceDetailVmTest, BusCasingAndModaliasSpacingAreConsistent) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::Device d;
+    d.id = core::DeviceId{"u1"};
+    d.bus = core::BusType::Usb;
+    d.name = "Mouse";
+    d.status = core::DeviceStatus::Active;
+    d.modalias = "usb:v1D6Bp0002";
+    pal.seedDevice(d);
+    app::DeviceService svc(bus);
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refresh().wait();
+
+    app::DeviceDetailVM vm(facade);
+    const auto lines = vm.lines(core::DeviceId{"u1"});
+    bool busLine = false, modaliasLine = false;
+    for (const auto& l : lines) {
+        if (l == "Bus:      USB") busLine = true;                  // displayBus, not "Usb"
+        if (l == "Modalias: usb:v1D6Bp0002") modaliasLine = true;  // one space after the colon
+    }
+    EXPECT_TRUE(busLine);
+    EXPECT_TRUE(modaliasLine);
+}

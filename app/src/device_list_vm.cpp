@@ -17,11 +17,6 @@ std::string toLower(std::string s) {
     return s;
 }
 
-std::string toUpper(std::string s) {
-    for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s;
-}
-
 std::string haystackFor(const core::Device& d) {
     return toLower(d.name + " " + d.vendorId + ":" + d.productId + " " + core::to_string(d.bus));
 }
@@ -68,7 +63,7 @@ void DeviceListVM::appendRows(core::BusType bus, std::vector<const core::Device*
     if (group.empty()) return;
     std::ranges::sort(
         group, [](const core::Device* a, const core::Device* b) { return a->name < b->name; });
-    rows_.push_back(std::string("── ") + toUpper(core::to_string(bus)) + " ──");
+    rows_.push_back(std::string("── ") + core::displayBus(bus) + " ──");
     rowIds_.emplace_back(std::nullopt);  // header
     for (const core::Device* d : group) {
         rows_.push_back("  " + d->name + "  (" + d->vendorId + ":" + d->productId + ")");

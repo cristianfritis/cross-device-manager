@@ -13,8 +13,11 @@ std::string lower(std::string s) {
     return s;
 }
 
+// Sentence-case status prose (DESIGN.md §6) lowercases the shared displayBus()
+// token so the bus name flows mid-sentence ("usb device added: ...") while
+// still deriving from the one casing source, not a second ad-hoc conversion.
 std::string describe(const core::Device& d, const char* verb) {
-    return lower(core::to_string(d.bus)) + " device " + verb + ": " + d.name;
+    return lower(core::displayBus(d.bus)) + " device " + verb + ": " + d.name;
 }
 
 }  // namespace

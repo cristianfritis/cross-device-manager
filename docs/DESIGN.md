@@ -265,6 +265,15 @@ When nothing is selected, explain the next action in one sentence:
 `Select a device to inspect its properties.` or
 `Select a module to inspect its properties.`
 
+Device presentation cosmetics **must** stay consistent across every surface. Bus
+names render through one shared `core::displayBus()` helper — acronyms
+upper-cased (`USB`, `PCI`), proper nouns title-cased (`Platform`, `Virtio`,
+`Other`) — so a list header, a detail row, and status prose never disagree on
+casing. Status prose may lower-case that one token for sentence flow, but it
+derives from the same helper rather than a second ad-hoc conversion. Detail rows
+use a fixed-width label column so every value starts in the same place and no
+value abuts its colon.
+
 ### 5.3 Toolbar and commands
 
 Order commands by frequency and consequence:
@@ -314,6 +323,28 @@ Use explicit text, for example:
 
 Do not use a large red alert for steady-state security configuration.
 
+### 5.6 Destructive-restore preview
+
+Restoring a snapshot **must** open a preview before it runs, not a bare yes/no
+confirm. The preview names the snapshot and shows what a restore would change
+against the current live state, the selected/current/last-good markers, and a
+partial-convergence note when a restore cannot fully converge. The primary
+button repeats the verb (`Restore`); the safer cancel keeps initial focus.
+
+The preview's diff is an authoritative round trip, so it **must** be fetched
+asynchronously and shown only once it lands — the modal must never rewrite its
+own content under the user, and neither UI thread may block on the fetch. While
+the fetch is in flight, block a duplicate submission and show the shared loading
+text; a failed fetch shows the shared unavailable text rather than a stale diff.
+When a restore does not fully converge, durable recovery guidance (the failed
+items, the safety snapshot id, and the exact CLI recovery command) **must**
+remain visible after the transient status clears — it is not a status message.
+
+| Concept | Qt expression | FTXUI expression |
+| --- | --- | --- |
+| Restore preview | Modal dialog opened on diff-ready | Modal pane replacing the list |
+| Recovery guidance | Persistent label under the panes | Bordered block below the list |
+
 ## 6. State Model
 
 Every new workflow must deliberately handle the following states on both
@@ -347,6 +378,25 @@ Status messages use sentence case, a concrete subject, and no celebratory copy:
 Do not report raw exceptions, errno values, D-Bus names, or filesystem paths as
 the only explanation. Preserve diagnostic detail for logs and expose it in an
 expandable details region when useful.
+
+### 6.1 Shared state wording
+
+List and detail state text originates in the ViewModels so both surfaces render
+the same words; neither frontend invents its own. When any string changes,
+change it once in the VM. The current shared list strings:
+
+| View | Empty system result | No filter match |
+| --- | --- | --- |
+| Devices | `(no devices)` | `(no devices)` |
+| Modules | `(no modules)` | `(no matches)` |
+| Updates | `(no updates available)` | — (no filter) |
+| Snapshots | `(no snapshots)` | `No snapshots match "<filter>"` |
+
+Other shared state text: an unselected device detail reads `(no device
+selected)`; a snapshot whose payload cannot be diffed reports `Differences are
+unavailable for this snapshot.`; daemon-unavailable and guard refusals surface
+through the shared status line, never as a blank list. Loading is the initial
+synchronous populate, so the first frame is never empty.
 
 ## 7. GUI Rules: Qt 6 Widgets
 
@@ -433,6 +483,23 @@ The following are invariants:
   support permits, without repeatedly interrupting the user.
 - TUI commands use ordinary keys and always provide a discoverable way to quit,
   cancel, return, and clear a filter.
+
+### 10.1 Keyboard, shortcuts, and layout minimums
+
+- The GUI provides keyboard shortcuts for tab switching (`Ctrl+1`…`Ctrl+4`) and
+  the per-view primary verbs (`F5` refresh, `Ctrl+E` enable/disable, `Ctrl+L`
+  load module, `Ctrl+N` create snapshot). Verb shortcuts are gated to their tab,
+  so a shortcut fired off-tab is inert rather than acting on a hidden view.
+- Every focusable list, tree, and filter carries an accessible name; toolbar
+  actions carry their visible text as their name. Icon-only or ambiguous
+  controls are not permitted without an accessible name.
+- Tab order per page follows the visual reading order: filter, then list, then
+  detail.
+- The GUI enforces a minimum window size of `800x520` (§3.1) so primary controls
+  can never be squeezed off-screen. The TUI shows a concise minimum-size message
+  below `80x24` (§3.2), keeping quit and resize live.
+- List rows elide long values (`ElideRight`, no wrap); the full value is always
+  reachable in the detail pane, which renders the ViewModel's complete lines.
 
 ## 11. Anti-Patterns
 
