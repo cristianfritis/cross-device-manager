@@ -1,6 +1,12 @@
 #!/bin/sh
 # devmgr postinst (packaging-deb spec): refresh systemd + D-Bus so bus
 # activation works immediately — no reboot, no manual daemon start.
+#
+# Idempotent / interrupted-install recovery (packaging-deb upgrade spec): every
+# action here is safe to run twice, so a run killed mid-configure recovers by
+# re-running `apt install ./deb` (or `dpkg --configure -a`). Crucially this
+# script never STARTS devmgrd — the daemon is D-Bus activated on first call —
+# so an interrupted configure can never leave a half-configured daemon running.
 set -e
 
 case "$1" in

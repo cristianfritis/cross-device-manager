@@ -19,6 +19,20 @@ polkit-gated daemon (`devmgrd`), a Qt 6 GUI (`devmgr-gui`), a terminal UI
    launch `devmgr-gui` — or `devmgr-tui` in a terminal. No daemon setup:
    `devmgrd` starts on demand via D-Bus activation.
 
+### Fedora (.rpm)
+
+1. Download `devmgr-*.x86_64.rpm` and `SHA256SUMS` from the
+   [latest release](https://github.com/cristianfritis/cross-device-manager/releases).
+2. Verify the download, then install:
+   ```sh
+   sha256sum -c SHA256SUMS --ignore-missing
+   sudo dnf install ./devmgr-*.x86_64.rpm
+   ```
+   `dnf` resolves the Qt6/udev/kmod dependencies; there is no manual
+   `sdbus-c++` step (it is statically linked, same as the deb).
+3. Launch `devmgr-gui` from a graphical session, or `devmgr-tui` in a terminal.
+   `devmgrd` bus-activates on first use — no daemon setup.
+
 ### Other distros (tarball)
 
 Download `devmgr-*-linux-x86_64.tar.gz` plus `SHA256SUMS`, verify, and run the
@@ -35,9 +49,42 @@ Uninstall with `packaging/uninstall.sh`; add `--purge` to also delete the
 daemon state in `/var/lib/devmgrd`. (`apt remove` / plain uninstall preserve
 that state for reinstalls.)
 
-**Upgrading from a source install:** remove any manually copied policy files
-first, or at minimum re-install the polkit policy — the pre-Phase-7 file lacks
-the snapshot action and every mutating snapshot verb will be refused (see
+## Removing & upgrading
+
+**State is preserved by default.** `/var/lib/devmgrd` — every snapshot and all
+daemon state — survives removal and upgrades. Only an explicit purge deletes it:
+
+| Format  | Remove (keep state)     | Full cleanup (delete state)        |
+|---------|-------------------------|------------------------------------|
+| deb     | `sudo apt remove devmgr`| `sudo apt purge devmgr`            |
+| rpm     | `sudo dnf remove devmgr`| `sudo dnf remove devmgr` then `sudo rm -rf /var/lib/devmgrd` |
+| tarball | `sudo packaging/uninstall.sh` | `sudo packaging/uninstall.sh --purge` |
+
+rpm has no purge concept, so `dnf remove` / `rpm -e` always keep the state dir;
+remove it by hand for a full cleanup.
+
+**Upgrading a package install** (deb over deb, rpm over rpm) preserves state and
+all pre-upgrade snapshots and needs no manual migration — install the newer
+package the same way you installed the first; the daemon restarts on the new
+version and every prior snapshot still lists and restores. An install
+interrupted mid-transaction is recoverable by simply re-running it (the
+maintainer scripts are idempotent and never leave a half-configured daemon).
+
+**Switching from the tarball to a package:** the tarball and the packages share
+the systemd/D-Bus/polkit paths (only the binary dir differs — the tarball uses
+`/usr/local/bin`). **Uninstall the tarball first, then install the package:**
+
+```sh
+sudo packaging/uninstall.sh          # keeps /var/lib/devmgrd; snapshots survive
+sudo apt install ./devmgr_*_amd64.deb   # or: sudo dnf install ./devmgr-*.x86_64.rpm
+```
+
+Do not run the tarball uninstaller *after* installing the package — it would
+remove the now-package-owned unit and policy files.
+
+**Upgrading from an old source install:** remove any manually copied policy
+files first, or at minimum re-install the polkit policy — the pre-Phase-7 file
+lacks the snapshot action and every mutating snapshot verb will be refused (see
 [Authorization (snapshot verbs)](#authorization-snapshot-verbs)):
 
 ```sh

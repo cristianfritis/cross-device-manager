@@ -15,3 +15,11 @@ services:
       args:
         BASE: "ubuntu:22.04"
     command: ["bash"]
+  # Fedora packaging image (packaging-rpm spec): builds the full stack, cuts the
+  # rpm with `cpack -G RPM`, installs it with dnf, and `rpm -V`-verifies it — the
+  # container gate analogous to the deb's VM install-smoke. Runs test/container/
+  # rpm-verify.sh by default (Dockerfile.fedora CMD).
+  pkg-rpm:
+    build:
+      context: ..
+      dockerfile: Dockerfile.fedora

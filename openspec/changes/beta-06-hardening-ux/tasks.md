@@ -23,8 +23,8 @@
 
 ## 4. Packaging — RPM & deb upgrade behavior
 
-- [ ] 4.1 CPack RPM generator config (metadata, Fedora Requires, %post/%preun scriptlets, state-dir preserve on erase, LICENSE) + Fedora container job building and `rpm -V`-verifying the package; README install/cleanup docs
-- [ ] 4.2 deb upgrade behavior: idempotent maintainer scripts (interrupted-install recovery), upgrade-preserves-state verification, tarball→deb replacement path documented and checked
+- [x] 4.1 CPack RPM generator config (metadata, Fedora Requires, %post/%preun scriptlets, state-dir preserve on erase, LICENSE) + Fedora container job building and `rpm -V`-verifying the package; README install/cleanup docs
+- [x] 4.2 deb upgrade behavior: idempotent maintainer scripts (interrupted-install recovery), upgrade-preserves-state verification, tarball→deb replacement path documented and checked
 
 ## 5. Release supply chain
 

@@ -4,6 +4,11 @@
 if(CPACK_GENERATOR STREQUAL "DEB")
     set(CPACK_COMPONENTS_ALL "runtime;system")
     set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+elseif(CPACK_GENERATOR STREQUAL "RPM")
+    # Fedora parity with the deb: the same FHS-path components under /usr, never
+    # the tarball payload (packaging-rpm spec).
+    set(CPACK_COMPONENTS_ALL "runtime;system")
+    set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 elseif(CPACK_GENERATOR STREQUAL "TGZ")
     set(CPACK_COMPONENTS_ALL "runtime;tarball")
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")

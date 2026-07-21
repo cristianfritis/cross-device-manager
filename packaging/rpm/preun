@@ -1,0 +1,11 @@
+# devmgr RPM %preun (packaging-rpm spec): stop the daemon on erase, mirroring
+# the deb prerm. CPack injects this body after the `%preun` line.
+# $1 is the number of versions that REMAIN after this operation: 0 = final
+# erase (stop the daemon), 1 = upgrade (leave it; the new version's %post
+# reloads). rpm has no purge concept, so /var/lib/devmgrd — unowned, created by
+# the daemon at runtime — always survives; the README documents manual removal.
+if [ "$1" -eq 0 ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl stop devmgrd.service 2>/dev/null || true
+    fi
+fi

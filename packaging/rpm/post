@@ -1,0 +1,12 @@
+# devmgr RPM %post (packaging-rpm spec): refresh systemd + D-Bus so bus
+# activation works immediately — the deb postinst's twin. CPack injects this
+# body after the `%post` line, so no shebang and no `%post` header here.
+# $1 is the number of installed versions AFTER this transaction (1 = fresh
+# install, 2 = upgrade); the reload is idempotent and safe to run every time.
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+# Make the system bus rescan activation files and bus policy.
+dbus-send --system --type=method_call \
+    --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig \
+    2>/dev/null || true

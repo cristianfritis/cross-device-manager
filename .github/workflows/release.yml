@@ -11,6 +11,20 @@ permissions:
   contents: write
 
 jobs:
+  # RPM gate (packaging-rpm spec): build the full stack in a Fedora container,
+  # cut the rpm with `cpack -G RPM`, dnf-install it, and `rpm -V`-verify — the
+  # container analogue of the deb's VM install-smoke. Independent of the deb
+  # release job; the owner confirms both green before publishing the draft.
+  # Asset wiring into the release (rpm in SHA256SUMS + upload) lands with 5.4.
+  rpm-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Fedora packaging image
+        run: docker compose -f test/docker-compose.yml build pkg-rpm
+      - name: Build + install + rpm -V verify the RPM (Fedora container)
+        run: docker compose -f test/docker-compose.yml run --rm pkg-rpm
+
   release:
     runs-on: ubuntu-latest
     steps:

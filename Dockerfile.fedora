@@ -1,0 +1,47 @@
+# Fedora packaging image (packaging-rpm spec): build the full stack and cut the
+# rpm on the real target so the Requires list and %post/%preun scriptlets are
+# derived on Fedora, not guessed. Pinned to the latest stable Fedora at
+# implementation time; bump deliberately when validating a newer release
+# (design decision 9 / open question: Fedora target is owner-confirmed).
+FROM fedora:42
+
+# Toolchain + dev libs for the dynamic needs (Qt6 Widgets/Test, libudev +
+# libsystemd via systemd-devel, libkmod via kmod-devel), rpm-build for the
+# CPack RPM generator, rpm for `rpm -V`, and the bits vcpkg needs to build the
+# in-tree ports (gtest/spdlog/nlohmann-json/tl-expected/ftxui) from source.
+RUN dnf -y install \
+        gcc-c++ cmake ninja-build git make pkgconf-pkg-config perl \
+        qt6-qtbase-devel qt6-qtbase-gui \
+        systemd-devel kmod-devel kmod \
+        rpm-build rpm \
+        dbus-daemon \
+        mesa-libGL-devel \
+        zip unzip tar curl ca-certificates \
+    && dnf clean all
+
+ENV VCPKG_ROOT=/opt/vcpkg
+RUN git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
+    && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+# sdbus-c++ v2 static — same pin and rationale as the Ubuntu image: the rpm
+# must not depend on whatever sdbus-c++ Fedora ships, and static keeps binary
+# parity with the deb (packaging-rpm / Phase 4 specs).
+RUN git clone --depth 1 --branch v2.3.1 https://github.com/Kistler-Group/sdbus-cpp.git /tmp/sdbus-cpp \
+    && cmake -S /tmp/sdbus-cpp -B /tmp/sdbus-cpp/build \
+         -DCMAKE_BUILD_TYPE=Release -DSDBUSCPP_BUILD_CODEGEN=OFF \
+         -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && cmake --build /tmp/sdbus-cpp/build -j \
+    && cmake --install /tmp/sdbus-cpp/build \
+    && rm -rf /tmp/sdbus-cpp
+
+# Pre-warm the vcpkg binary cache with the project's ports (gtest/spdlog/
+# nlohmann-json/tl-expected/ftxui) BEFORE copying the source, so editing the
+# tree or the verify script never re-triggers the port compilation — the
+# per-run build reuses the cached binaries. Invalidated only when vcpkg.json
+# changes. Copies just the manifest so this layer is source-independent.
+COPY vcpkg.json /tmp/warm/vcpkg.json
+RUN cd /tmp/warm && "$VCPKG_ROOT/vcpkg" install --triplet x64-linux && rm -rf /tmp/warm
+
+WORKDIR /src
+COPY . .
+CMD ["bash", "test/container/rpm-verify.sh"]
