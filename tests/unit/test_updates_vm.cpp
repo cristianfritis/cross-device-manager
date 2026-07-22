@@ -286,6 +286,46 @@ TEST_F(UpdatesVmTest, PercentOnlyFrameRetainsLastNamedStage) {  // design "Risks
     EXPECT_NE(vm.installProgressText().find("unknown"), std::string::npos);
 }
 
+TEST_F(UpdatesVmTest, StateForRowAvailableUpToDateAndOutOfRange) {
+    fwupd_.enumerateResult_ = std::vector<core::UpdateCandidate>{webcam()};  // has candidateVersion
+    dkms_.enumerateResult_ = std::vector<core::UpdateCandidate>{dkmsRow()};  // no candidateVersion
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.rowsRef().size(), 2U);  // row 0 = fwupd Webcam, row 1 = dkms nvidia
+    EXPECT_EQ(vm.stateForRow(0), app::UpdateRowState::Available);
+    EXPECT_EQ(vm.stateForRow(1), app::UpdateRowState::UpToDate);
+    EXPECT_FALSE(vm.stateForRow(-1).has_value());
+    EXPECT_FALSE(vm.stateForRow(99).has_value());
+}
+
+TEST_F(UpdatesVmTest, StateForRowNulloptOnPlaceholder) {
+    refresh();  // both providers empty → single placeholder row
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_EQ(vm.rowsRef()[0], "(no updates available)");
+    EXPECT_FALSE(vm.stateForRow(0).has_value());
+}
+
+TEST_F(UpdatesVmTest, StateForRowErrorWhenProviderUnavailableWithRetainedRows) {
+    fwupd_.enumerateResult_ = std::vector<core::UpdateCandidate>{webcam()};
+    refresh();  // caches Webcam as this provider's last-good candidate
+    // Provider goes unavailable: buildProviderState retains the last-good rows
+    // (§8.1) but the availability error makes them suspect → Error.
+    fwupd_.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = "daemon down"},
+        .notices = {}};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_GE(vm.rowsRef().size(), 1U);
+    EXPECT_NE(vm.rowsRef()[0].find("Webcam"), std::string::npos);  // retained row
+    EXPECT_EQ(vm.stateForRow(0), app::UpdateRowState::Error);
+}
+
 TEST_F(UpdatesVmTest, TeardownStormNoPostAfterDrain) {  // review test 14 (VM level)
     refresh();
     QueuingUiDispatcher queuing;

@@ -2,6 +2,8 @@
 
 #include <chrono>  // FIX ROUND 1 (i-1): wait_for in the ready-future test
 #include <functional>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "devmgr/app/device_service.hpp"
@@ -153,6 +155,50 @@ TEST_F(ModulesVMTest, FillSignaturesWithNothingToFillReturnsReadyFuture) {
 // test-local deferring dispatcher and asserts running the orphaned closure
 // afterward is a safe no-op (a clean use-after-free repro under ASan before
 // the alive-token fix).
+TEST_F(ModulesVMTest, SignedForRowClassifiesSignatureColumn) {
+    using devmgr::app::ModuleSignature;
+    seed("signedmod", 0);
+    seed("unsignedmod", 0);
+    seed("unknownmod", 0);  // no seeded driver → moduleDetail() fails → "?" cell
+    devmgr::core::Driver s;
+    s.name = "signedmod";
+    s.isSigned = true;
+    s.signer = "Build key";
+    pal_.seedDriver("/a", s);
+    devmgr::core::Driver u;
+    u.name = "unsignedmod";
+    u.isSigned = false;
+    pal_.seedDriver("/b", u);
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+    v.rebuild();
+
+    // Before the async fill every cell is "…" (pending) → Undetermined.
+    for (int i = 0; std::cmp_less(i, v.rowsRef().size()); ++i)
+        EXPECT_EQ(v.signedForRow(i), ModuleSignature::Undetermined);
+
+    v.fillSignatures().wait();
+    v.rebuild();
+
+    auto sigOfNamed = [&](const char* needle) -> std::optional<ModuleSignature> {
+        for (int i = 0; std::cmp_less(i, v.rowsRef().size()); ++i)
+            if (v.rowsRef()[i].find(needle) != std::string::npos) return v.signedForRow(i);
+        return std::nullopt;
+    };
+    EXPECT_EQ(sigOfNamed("signedmod"), ModuleSignature::Signed);
+    EXPECT_EQ(sigOfNamed("unsignedmod"), ModuleSignature::Unsigned);
+    EXPECT_EQ(sigOfNamed("unknownmod"), ModuleSignature::Undetermined);
+
+    EXPECT_FALSE(v.signedForRow(-1).has_value());
+    EXPECT_FALSE(v.signedForRow(9999).has_value());
+}
+
+TEST_F(ModulesVMTest, SignedForRowNulloptOnPlaceholderRow) {
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+    v.rebuild();  // no modules → "(no modules)" placeholder, not a module row
+    ASSERT_EQ(v.rowsRef().size(), 1U);
+    EXPECT_FALSE(v.signedForRow(0).has_value());
+}
+
 TEST_F(ModulesVMTest, PostedClosureAfterDestructionIsDropped) {
     seed("dummy", 0);
     DeferringUiDispatcher deferring;

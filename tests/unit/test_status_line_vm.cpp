@@ -251,3 +251,37 @@ TEST(StatusLineVm, TaskCompletedMessageShownAfterArmOnly) {
     bus.publish(devmgr::core::TaskCompletedEvent{"t1", false, "cannot disable: sole keyboard"});
     EXPECT_EQ(vm.text(), "cannot disable: sole keyboard");
 }
+
+TEST(StatusLineVm, SeverityTracksSourceEventAndResetsWhenCleared) {
+    using devmgr::app::StatusSeverity;
+    devmgr::runtime::EventBus bus;
+    devmgr::runtime::DelayedScheduler timer;
+    devmgr::test::InlineUiDispatcher dispatcher;
+    devmgr::app::StatusLineVM vm(bus, timer, dispatcher, 40ms);
+    vm.arm();
+
+    EXPECT_EQ(vm.severity(), StatusSeverity::Ok);  // steady (empty) line
+
+    bus.publish(devmgr::core::DeviceAddedEvent{usb("dev-1", "Widget")});  // notification → Info
+    EXPECT_EQ(vm.text(), "usb device added: Widget");
+    EXPECT_EQ(vm.severity(), StatusSeverity::Info);
+
+    EXPECT_TRUE(waitFor([&] { return vm.text().empty(); }, 1s));  // auto-clear
+    EXPECT_EQ(vm.severity(), StatusSeverity::Ok);                 // back to steady state
+}
+
+TEST(StatusLineVm, SeverityIsSuccessOrDangerByTaskOutcome) {
+    using devmgr::app::StatusSeverity;
+    devmgr::runtime::EventBus bus;
+    devmgr::runtime::DelayedScheduler timer;
+    devmgr::test::InlineUiDispatcher dispatcher;
+    devmgr::app::StatusLineVM vm(bus, timer, dispatcher, 5s);  // long ttl; assert severity
+    vm.arm();
+
+    bus.publish(devmgr::core::TaskCompletedEvent{"t1", true, "enabled Widget"});
+    EXPECT_EQ(vm.severity(), StatusSeverity::Success);
+
+    // A guard refusal publishes ok=false → Danger (design §4.1).
+    bus.publish(devmgr::core::TaskCompletedEvent{"guard", false, "cannot disable: sole keyboard"});
+    EXPECT_EQ(vm.severity(), StatusSeverity::Danger);
+}

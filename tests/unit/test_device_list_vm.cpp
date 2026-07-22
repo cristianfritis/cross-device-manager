@@ -198,3 +198,60 @@ TEST(DeviceListVmTest, RebuildHooksBracketDeltaAndFilterRebuilds) {
     vm.setFilter("");
     EXPECT_EQ(log.size(), 4u);
 }
+
+TEST(DeviceListVmTest, StatusForRowMapsDeviceRowsAndNulloptOnHeaders) {
+    Fixture f;
+    auto mouse = dev("u1", core::BusType::Usb, "Mouse");
+    mouse.status = core::DeviceStatus::Disabled;
+    auto gpu = dev("p1", core::BusType::Pci, "GPU");
+    gpu.status = core::DeviceStatus::Error;
+    f.pal.seedDevice(mouse);
+    f.pal.seedDevice(gpu);
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+
+    // Header rows carry no status; device rows carry the Device's own status.
+    for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i) {
+        if (vm.isHeader(i)) {
+            EXPECT_FALSE(vm.statusForRow(i).has_value());
+        } else {
+            EXPECT_TRUE(vm.statusForRow(i).has_value());
+        }
+    }
+    auto statusOfNamed = [&](const char* needle) -> std::optional<core::DeviceStatus> {
+        for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i)
+            if (vm.rowsRef()[i].find(needle) != std::string::npos) return vm.statusForRow(i);
+        return std::nullopt;
+    };
+    EXPECT_EQ(statusOfNamed("Mouse"), core::DeviceStatus::Disabled);
+    EXPECT_EQ(statusOfNamed("GPU"), core::DeviceStatus::Error);
+
+    EXPECT_FALSE(vm.statusForRow(-1).has_value());  // out of range is never a status
+    EXPECT_FALSE(vm.statusForRow(9999).has_value());
+}
+
+TEST(DeviceListVmTest, StatusForRowNulloptOnEmptyPlaceholderAndStaysAlignedUnderFilter) {
+    Fixture f;
+    auto mouse = dev("u1", core::BusType::Usb, "Logitech Mouse");
+    mouse.status = core::DeviceStatus::Active;
+    auto gpu = dev("p1", core::BusType::Pci, "NVIDIA GPU");
+    gpu.status = core::DeviceStatus::Transitioning;
+    f.pal.seedDevice(mouse);
+    f.pal.seedDevice(gpu);
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+
+    // Filter to the mouse: rowStatus_ must stay aligned with the shrunk rows_.
+    vm.setFilter("mouse");
+    std::optional<core::DeviceStatus> mouseStatus;
+    for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i) {
+        if (vm.rowsRef()[i].find("Mouse") != std::string::npos) mouseStatus = vm.statusForRow(i);
+        EXPECT_EQ(vm.rowsRef()[i].find("GPU"), std::string::npos);
+    }
+    EXPECT_EQ(mouseStatus, core::DeviceStatus::Active);
+
+    // Filter matches nothing → single "(no devices)" placeholder, no status.
+    vm.setFilter("zzz-nonexistent");
+    ASSERT_EQ(vm.rowsRef().size(), 1u);
+    EXPECT_FALSE(vm.statusForRow(0).has_value());
+}

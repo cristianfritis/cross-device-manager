@@ -15,6 +15,13 @@
 
 namespace devmgr::app {
 
+// Per-row module signature state for TUI semantic colouring (design decision
+// 1a): the state ModulesVM already computes into its signature column.
+// Undetermined covers both "?" (could not classify) and the async-pending "…"
+// cell. Blacklist is a modprobe.d fact fetched only for the detail pane
+// (facade_.modprobeDetail), not held per row, so it stays a detail signal.
+enum class ModuleSignature { Signed, Unsigned, Undetermined };
+
 // Toolkit-agnostic Modules view model: filtered rows over listModules(), a
 // selected module, an async-filled signature column (spec §7.1 perf note),
 // and a Secure Boot/lockdown banner. Subscribes ModulesChangedEvent and
@@ -33,6 +40,10 @@ class ModulesVM {
     int& selectedRef() { return selected_; }
     void setFilter(std::string filter);
     std::optional<std::string> selectedModule() const;
+    // Per-row signature state for TUI colouring (read-only; no wording change).
+    // nullopt for the placeholder and out-of-range rows. Reads the same
+    // signature cell the row already shows, so colour and text never disagree.
+    std::optional<ModuleSignature> signedForRow(int row) const;
     std::vector<std::string> detailLines() const;  // selected module deep info
     std::string banner() const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);

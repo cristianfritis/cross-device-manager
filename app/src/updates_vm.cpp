@@ -241,6 +241,16 @@ const core::UpdateCandidate* UpdatesVM::selectedCandidate() const {
     return &snapshot_[ref->first].candidates[ref->second];
 }
 
+std::optional<UpdateRowState> UpdatesVM::stateForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowRefs_.size())) return std::nullopt;
+    const auto& ref = rowRefs_[static_cast<std::size_t>(row)];
+    if (!ref) return std::nullopt;  // placeholder row
+    const auto& state = snapshot_[ref->first];
+    if (state.refreshError || state.availability.error) return UpdateRowState::Error;
+    return state.candidates[ref->second].candidateVersion ? UpdateRowState::Available
+                                                          : UpdateRowState::UpToDate;
+}
+
 std::optional<std::pair<std::string, std::string>> UpdatesVM::selectedKey() const {
     if (selected_ < 0 || std::cmp_greater_equal(selected_, rowRefs_.size())) return std::nullopt;
     const auto& ref = rowRefs_[static_cast<std::size_t>(selected_)];

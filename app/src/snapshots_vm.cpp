@@ -96,6 +96,24 @@ std::vector<std::size_t> chainIndents(const std::vector<core::SnapshotChainRow>&
     return indents;
 }
 
+// HEAD and last-good snapshot ids from the chain (snapshot-history spec), each
+// "" when the chain has no such row. Derived from the same core::buildSnapshotChain
+// the history markers and preview use, so the list, markers and preview can
+// never disagree about which row is which. `chain` is index-aligned with `metas`.
+struct HeadAndLastGood {
+    std::string head;
+    std::string lastGood;
+};
+HeadAndLastGood headAndLastGood(const std::vector<core::SnapshotChainRow>& chain,
+                                const std::vector<core::SnapshotMeta>& metas) {
+    HeadAndLastGood ids;
+    for (std::size_t i = 0; i < chain.size(); ++i) {
+        if (chain[i].head) ids.head = metas[i].id;
+        if (chain[i].lastGood) ids.lastGood = metas[i].id;
+    }
+    return ids;
+}
+
 // Which snapshot is selected, which is current HEAD, which is last good
 // (snapshot-ui spec). HEAD and last-good come from the same chain builder the
 // history view uses, so the preview and the list cannot disagree about which
@@ -219,10 +237,14 @@ void SnapshotsVM::rebuild() {
     rows_.clear();
     rowRefs_.clear();
     // Chain over the FULL list, so HEAD/last-good stay true regardless of what
-    // the filter hides (see the header note).
-    const auto chain =
-        historyView_ ? core::buildSnapshotChain(metas_) : std::vector<core::SnapshotChainRow>{};
-    const auto indents = chainIndents(chain);
+    // the filter hides (see the header note). Built unconditionally now — the
+    // row-marker predicates need HEAD/last-good even with the history view off —
+    // and reused for the indent path below when the view is on.
+    const auto chain = core::buildSnapshotChain(metas_);
+    const auto ids = headAndLastGood(chain, metas_);
+    headId_ = ids.head;
+    lastGoodId_ = ids.lastGood;
+    const auto indents = historyView_ ? chainIndents(chain) : std::vector<std::size_t>{};
     const std::string needle = toLower(filter_);
     for (std::size_t i = 0; i < metas_.size(); ++i) {
         if (!needle.empty() && filterHaystack(metas_[i]).find(needle) == std::string::npos)
@@ -261,17 +283,37 @@ void SnapshotsVM::setHistoryView(bool on) {
     rebuild();
 }
 
-const core::SnapshotMeta* SnapshotsVM::selectedMeta() const {
-    if (selected_ < 0 || std::cmp_greater_equal(selected_, rowRefs_.size())) return nullptr;
-    const auto& ref = rowRefs_[static_cast<std::size_t>(selected_)];
+const core::SnapshotMeta* SnapshotsVM::metaForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowRefs_.size())) return nullptr;
+    const auto& ref = rowRefs_[static_cast<std::size_t>(row)];
     if (!ref) return nullptr;
     return &metas_[*ref];
+}
+
+const core::SnapshotMeta* SnapshotsVM::selectedMeta() const {
+    return metaForRow(selected_);
 }
 
 std::optional<std::string> SnapshotsVM::selectedId() const {
     const auto* m = selectedMeta();
     if (m == nullptr) return std::nullopt;
     return m->id;
+}
+
+std::optional<core::SnapshotHealth> SnapshotsVM::healthForRow(int row) const {
+    const auto* m = metaForRow(row);
+    if (m == nullptr) return std::nullopt;
+    return m->health;
+}
+
+bool SnapshotsVM::isHeadRow(int row) const {
+    const auto* m = metaForRow(row);
+    return m != nullptr && !headId_.empty() && m->id == headId_;
+}
+
+bool SnapshotsVM::isLastGoodRow(int row) const {
+    const auto* m = metaForRow(row);
+    return m != nullptr && !lastGoodId_.empty() && m->id == lastGoodId_;
 }
 
 std::string SnapshotsVM::banner() const {

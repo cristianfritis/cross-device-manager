@@ -64,10 +64,12 @@ void DeviceListVM::appendRows(core::BusType bus, std::vector<const core::Device*
     std::ranges::sort(
         group, [](const core::Device* a, const core::Device* b) { return a->name < b->name; });
     rows_.push_back(std::string("── ") + core::displayBus(bus) + " ──");
-    rowIds_.emplace_back(std::nullopt);  // header
+    rowIds_.emplace_back(std::nullopt);     // header
+    rowStatus_.emplace_back(std::nullopt);  // header carries no device status
     for (const core::Device* d : group) {
         rows_.push_back("  " + d->name + "  (" + d->vendorId + ":" + d->productId + ")");
         rowIds_.emplace_back(d->id);
+        rowStatus_.emplace_back(d->status);
     }
 }
 
@@ -95,11 +97,13 @@ void DeviceListVM::rebuild() {
 
     rows_.clear();
     rowIds_.clear();
+    rowStatus_.clear();
     for (std::size_t g = 0; g < kOrder.size(); ++g) appendRows(kOrder.at(g), groups[g]);
 
     if (rows_.empty()) {
         rows_.emplace_back("(no devices)");
         rowIds_.emplace_back(std::nullopt);
+        rowStatus_.emplace_back(std::nullopt);
     }
     restoreSelection(keep);
     if (afterRebuild_) afterRebuild_();
@@ -122,6 +126,11 @@ std::optional<core::DeviceId> DeviceListVM::selectedDeviceId() const {
 bool DeviceListVM::isHeader(int row) const {
     if (row < 0 || std::cmp_greater_equal(row, rowIds_.size())) return false;
     return !rowIds_[static_cast<std::size_t>(row)].has_value();
+}
+
+std::optional<core::DeviceStatus> DeviceListVM::statusForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowStatus_.size())) return std::nullopt;
+    return rowStatus_[static_cast<std::size_t>(row)];
 }
 
 }  // namespace devmgr::app

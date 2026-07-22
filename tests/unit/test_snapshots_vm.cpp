@@ -476,3 +476,49 @@ TEST_F(SnapshotsVmTest, FailedRestoreLeavesNoStaleGuidanceFromAnEarlierOne) {
     facade_.restoreSnapshot(std::string(64, 'b')).get();
     EXPECT_TRUE(vm.restoreGuidanceLines().empty());
 }
+
+TEST_F(SnapshotsVmTest, HealthForRowAndHeadLastGoodMarkersLandOnDifferentRows) {
+    using core::SnapshotHealth;
+    // Chain b(corrupt) -> a(healthy): b is the chain tip (HEAD); a is the most
+    // recent healthy snapshot (last good). The two markers land on different
+    // rows, which is exactly what group 4's accent colouring needs to tell apart.
+    seedAndRefresh({manualCorruptMeta(), autoMeta()});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.rowsRef().size(), 2U);
+
+    auto rowOf = [&](const char* idPrefix) {
+        for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i)
+            if (vm.rowsRef()[i].find(idPrefix) != std::string::npos) return i;
+        return -1;
+    };
+    const int rowB = rowOf("bbbbbbbbbbbb");
+    const int rowA = rowOf("aaaaaaaaaaaa");
+    ASSERT_GE(rowB, 0);
+    ASSERT_GE(rowA, 0);
+
+    EXPECT_EQ(vm.healthForRow(rowB), SnapshotHealth::Corrupt);
+    EXPECT_EQ(vm.healthForRow(rowA), SnapshotHealth::Ok);
+
+    EXPECT_TRUE(vm.isHeadRow(rowB));       // b is the chain tip
+    EXPECT_FALSE(vm.isLastGoodRow(rowB));  // ...but corrupt, so not last-good
+    EXPECT_FALSE(vm.isHeadRow(rowA));
+    EXPECT_TRUE(vm.isLastGoodRow(rowA));  // a is the most recent healthy snapshot
+
+    // Markers are computed with the history view OFF too — colouring needs them
+    // in the flat list, not only the chain view.
+    EXPECT_FALSE(vm.historyView());
+}
+
+TEST_F(SnapshotsVmTest, HealthAndMarkersAreEmptyOnPlaceholderAndOutOfRange) {
+    seedAndRefresh({});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.rowsRef().size(), 1U);  // "(no snapshots)" placeholder
+    EXPECT_FALSE(vm.healthForRow(0).has_value());
+    EXPECT_FALSE(vm.isHeadRow(0));
+    EXPECT_FALSE(vm.isLastGoodRow(0));
+    EXPECT_FALSE(vm.healthForRow(-1).has_value());
+    EXPECT_FALSE(vm.healthForRow(99).has_value());
+    EXPECT_FALSE(vm.isHeadRow(99));
+}

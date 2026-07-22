@@ -28,6 +28,12 @@ class DeviceListVM {
     // it); false for device rows and for out-of-range rows. Lets a frontend
     // render/disable headers without re-deriving the grouping.
     bool isHeader(int row) const;
+    // Per-row device status for TUI semantic colouring (read-only; adds no
+    // wording and changes no behaviour). Returns the status the row's Device
+    // already carries; nullopt for group-header, "(no devices)" placeholder,
+    // and out-of-range rows — exactly the rows isHeader()/selectedDeviceId()
+    // treat as non-device. The role→colour mapping lives in the TUI, not here.
+    std::optional<core::DeviceStatus> statusForRow(int row) const;
     // Frontend hooks invoked at entry/exit of every rebuild() — the single
     // funnel for all row mutation (delta-triggered posts and setFilter alike).
     // Qt uses them for beginResetModel()/endResetModel(); the TUI leaves them
@@ -52,6 +58,10 @@ class DeviceListVM {
     std::string filter_;
     std::vector<std::string> rows_;
     std::vector<std::optional<core::DeviceId>> rowIds_;  // nullopt == group header
+    // Aligned 1:1 with rows_/rowIds_; nullopt for header/placeholder rows.
+    // Captured from the grouped Device* during rebuild so statusForRow() is a
+    // pure lookup (status only changes via a delta, which rebuilds anyway).
+    std::vector<std::optional<core::DeviceStatus>> rowStatus_;
     // Model snapshot cached on the UI thread so filter keystrokes rebuild rows
     // without re-copying the whole model out of DeviceService. haystacks_ holds
     // the per-device lowercase filter text, aligned with snapshot_, computed

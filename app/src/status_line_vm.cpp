@@ -26,21 +26,23 @@ StatusLineVM::StatusLineVM(runtime::EventBus& bus, runtime::DelayedScheduler& ti
                            IUiDispatcher& dispatcher, std::chrono::milliseconds ttl)
     : timer_(timer), dispatcher_(dispatcher), ttl_(ttl) {
     subAdded_ = bus.subscribe<core::DeviceAddedEvent>([this](const core::DeviceAddedEvent& e) {
-        if (armed_.load()) setMessage(describe(e.device, "added"));
+        if (armed_.load()) setMessage(describe(e.device, "added"), StatusSeverity::Info);
     });
     subChanged_ =
         bus.subscribe<core::DeviceChangedEvent>([this](const core::DeviceChangedEvent& e) {
-            if (armed_.load()) setMessage(describe(e.device, "changed"));
+            if (armed_.load()) setMessage(describe(e.device, "changed"), StatusSeverity::Info);
         });
     subRemoved_ = bus.subscribe<core::DeviceRemovedEvent>([this](const core::DeviceRemovedEvent&) {
         // Removed carries only a DeviceId (the device is gone) — generic text.
-        if (armed_.load()) setMessage("device removed");
+        if (armed_.load()) setMessage("device removed", StatusSeverity::Info);
     });
     subTaskCompleted_ =
         bus.subscribe<core::TaskCompletedEvent>([this](const core::TaskCompletedEvent& e) {
             // Mutation results (Phase 4) share the transient line — success and
-            // failure alike; the message already says which.
-            if (armed_.load()) setMessage(e.message);
+            // failure alike; the message already says which, and its ok flag
+            // gives the colour valence (a guard refusal publishes ok=false).
+            if (armed_.load())
+                setMessage(e.message, e.ok ? StatusSeverity::Success : StatusSeverity::Danger);
         });
 }
 
@@ -91,10 +93,17 @@ std::string StatusLineVM::text() const {
     return text_;
 }
 
-void StatusLineVM::setMessage(std::string message) {
+StatusSeverity StatusLineVM::severity() const {
+    std::scoped_lock lock(mutex_);
+    // Empty line ⇒ steady state, regardless of the last message's valence.
+    return text_.empty() ? StatusSeverity::Ok : severity_;
+}
+
+void StatusLineVM::setMessage(std::string message, StatusSeverity severity) {
     {
         std::scoped_lock lock(mutex_);
         text_ = std::move(message);
+        severity_ = severity;
         // Resolve the previous clear immediately if cancel() guarantees it
         // will never run; otherwise leave it counted in outstandingClears_ —
         // it will resolve itself from inside onClearFired() once it actually
@@ -123,6 +132,7 @@ void StatusLineVM::onClearFired(std::uint64_t generation) {
         // still-pending clear timer.
         if (generation == generation_) {
             text_.clear();
+            severity_ = StatusSeverity::Ok;  // back to steady state with the empty line
             clearHandle_ = 0;
             cleared = true;
         }

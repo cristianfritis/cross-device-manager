@@ -100,6 +100,16 @@ class SnapshotsVM {
     // snapshot is a read, and the daemon refuses it authoritatively.
     std::optional<std::string> selectedSnapshotId() const { return selectedId(); }
 
+    // Per-row snapshot health for TUI colouring (read-only; no wording change).
+    // nullopt for the placeholder / out-of-range rows.
+    std::optional<core::SnapshotHealth> healthForRow(int row) const;
+    // Row-marker predicates for the chain view (snapshot-history spec): whether
+    // the row is the current HEAD or the last-good snapshot. Both derive from
+    // the same core::buildSnapshotChain the history markers use (computed once
+    // per rebuild), so a coloured marker can never disagree with the list.
+    bool isHeadRow(int row) const;
+    bool isLastGoodRow(int row) const;
+
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     // Fired on the UI thread when a requested diff lands. Deliberately NOT the
     // rebuild hooks: those bracket a Qt begin/endResetModel pair, and a diff
@@ -111,8 +121,9 @@ class SnapshotsVM {
    private:
     void queueRebuild();  // SnapshotsRefreshedEvent → coalesced dispatcher post
     void queueRefresh();  // SnapshotsChangedEvent → coalesced facade_.refreshSnapshots()
-    // Selected row's meta, nullptr for the placeholder row; and its stable
-    // identity for selection restore across rebuilds.
+    // Row's meta, nullptr for the placeholder / out-of-range row. selectedMeta()
+    // is metaForRow(selected_); both feed the per-row accessors above.
+    const core::SnapshotMeta* metaForRow(int row) const;
     const core::SnapshotMeta* selectedMeta() const;
     std::optional<std::string> selectedId() const;
 
@@ -130,6 +141,11 @@ class SnapshotsVM {
     // Row → index into metas_; nullopt == placeholder.
     std::vector<std::optional<std::size_t>> rowRefs_;
     std::vector<core::SnapshotMeta> metas_;
+    // Current chain HEAD and last-good snapshot ids ("" when none). Recomputed
+    // each rebuild() from core::buildSnapshotChain so the row-marker predicates
+    // are O(1) id compares rather than rebuilding the chain per query.
+    std::string headId_;
+    std::string lastGoodId_;
     int selected_ = 0;
     std::atomic<bool> rebuildQueued_{false};
     std::atomic<bool> refreshQueued_{false};

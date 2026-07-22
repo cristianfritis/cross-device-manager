@@ -21,12 +21,12 @@ Sequencing follows design.md Migration Plan: each numbered group leaves the buil
 
 ## 3. VM per-row state accessors (app/; no wording/behavior change)
 
-- [ ] 3.1 `DeviceListVM::statusForRow(int) -> std::optional<core::DeviceStatus>` (nullopt for header/placeholder/oob) + unit tests over grouped/filtered/empty layouts
-- [ ] 3.2 `ModulesVM::signedForRow(int)` (signed/unsigned/undetermined; blacklisted if available) returning an optional state enum + unit tests
-- [ ] 3.3 `UpdatesVM::stateForRow(int)` (available/up-to-date/error, optional) + unit tests
-- [ ] 3.4 `SnapshotsVM::healthForRow(int) -> std::optional<core::SnapshotHealth>` plus HEAD / last-good row-marker predicates + unit tests
-- [ ] 3.5 `StatusLineVM::severity()` (ok/success/warning/danger/info tracked when the message is set) + unit tests
-- [ ] 3.6 Run `devmgr_tests` (container unit gate) green with the new accessor tests
+- [x] 3.1 `DeviceListVM::statusForRow(int) -> std::optional<core::DeviceStatus>` (nullopt for header/placeholder/oob) + unit tests over grouped/filtered/empty layouts
+- [x] 3.2 `ModulesVM::signedForRow(int)` (signed/unsigned/undetermined; blacklisted if available) returning an optional state enum + unit tests
+- [x] 3.3 `UpdatesVM::stateForRow(int)` (available/up-to-date/error, optional) + unit tests
+- [x] 3.4 `SnapshotsVM::healthForRow(int) -> std::optional<core::SnapshotHealth>` plus HEAD / last-good row-marker predicates + unit tests
+- [x] 3.5 `StatusLineVM::severity()` (ok/success/warning/danger/info tracked when the message is set) + unit tests
+- [x] 3.6 Run `devmgr_tests` (container unit gate) green with the new accessor tests
 
 ## 4. Semantic coloring and layout polish (TUI maps accessor state → theme role)
 

@@ -18,6 +18,12 @@
 
 namespace devmgr::app {
 
+// Per-row update state for TUI semantic colouring (design decision 1a).
+// Available: the candidate offers a newer version. UpToDate: no candidate
+// version. Error: the row's provider failed to enumerate or is unavailable
+// (availability/refresh error) — the whole provider's rows are then suspect.
+enum class UpdateRowState { Available, UpToDate, Error };
+
 // Toolkit-agnostic Updates view model (spec §8.3): row/detail/banner
 // formatting single-source here (V3, byte-frozen parity T11/T12), durable
 // DeviceRequest banner (spec §9), coalesced refresh/rebuild through the
@@ -47,6 +53,10 @@ class UpdatesVM {
         std::string confirmText;  // version delta + needs-reboot warn + duration (spec §9)
     };
     std::optional<InstallArgs> selectedInstall() const;  // nullopt ⇔ verb disabled (V1 gate)
+    // Per-row update state for TUI colouring (read-only; no wording change).
+    // nullopt for the placeholder / out-of-range rows. Resolved from the same
+    // provider snapshot the row was built from, so colour and row agree.
+    std::optional<UpdateRowState> stateForRow(int row) const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     std::string installProgressText() const;  // "" when idle
 

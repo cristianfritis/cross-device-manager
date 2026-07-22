@@ -65,6 +65,16 @@ std::string signatureCellFor(const core::Result<core::Driver>& info) {
     return info ? signatureLabel(*info) : std::string("?");
 }
 
+// Maps the signature-column cell text to a colouring state (design decision
+// 1a). "NO" → Unsigned, a "yes…" cell → Signed; "?" (unclassifiable) and "…"
+// (async pending) both → Undetermined. Kept next to signatureCellFor() so the
+// two agree on what the cell strings mean.
+ModuleSignature classifySignatureCell(const std::string& cell) {
+    if (cell == "NO") return ModuleSignature::Unsigned;
+    if (cell.starts_with("yes")) return ModuleSignature::Signed;
+    return ModuleSignature::Undetermined;
+}
+
 // Restores the highlighted module by name after a rebuild, then clamps.
 int restoreSelection(const std::vector<std::optional<std::string>>& rowNames,
                      const std::optional<std::string>& keep, int current, int rowCount) {
@@ -165,6 +175,14 @@ void ModulesVM::rebuild() {
 std::optional<std::string> ModulesVM::selectedModule() const {
     if (selected_ < 0 || std::cmp_greater_equal(selected_, rowNames_.size())) return std::nullopt;
     return rowNames_[static_cast<std::size_t>(selected_)];
+}
+
+std::optional<ModuleSignature> ModulesVM::signedForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowNames_.size())) return std::nullopt;
+    const auto& name = rowNames_[static_cast<std::size_t>(row)];
+    if (!name) return std::nullopt;  // placeholder row carries no module
+    const auto it = signatureCell_.find(*name);
+    return classifySignatureCell(it != signatureCell_.end() ? it->second : std::string("…"));
 }
 
 std::shared_future<void> ModulesVM::fillSignatures() {
