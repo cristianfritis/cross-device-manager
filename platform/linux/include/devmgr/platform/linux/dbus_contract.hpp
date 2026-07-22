@@ -66,6 +66,23 @@ inline core::Error coreErrorFor(const std::string& dbusErrorName, std::string me
     if (dbusErrorName == "org.freedesktop.DBus.Error.NoReply" ||
         dbusErrorName == "org.freedesktop.DBus.Error.Timeout")
         return {.code = core::Error::Code::Busy, .message = "helper timed out"};
+    // Daemon not present or not activatable on the bus: systemd refused/failed
+    // activation, or D-Bus has no owner/server/connection. These are
+    // "unreachable" (CLI exit 4), distinct from a reached daemon that failed an
+    // op. Classified by the stable error NAME here — the authoritative signal,
+    // which survives message localization — and carried as Busy, the domain code
+    // the CLI already routes to unreachable, with the real cause preserved so the
+    // user still sees why (e.g. "Unit devmgrd.service is masked.").
+    if (dbusErrorName == "org.freedesktop.systemd1.UnitMasked" ||
+        dbusErrorName == "org.freedesktop.systemd1.NoSuchUnit" ||
+        dbusErrorName == "org.freedesktop.systemd1.UnitInactive" ||
+        dbusErrorName == "org.freedesktop.DBus.Error.NameHasNoOwner" ||
+        dbusErrorName == "org.freedesktop.DBus.Error.NoServer" ||
+        dbusErrorName == "org.freedesktop.DBus.Error.Disconnected" ||
+        dbusErrorName == "org.freedesktop.DBus.Error.Spawn.ExecFailed" ||
+        dbusErrorName == "org.freedesktop.DBus.Error.Spawn.ServiceNotValid" ||
+        dbusErrorName == "org.freedesktop.DBus.Error.Spawn.FileNotFound")
+        return {.code = core::Error::Code::Busy, .message = std::move(message)};
     return {.code = core::Error::Code::Io, .message = std::move(message)};
 }
 

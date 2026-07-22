@@ -71,3 +71,6 @@ dist/
 
 # Private keys
 *.key
+
+# Testing Production files
+.production-testing/

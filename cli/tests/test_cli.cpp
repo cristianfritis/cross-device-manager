@@ -312,6 +312,91 @@ TEST(CliErrors, GenericIoFailureMapsToExitFive) {
     EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kFailed);
 }
 
+// Daemon-unavailability arriving as an Io error message (a systemd/D-Bus name
+// embedded in the text, or an activation/connection failure) must classify as
+// unreachable (exit 4), not a reached-but-failed op (exit 5) — Scenario 8's
+// masked-daemon case is the "Unit ... is masked." row below. Matching is a
+// case-insensitive substring, so wording/capitalization drift is tolerated.
+class CliUnreachableMessages : public testing::TestWithParam<std::string> {};
+
+TEST_P(CliUnreachableMessages, MapToExitFour) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::Io, GetParam()};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kUnreachable) << GetParam();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DaemonDown, CliUnreachableMessages,
+    testing::Values(
+        // The marker coreErrorFor() emits for a bus with no devmgrd.
+        std::string{"helper devmgrd is not available"},
+        // systemd refused activation because the unit is masked (Scenario 8).
+        std::string{"Unit devmgrd.service is masked."},
+        // Same, but with the stable systemd error name prefixed to the message.
+        std::string{"org.freedesktop.systemd1.UnitMasked: Unit devmgrd.service is masked."},
+        // D-Bus has no .service file / no owner for the bus name.
+        std::string{"The name org.devmgr.Manager1 was not provided by any .service files"},
+        // The system bus socket itself is absent (daemon and bus both down).
+        std::string{"Failed to connect to socket /run/dbus/system_bus_socket: No such file or "
+                    "directory"},
+        // Case-insensitivity: an upper-cased phrase still classifies as down.
+        std::string{"UNIT DEVMGRD.SERVICE IS MASKED."}));
+
+// The counterpart: Io failures from a reached daemon (or an unrelated local I/O
+// error) stay exit 5. "No such file or directory" in isolation — not about the
+// bus socket — must NOT be mistaken for an unreachable bus.
+class CliFailedMessages : public testing::TestWithParam<std::string> {};
+
+TEST_P(CliFailedMessages, MapToExitFive) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::Io, GetParam()};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kFailed) << GetParam();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ReachedButFailed, CliFailedMessages,
+    testing::Values(std::string{"random I/O failure"}, std::string{"snapshots dir is not writable"},
+                    std::string{"snapshot dead0 is corrupt"},
+                    std::string{"restore item failed: No such file or directory"}));
+
+// The remaining domain codes keep their own exit code, independent of message.
+TEST(CliErrors, UnsupportedApiMapsToExitFive) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::Unsupported, "devmgrd too old (API 2 < 3) — restart"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kFailed);
+}
+
+TEST(CliErrors, ConflictMapsToExitFive) {
+    FakeChannel ch;
+    ch.list.push_back(meta(id64("dead0"), SnapshotTrigger::Auto, "SetDeviceEnabled", "/sys/x"));
+    ch.restoreError = Error{Error::Code::Conflict, "critical device"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "restore", "dead0"}).code, cli::kFailed);
+}
+
+TEST(CliErrors, NetworkMapsToExitFive) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::Network, "provider unreachable"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kFailed);
+}
+
+TEST(CliErrors, NotFoundMapsToExitTwo) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::NotFound, "no such snapshot"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kNotFound);
+}
+
+TEST(CliErrors, PermissionMapsToExitThree) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::Permission, "polkit denied"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kNotAuthorized);
+}
+
+TEST(CliErrors, InvalidArgsMapsToExitOne) {
+    FakeChannel ch;
+    ch.listError = Error{Error::Code::InvalidArgs, "label too long"};
+    EXPECT_EQ(invoke(ch, {"snapshot", "list"}).code, cli::kUsage);
+}
+
 // ---- history ----
 
 TEST(CliHistory, EmptyPrintsPlaceholder) {
