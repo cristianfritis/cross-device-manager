@@ -1,3 +1,7 @@
 build/
 vcpkg_installed/
 .git/
+.codegraph/
+**/.codegraph/
+*.sock
+**/*.sock

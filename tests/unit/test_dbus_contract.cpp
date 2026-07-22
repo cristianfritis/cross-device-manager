@@ -36,6 +36,28 @@ TEST(DbusContractTest, TransportErrorsMapPerSpecTable) {
     EXPECT_EQ(other.message, "boom");
 }
 
+// Daemon-not-present / not-activatable errors are recognized by their stable
+// error NAME (authoritative, localization-proof) and carried as Busy — the
+// domain code the CLI routes to "unreachable" (exit 4) — with the real cause
+// preserved so the user still sees why. Covers Scenario 8's masked unit.
+TEST(DbusContractTest, DaemonUnavailableNamesMapToUnreachable) {
+    const std::array names = {"org.freedesktop.systemd1.UnitMasked",
+                              "org.freedesktop.systemd1.NoSuchUnit",
+                              "org.freedesktop.systemd1.UnitInactive",
+                              "org.freedesktop.DBus.Error.NameHasNoOwner",
+                              "org.freedesktop.DBus.Error.NoServer",
+                              "org.freedesktop.DBus.Error.Disconnected",
+                              "org.freedesktop.DBus.Error.Spawn.ExecFailed",
+                              "org.freedesktop.DBus.Error.Spawn.ServiceNotValid",
+                              "org.freedesktop.DBus.Error.Spawn.FileNotFound"};
+    for (const auto* name : names) {
+        const auto mapped = coreErrorFor(name, "Unit devmgrd.service is masked.");
+        EXPECT_EQ(mapped.code, Error::Code::Busy) << name;
+        // Real cause preserved (not overwritten with a generic marker).
+        EXPECT_EQ(mapped.message, "Unit devmgrd.service is masked.") << name;
+    }
+}
+
 // ApiVersion 4 added InvalidArgs. It round-trips by name, and — critically for
 // pre-v4 clients — an unrecognized name still degrades to Io rather than being
 // mistaken for one of the codes they do know.

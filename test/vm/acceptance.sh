@@ -15,7 +15,8 @@
 #   5. device disable + snapshot restore round-trip (restore re-enables)
 #   6. driver blacklist round-trip through a manual snapshot (config-level)
 #   7. hotplug reaction: hot-remove the USB device, re-enumerate, count drops
-#   8. CLI recovery path: daemon down -> the recovery CLI exits 4 (snapshot-cli spec)
+#   8. CLI recovery path: daemon down (masked, non-activatable) -> the recovery
+#      CLI exits 4 on the system bus (snapshot-cli spec)
 #   9. journal carries no sandbox denial for any of the above
 # Ends with an explicit ACCEPTANCE OK (all scenarios passed).
 set -euo pipefail
@@ -132,14 +133,31 @@ after=$(self_test_rows devmgr-tui --self-test)
     echo "enumeration did not react to hot-remove (before=$before after=$after)"; exit 1; }
 echo "hotplug reaction OK (rows $before -> $after)"
 
-echo "==> [8/9] CLI recovery: daemon down -> recovery CLI exits 4"
+echo "==> [8/9] CLI recovery: daemon down (masked) -> recovery CLI exits 4"
+# Mask the unit so D-Bus activation CANNOT restart it: systemd refuses a masked
+# unit (org.freedesktop.systemd1.UnitMasked), the genuine "unreachable" state a
+# tester reaches after `systemctl mask`. Stop first — `systemctl stop` errors on
+# an already-masked unit — then mask once it has settled. Scenario 2 already
+# proved the activatable path exits 0; this proves the masked path exits 4 (not
+# 5). The EXIT trap unmasks on every path so a failure never leaves it wedged.
 systemctl stop devmgrd.service
+for _ in {1..50}; do systemctl is-active --quiet devmgrd.service || break; sleep 0.1; done
+systemctl mask devmgrd.service
+trap 'systemctl unmask devmgrd.service >/dev/null 2>&1 || true; \
+      systemctl reset-failed devmgrd.service >/dev/null 2>&1 || true' EXIT
 set +e
-devmgr snapshot list >/dev/null 2>/tmp/accept-down.err
+devmgr --bus system snapshot list >/dev/null 2>/tmp/accept-down.err
 rc=$?
 set -e
-[ "$rc" = "4" ] || { echo "daemon-down exit was $rc, want 4:"; cat /tmp/accept-down.err; exit 1; }
-echo "CLI recovery OK (exit 4)"
+# The masked unit must not have been reactivated by the CLI's activation attempt.
+if systemctl is-active --quiet devmgrd.service; then
+    echo "scenario 8: CLI reactivated the masked daemon"; exit 1
+fi
+[ "$rc" = "4" ] || { echo "daemon-down (masked) exit was $rc, want 4:"; cat /tmp/accept-down.err; exit 1; }
+systemctl unmask devmgrd.service
+systemctl reset-failed devmgrd.service >/dev/null 2>&1 || true
+trap - EXIT
+echo "CLI recovery OK (masked daemon, exit 4)"
 
 echo "==> [9/9] journal has no sandbox denial"
 DENIALS=$(journalctl -u devmgrd.service --since "$SINCE" --no-pager |

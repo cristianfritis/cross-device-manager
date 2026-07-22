@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Block a commit that would fail CI's clang-format gate. Checks only STAGED C++
+# files (fast, host clang-format). Enabled per-clone via:
+#     git config core.hooksPath scripts/hooks
+#
+# For exact CI-18 parity before a push/tag, run:  scripts/check-format.sh --container
+# Bypass this hook once (not recommended):        git commit --no-verify
+set -euo pipefail
+REPO="$(git rev-parse --show-toplevel)"
+exec "$REPO/scripts/check-format.sh" --staged

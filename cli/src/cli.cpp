@@ -1,11 +1,14 @@
 #include "cli/src/cli.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <ctime>
 #include <functional>
 #include <optional>
 #include <ostream>
+#include <string_view>
 
 #include "devmgr/core/snapshot_history.hpp"
 #include "devmgr/core/snapshot_json.hpp"
@@ -15,11 +18,42 @@
 namespace devmgr::cli {
 namespace {
 
-// The exact text coreErrorFor() (platform/linux dbus_contract.hpp) produces
-// when the daemon is not registered on the bus. Matching it lets us return the
-// dedicated "unreachable" exit code (4) while every other Io failure — a
-// reachable daemon that could not complete the op — maps to "failed" (5).
-constexpr const char* kHelperUnavailable = "helper devmgrd is not available";
+// Markers (all lowercase) that identify a "daemon/helper is unreachable or
+// could not be activated" failure — CLI exit 4 (kUnreachable) — as opposed to a
+// reached daemon that failed the op (exit 5, kFailed). coreErrorFor()
+// (platform/linux dbus_contract.hpp) prefers stable D-Bus/systemd error *names*,
+// mapping the unreachable ones to Busy; this list is the message-text fallback
+// for the cases that only reach us as a string (a name embedded in the message,
+// or a transport error). Matched as a case-insensitive substring — never exact
+// byte equality — so wording or capitalization drift does not misclassify.
+constexpr std::array<std::string_view, 18> kUnreachableMarkers = {
+    // Stable D-Bus / systemd error names (may arrive embedded in the message,
+    // e.g. "org.freedesktop.systemd1.UnitMasked: Unit ... is masked.").
+    "systemd1.unitmasked", "systemd1.nosuchunit", "systemd1.unitinactive",
+    "dbus.error.serviceunknown", "dbus.error.namehasnoowner", "dbus.error.noreply",
+    "dbus.error.spawn.",  // Spawn.ExecFailed / ServiceNotValid / FileNotFound
+    "dbus.error.noserver", "dbus.error.disconnected",
+    // Human-readable phrases the same failures surface as.
+    "helper devmgrd is not available", "is masked", "devmgrd.service not found",
+    "activation via systemd failed", "failed to activate service",
+    "was not provided by any .service files", "disconnected from message bus without replying",
+    "failed to connect to socket", "could not connect to bus"};
+
+// True when the Error means the daemon/helper is unreachable or could not be
+// activated (exit 4), not a reached daemon that failed the op (exit 5). Prefers
+// the stable transport signal (Busy = no-reply/timeout, set by coreErrorFor);
+// for Io it scans the message case-insensitively against kUnreachableMarkers.
+// Any other code has its own exit code and is not this function's concern.
+bool isDaemonUnavailableError(const core::Error& e) {
+    if (e.code == core::Error::Code::Busy) return true;  // no-reply/timeout: not answering
+    if (e.code != core::Error::Code::Io) return false;
+    std::string lower = e.message;
+    std::ranges::transform(lower, lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return std::ranges::any_of(kUnreachableMarkers, [&](std::string_view marker) {
+        return lower.find(marker) != std::string::npos;
+    });
+}
 
 constexpr const char* kUsageText =
     "usage: devmgr [--bus system|session] snapshot <command>\n"
@@ -46,9 +80,11 @@ int exitCodeFor(const core::Error& e) {
         case core::Error::Code::InvalidArgs:
             return kUsage;  // malformed argument — the caller's mistake, not the daemon's
         case core::Error::Code::Busy:
-            return kUnreachable;  // no-reply / timeout: daemon not answering
         case core::Error::Code::Io:
-            return e.message == kHelperUnavailable ? kUnreachable : kFailed;
+            // Busy (no-reply/timeout) and daemon-unavailable Io failures both mean
+            // "could not reach or activate the daemon" → kUnreachable; any other Io
+            // failure is a reached daemon that failed the op → kFailed.
+            return isDaemonUnavailableError(e) ? kUnreachable : kFailed;
         default:  // Unsupported (api too old), Conflict, Network → operation failed
             return kFailed;
     }
