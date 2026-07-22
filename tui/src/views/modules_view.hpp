@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string>
 
 #include <ftxui/dom/elements.hpp>  // Element
@@ -24,6 +25,10 @@ struct ModulesView {
     ftxui::Element detail;       // moduleDetail->Render()
     std::string statusText;
     int leftPaneWidth;
+    // Secure Boot / lockdown banner valence: Info in the steady state, Warning
+    // when it explains a likely refusal (§5.5). nullopt leaves it uncoloured.
+    std::optional<Role> bannerRole{};
+    std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
 };
 ftxui::Element renderModulesView(ModulesView view, const Theme& theme);
 

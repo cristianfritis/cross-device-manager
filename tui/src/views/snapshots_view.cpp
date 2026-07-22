@@ -47,7 +47,7 @@ ftxui::Element renderSnapshotsView(SnapshotsView v, const Theme& theme) {
             top.push_back(vbox(std::move(g)) | border);
         }
     }
-    top.push_back(renderStatusBar(v.statusText, theme));
+    top.push_back(renderStatusBar(v.statusText, v.statusRole, theme));
     return vbox(std::move(top)) | flex;
 }
 

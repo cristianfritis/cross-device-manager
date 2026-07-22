@@ -45,6 +45,7 @@
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "tui/src/ftxui_ui_dispatcher.hpp"
+#include "tui/src/render_util.hpp"
 #include "tui/src/views/devices_view.hpp"
 #include "tui/src/views/modules_view.hpp"
 #include "tui/src/views/snapshots_view.hpp"
@@ -77,6 +78,115 @@ std::string marqueeWindow(const std::string& s, int width, int tick) {
     std::string out;
     for (int i = offset; i < offset + width; ++i) out += glyphs[static_cast<std::size_t>(i)];
     return out;
+}
+
+// ---- Per-row state → semantic role/glyph mapping (DESIGN.md §4.1 TUI table) ----
+// The role→colour mapping deliberately lives in the TUI (per-surface presentation)
+// while the *state* comes from the ViewModel accessors (design decision 1a). Kept
+// here in the shell so the pure render library stays free of app/core types; the
+// render functions receive only tui `Role`/`Glyph` values. nullopt state (header,
+// placeholder, out-of-range) maps to no colour and no glyph — those rows stay plain.
+
+std::optional<Role> roleForDeviceStatus(std::optional<core::DeviceStatus> status) {
+    if (!status) return std::nullopt;
+    switch (*status) {
+        case core::DeviceStatus::Active:
+            return Role::Success;
+        case core::DeviceStatus::Disabled:
+            return Role::Danger;
+        case core::DeviceStatus::Transitioning:
+            return Role::Warning;
+        case core::DeviceStatus::Error:
+            return Role::Danger;
+        case core::DeviceStatus::Unknown:
+            return Role::Muted;
+    }
+    return std::nullopt;
+}
+
+std::optional<render::Glyph> glyphForDeviceStatus(std::optional<core::DeviceStatus> status) {
+    if (!status) return std::nullopt;
+    switch (*status) {
+        case core::DeviceStatus::Active:
+            return render::Glyph::Enabled;  // +
+        case core::DeviceStatus::Disabled:
+            return render::Glyph::Disabled;  // -
+        case core::DeviceStatus::Transitioning:
+            return render::Glyph::Unavailable;  // ? (in-flight/indeterminate)
+        case core::DeviceStatus::Error:
+            return render::Glyph::Unsigned;  // ! (fault)
+        case core::DeviceStatus::Unknown:
+            return render::Glyph::Unavailable;  // ?
+    }
+    return std::nullopt;
+}
+
+std::optional<Role> roleForSignature(std::optional<app::ModuleSignature> sig) {
+    if (!sig) return std::nullopt;
+    switch (*sig) {
+        case app::ModuleSignature::Signed:
+            return Role::Success;
+        case app::ModuleSignature::Unsigned:
+            return Role::Danger;
+        case app::ModuleSignature::Undetermined:
+            return Role::Muted;
+    }
+    return std::nullopt;
+}
+
+std::optional<Role> roleForUpdateState(std::optional<app::UpdateRowState> state) {
+    if (!state) return std::nullopt;
+    switch (*state) {
+        case app::UpdateRowState::Available:
+            return Role::Info;
+        case app::UpdateRowState::UpToDate:
+            return Role::Muted;  // muted-success: settled, no action
+        case app::UpdateRowState::Error:
+            return Role::Danger;
+    }
+    return std::nullopt;
+}
+
+// Health wins over the HEAD/last-good accent: a corrupt HEAD must read danger,
+// not accent. Healthy HEAD/last-good rows take the accent (the history-view text
+// markers carry the same fact without colour, §10).
+std::optional<Role> roleForSnapshotRow(std::optional<core::SnapshotHealth> health, bool isHead,
+                                       bool isLastGood) {
+    if (!health) return std::nullopt;
+    switch (*health) {
+        case core::SnapshotHealth::Corrupt:
+            return Role::Danger;
+        case core::SnapshotHealth::Unsupported:
+            return Role::Warning;
+        case core::SnapshotHealth::Ok:
+            break;
+    }
+    if (isHead || isLastGood) return Role::Accent;
+    return std::nullopt;
+}
+
+std::optional<Role> roleForSeverity(app::StatusSeverity severity) {
+    switch (severity) {
+        case app::StatusSeverity::Ok:
+            return std::nullopt;
+        case app::StatusSeverity::Success:
+            return Role::Success;
+        case app::StatusSeverity::Warning:
+            return Role::Warning;
+        case app::StatusSeverity::Danger:
+            return Role::Danger;
+        case app::StatusSeverity::Info:
+            return Role::Info;
+    }
+    return std::nullopt;
+}
+
+// Modules banner valence: banner() (modules_vm.cpp) appends "unsigned modules
+// will be rejected" exactly when Secure Boot / lockdown would reject them — warn
+// only then; the steady-state posture is informational.
+std::optional<Role> modulesBannerRole(const std::string& banner) {
+    if (banner.find("will be rejected") != std::string::npos) return Role::Warning;
+    return Role::Info;
 }
 }  // namespace
 
@@ -151,6 +261,13 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         if (preview) return "restore this snapshot? (y/n)";
         return statusVm.text();
     };
+    // Outcome valence for the status bar (§4.1): only the ViewModel-owned status
+    // message carries a severity; an active modal is an interactive prompt, shown
+    // neutral. Mirrors statusLine()'s modal precedence.
+    auto statusRole = [&]() -> std::optional<Role> {
+        if (textPrompt || confirm || preview) return std::nullopt;
+        return roleForSeverity(statusVm.severity());
+    };
 
     auto prunePending = [&] {
         std::erase_if(pending, [](const std::future<void>& f) {
@@ -198,13 +315,22 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     const Event kMarqueeTick = Event::Special("devmgr-marquee-tick");
     MenuOption deviceMenuOpt = MenuOption::Vertical();
     deviceMenuOpt.entries_option.transform = [&](const EntryState& s) {
-        constexpr int kRowWidth = kLeftPaneWidth - 4;  // border + "> " prefix + scrollbar
+        // Two narrower than before: the status glyph takes a glyph+space before
+        // the label (border + "> " prefix + glyph + space + scrollbar).
+        constexpr int kRowWidth = kLeftPaneWidth - 6;
         std::string label = s.label;
         if (s.active && string_width(label) > kRowWidth) {
             marqueeNeeded = true;
             label = marqueeWindow(label, kRowWidth, marqueeTick);
         }
-        return views::renderDeviceRow(label, s.active, s.focused);
+        // Group headers and the "(no devices)" placeholder carry no status: mute
+        // them (§4.3) and add no glyph. Device rows colour + glyph by status.
+        if (listVm.isHeader(s.index))
+            return views::renderDeviceRow(label, s.active, s.focused, std::nullopt, Role::Muted,
+                                          theme);
+        const auto status = listVm.statusForRow(s.index);
+        return views::renderDeviceRow(label, s.active, s.focused, glyphForDeviceStatus(status),
+                                      roleForDeviceStatus(status), theme);
     };
     auto deviceMenu = Menu(&listVm.rowsRef(), &listVm.selectedRef(), deviceMenuOpt);
 
@@ -234,7 +360,14 @@ int runTuiApp(bool selfTest, const Theme& theme) {
 
     auto layout = Container::Horizontal({leftPane, detailRenderer});
 
-    auto modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), MenuOption::Vertical());
+    MenuOption modulesMenuOpt = MenuOption::Vertical();
+    modulesMenuOpt.entries_option.transform = [&](const EntryState& s) {
+        // Colour by signature state; the "yes/NO/…" cell already in the row is the
+        // paired non-colour signal (§10), so no glyph is added.
+        return render::menuRow(s.label, s.active, s.focused, std::nullopt,
+                               roleForSignature(modulesVm.signedForRow(s.index)), theme);
+    };
+    auto modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), modulesMenuOpt);
     std::string bannerText;  // computed on tab entry — banner() reads sysfs, never per frame
     std::string moduleFilter;
     InputOption modFilterOpt;
@@ -268,7 +401,14 @@ int runTuiApp(bool selfTest, const Theme& theme) {
 
     // No filter on the updates list (UpdatesVM exposes none) — mirrors modules
     // shape minus the filter input.
-    auto updatesMenu = Menu(&updatesVm.rowsRef(), &updatesVm.selectedRef(), MenuOption::Vertical());
+    MenuOption updatesMenuOpt = MenuOption::Vertical();
+    updatesMenuOpt.entries_option.transform = [&](const EntryState& s) {
+        // Colour by availability; the "-> <version>"/marker text in the row is the
+        // paired non-colour signal (§10).
+        return render::menuRow(s.label, s.active, s.focused, std::nullopt,
+                               roleForUpdateState(updatesVm.stateForRow(s.index)), theme);
+    };
+    auto updatesMenu = Menu(&updatesVm.rowsRef(), &updatesVm.selectedRef(), updatesMenuOpt);
 
     // detailLines() is cheap (no disk/D-Bus I/O — it reads the last snapshot_,
     // T10), but still cache like the devices/modules panes above: cheap or
@@ -304,8 +444,18 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     snapFilterOpt.on_change = [&] { snapshotsVm.setFilter(snapshotFilter); };
     auto snapshotFilterInput = Input(snapFilterOpt);
 
-    auto snapshotsMenu =
-        Menu(&snapshotsVm.rowsRef(), &snapshotsVm.selectedRef(), MenuOption::Vertical());
+    MenuOption snapshotsMenuOpt = MenuOption::Vertical();
+    snapshotsMenuOpt.entries_option.transform = [&](const EntryState& s) {
+        // Colour by health, with HEAD/last-good taking the accent when healthy;
+        // the health word (non-Ok rows) and the history-view chain markers are the
+        // paired non-colour signals (§10).
+        return render::menuRow(
+            s.label, s.active, s.focused, std::nullopt,
+            roleForSnapshotRow(snapshotsVm.healthForRow(s.index), snapshotsVm.isHeadRow(s.index),
+                               snapshotsVm.isLastGoodRow(s.index)),
+            theme);
+    };
+    auto snapshotsMenu = Menu(&snapshotsVm.rowsRef(), &snapshotsVm.selectedRef(), snapshotsMenuOpt);
 
     // detailLines() is cheap (reads the last rebuilt metas_), but cache like
     // the other panes (A-1 idiom): identity is the row index.
@@ -352,6 +502,13 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         const auto progress = updatesVm.installProgressText();
         return progress.empty() ? statusVm.text() : progress;
     };
+    // Valence for the updates status bar: modal prompt and in-flight install
+    // progress are both neutral; otherwise the shared status message's severity.
+    auto updatesStatusRole = [&]() -> std::optional<Role> {
+        if (textPrompt || confirm) return std::nullopt;
+        if (!updatesVm.installProgressText().empty()) return std::nullopt;
+        return roleForSeverity(statusVm.severity());
+    };
 
     int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates, 3 = snapshots
     auto tabs = Container::Tab({layout, modulesLayout, updatesLayout, snapshotsLayout}, &activeTab);
@@ -383,7 +540,9 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .list = modulesMenu->Render(),
                                              .detail = moduleDetail->Render(),
                                              .statusText = statusLine(),
-                                             .leftPaneWidth = kWidePaneWidth},
+                                             .leftPaneWidth = kWidePaneWidth,
+                                             .bannerRole = modulesBannerRole(bannerText),
+                                             .statusRole = statusRole()},
                                             theme);
         }
         if (activeTab == 2) {
@@ -393,7 +552,8 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .list = updatesMenu->Render(),
                                              .detail = updatesDetail->Render(),
                                              .statusText = updatesStatusLine(),
-                                             .leftPaneWidth = kWidePaneWidth},
+                                             .leftPaneWidth = kWidePaneWidth,
+                                             .statusRole = updatesStatusRole()},
                                             theme);
         }
         if (activeTab == 3) {
@@ -404,7 +564,8 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             views::SnapshotsView v{.activeTab = activeTab,
                                    .banner = bannerText,
                                    .statusText = statusLine(),
-                                   .leftPaneWidth = kWidePaneWidth};
+                                   .leftPaneWidth = kWidePaneWidth,
+                                   .statusRole = statusRole()};
             if (preview) {
                 v.showPreview = true;
                 v.previewLines = snapshotsVm.previewLines();
@@ -425,7 +586,8 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                          .deviceList = deviceMenu->Render(),
                                          .detail = detailRenderer->Render(),
                                          .statusText = statusLine(),
-                                         .leftPaneWidth = kLeftPaneWidth},
+                                         .leftPaneWidth = kLeftPaneWidth,
+                                         .statusRole = statusRole()},
                                         theme);
     });
 

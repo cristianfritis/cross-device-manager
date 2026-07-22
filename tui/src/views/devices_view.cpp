@@ -8,14 +8,13 @@
 
 namespace devmgr::tui::views {
 
-ftxui::Element renderDeviceRow(const std::string& label, bool active, bool focused) {
-    using namespace ftxui;
-    // Byte-for-byte the prior menu-entry transform: alignment prefix, then
-    // reverse video for keyboard focus and bold for the active selection.
-    Element e = text((active ? "> " : "  ") + label);
-    if (focused) e = e | inverted;
-    if (active) e = e | bold;
-    return e;
+ftxui::Element renderDeviceRow(const std::string& label, bool active, bool focused,
+                               std::optional<render::Glyph> statusGlyph, std::optional<Role> role,
+                               const Theme& theme) {
+    // The alignment prefix, reverse-video focus and bold selection are the prior
+    // menu-entry transform verbatim; render::menuRow layers the status glyph and
+    // role colour on top (both nullopt here reproduce the old row byte-for-byte).
+    return render::menuRow(label, active, focused, statusGlyph, role, theme);
 }
 
 ftxui::Element renderDevicesView(DevicesView v, const Theme& theme) {
@@ -38,7 +37,7 @@ ftxui::Element renderDevicesView(DevicesView v, const Theme& theme) {
                        border,
                    std::move(v.detail) | border | flex,
                }) | flex,
-               renderStatusBar(v.statusText, theme),
+               renderStatusBar(v.statusText, v.statusRole, theme),
            }) |
            flex;
 }

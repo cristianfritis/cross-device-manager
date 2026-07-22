@@ -1,19 +1,26 @@
 #pragma once
+#include <optional>
 #include <string>
 
 #include <ftxui/dom/elements.hpp>  // Element
 
+#include "tui/src/render_util.hpp"  // render::Glyph, render::menuRow
 #include "tui/src/theme.hpp"
 
 namespace devmgr::tui::views {
 
 // Selection/focus marker policy for a single Devices-list row (docs/DESIGN.md
-// §2.3 master-detail, §4.5 selection emphasis). Extracted verbatim from the
-// menu-entry transform so it is unit-testable: active → "> " prefix + bold,
-// focused → reverse video, otherwise a two-space alignment prefix. Pure — the
-// marquee windowing stays in the shell (it needs live tick state) and hands the
-// already-windowed label in. Semantic status colour arrives in group 4.
-ftxui::Element renderDeviceRow(const std::string& label, bool active, bool focused);
+// §2.3 master-detail, §4.5 selection emphasis, §4.1 semantic colour): active →
+// "> " prefix + bold, focused → reverse video, otherwise a two-space alignment
+// prefix. `statusGlyph`/`role` colour and glyph-mark the row by its device
+// status (the shell maps DeviceStatus → glyph+role; header/placeholder rows pass
+// nullopt). Pure — the marquee windowing stays in the shell (it needs live tick
+// state) and hands the already-windowed label in. The default arguments preserve
+// the earlier no-colour signature for callers/tests that do not colour.
+ftxui::Element renderDeviceRow(const std::string& label, bool active, bool focused,
+                               std::optional<render::Glyph> statusGlyph = std::nullopt,
+                               std::optional<Role> role = std::nullopt,
+                               const Theme& theme = Theme{});
 
 // Complete Devices tab composition: navigation bar, bold legend, master-detail
 // split (filter + scrolling device list on the left, detail on the right) and a
@@ -30,6 +37,7 @@ struct DevicesView {
     ftxui::Element detail;       // detailRenderer->Render()
     std::string statusText;
     int leftPaneWidth;
+    std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
 };
 ftxui::Element renderDevicesView(DevicesView view, const Theme& theme);
 

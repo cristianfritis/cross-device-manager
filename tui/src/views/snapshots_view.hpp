@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,7 @@ struct SnapshotsView {
     ftxui::Element list;                     // !showPreview: snapshotsMenu->Render()
     ftxui::Element detail;                   // !showPreview: snapshotsDetail->Render()
     std::vector<std::string> guidanceLines;  // !showPreview: empty → panel omitted
+    std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
 };
 ftxui::Element renderSnapshotsView(SnapshotsView view, const Theme& theme);
 

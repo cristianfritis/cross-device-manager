@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>      // std::uint8_t
+#include <optional>     // std::optional
 #include <string>       // std::string
 #include <string_view>  // std::string_view
 #include <utility>      // std::move
@@ -34,6 +35,30 @@ inline std::string_view glyph(Glyph g, const Theme& theme) {
             return u ? "◆" : "*";  // diamond / star (HEAD, last-good)
     }
     return "?";
+}
+
+// One menu-list row, byte-for-byte the FTXUI default-entry look (a "> "/"  "
+// selection marker, reverse video when focused, bold when active) with two
+// presentation additions layered on: an optional status glyph before the label
+// (the width-safe non-colour signal) and an optional semantic role colour. The
+// role decorator is identity outside Full mode, so in Mono/Plain the glyph and
+// the row's own text carry the meaning and colour never becomes the sole signal
+// (§10). `label` is already windowed/marquee-trimmed by the caller.
+inline ftxui::Element menuRow(std::string_view label, bool active, bool focused,
+                              std::optional<Glyph> statusGlyph, std::optional<Role> role,
+                              const Theme& theme) {
+    using namespace ftxui;
+    std::string line = active ? "> " : "  ";
+    if (statusGlyph) {
+        line.append(glyph(*statusGlyph, theme));
+        line.push_back(' ');
+    }
+    line.append(label);
+    Element e = text(line);
+    if (role) e = e | theme.decorate(*role);
+    if (focused) e = e | inverted;
+    if (active) e = e | bold;
+    return e;
 }
 
 // Detail key/value row with a fixed-width label column (§5.2: every value

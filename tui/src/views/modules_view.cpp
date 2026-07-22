@@ -10,11 +10,14 @@ namespace devmgr::tui::views {
 
 ftxui::Element renderModulesView(ModulesView v, const Theme& theme) {
     using namespace ftxui;
-    // Structure and decorators are the prior in-closure composition unchanged.
+    // Structure and decorators are the prior composition; the banner now takes a
+    // semantic role (info in steady state, warning when a refusal is likely).
+    Element banner = text(" " + v.banner + " ");
+    if (v.bannerRole) banner = banner | theme.decorate(*v.bannerRole);
     return vbox({
                renderTabBar(v.activeTab, theme),
                text(" Modules (/=filter  l=load  u=unload  q=quit) ") | bold,
-               text(" " + v.banner + " "),
+               banner,
                separator(),
                hbox({
                    vbox({
@@ -25,7 +28,7 @@ ftxui::Element renderModulesView(ModulesView v, const Theme& theme) {
                        border,
                    std::move(v.detail) | border | flex,
                }) | flex,
-               renderStatusBar(v.statusText, theme),
+               renderStatusBar(v.statusText, v.statusRole, theme),
            }) |
            flex;
 }

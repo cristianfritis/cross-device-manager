@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string>
 
 #include <ftxui/dom/elements.hpp>  // Element
@@ -22,6 +23,7 @@ struct UpdatesView {
     ftxui::Element detail;      // updatesDetail->Render()
     std::string statusText;
     int leftPaneWidth;
+    std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
 };
 ftxui::Element renderUpdatesView(UpdatesView view, const Theme& theme);
 

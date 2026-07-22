@@ -30,12 +30,12 @@ Sequencing follows design.md Migration Plan: each numbered group leaves the buil
 
 ## 4. Semantic coloring and layout polish (TUI maps accessor state → theme role)
 
-- [ ] 4.1 Devices: Active→success, Disabled→danger, Transitioning→warning, Error→danger, Unknown→muted; guard refusal→danger on status line; glyph+text paired everywhere
-- [ ] 4.2 Modules: signed→success, unsigned→danger, undetermined→muted, blacklisted→warning; security banner info in steady state, warning only when it explains a likely refusal
-- [ ] 4.3 Updates: available→info, up-to-date→muted success, error→danger
-- [ ] 4.4 Snapshots: healthy→default, corrupt→danger, unsupported→warning; HEAD + last-good markers accent
-- [ ] 4.5 Status line: success/warning/danger/info by `severity()`
-- [ ] 4.6 Border discipline: borders on major regions only (list/detail/status); separators + muted group headers for sub-regions; one legend line, one status line; verify 80–109 col switching layout intact
+- [x] 4.1 Devices: Active→success, Disabled→danger, Transitioning→warning, Error→danger, Unknown→muted; guard refusal→danger on status line; glyph+text paired everywhere
+- [x] 4.2 Modules: signed→success, unsigned→danger, undetermined→muted, blacklisted→warning; security banner info in steady state, warning only when it explains a likely refusal
+- [x] 4.3 Updates: available→info, up-to-date→muted success, error→danger
+- [x] 4.4 Snapshots: healthy→default, corrupt→danger, unsupported→warning; HEAD + last-good markers accent
+- [x] 4.5 Status line: success/warning/danger/info by `severity()`
+- [x] 4.6 Border discipline: borders on major regions only (list/detail/status); separators + muted group headers for sub-regions; one legend line, one status line; verify 80–109 col switching layout intact
 
 ## 5. States matrix and color-independence proof
 

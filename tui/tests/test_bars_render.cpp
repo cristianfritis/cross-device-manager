@@ -5,6 +5,7 @@
 #include "tui/src/views/tab_bar.hpp"
 
 #include <array>
+#include <optional>
 #include <string>
 
 #include <ftxui/dom/node.hpp>  // Render
@@ -70,7 +71,8 @@ TEST(TabBarRender, ActiveTabIsBold) {
 TEST(StatusBarRender, ShowsTextReverseVideo) {
     const Theme theme(ColorMode::Full, false);
     for (Size s : kSizes) {
-        ftxui::Screen screen = renderTo(views::renderStatusBar("Refreshed 18 devices.", theme), s);
+        ftxui::Screen screen =
+            renderTo(views::renderStatusBar("Refreshed 18 devices.", std::nullopt, theme), s);
         const std::string row = rowText(screen, 0);
         EXPECT_NE(row.find("Refreshed 18 devices."), std::string::npos);
         EXPECT_LE(static_cast<int>(row.size()), s.w);
