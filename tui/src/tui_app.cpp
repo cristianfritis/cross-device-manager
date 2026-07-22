@@ -45,6 +45,10 @@
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "tui/src/ftxui_ui_dispatcher.hpp"
+#include "tui/src/views/devices_view.hpp"
+#include "tui/src/views/modules_view.hpp"
+#include "tui/src/views/snapshots_view.hpp"
+#include "tui/src/views/updates_view.hpp"
 
 namespace devmgr::tui {
 
@@ -76,7 +80,7 @@ std::string marqueeWindow(const std::string& s, int width, int tick) {
 }
 }  // namespace
 
-int runTuiApp(bool selfTest) {
+int runTuiApp(bool selfTest, const Theme& theme) {
     using namespace ftxui;
 
     runtime::EventBus bus;
@@ -167,6 +171,9 @@ int runTuiApp(bool selfTest) {
         });
 
     static constexpr int kLeftPaneWidth = 44;
+    // Modules/Updates/Snapshots use a wider left pane than Devices (their rows
+    // carry longer identifiers); shared here so the three views stay in step.
+    static constexpr int kWidePaneWidth = 72;
     // Below this the side-by-side panes cannot render without writing outside
     // the screen; DESIGN.md §3.2 asks for a concise minimum-size message that
     // still honors quit and resize instead of a broken layout.
@@ -197,10 +204,7 @@ int runTuiApp(bool selfTest) {
             marqueeNeeded = true;
             label = marqueeWindow(label, kRowWidth, marqueeTick);
         }
-        Element e = text((s.active ? "> " : "  ") + label);
-        if (s.focused) e = e | inverted;
-        if (s.active) e = e | bold;
-        return e;
+        return views::renderDeviceRow(label, s.active, s.focused);
     };
     auto deviceMenu = Menu(&listVm.rowsRef(), &listVm.selectedRef(), deviceMenuOpt);
 
@@ -352,23 +356,11 @@ int runTuiApp(bool selfTest) {
     int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates, 3 = snapshots
     auto tabs = Container::Tab({layout, modulesLayout, updatesLayout, snapshotsLayout}, &activeTab);
 
-    // Tab titles line: names all three views with their direct-access digit
-    // (parity with the GUI's persistent tab bar, DESIGN.md §9 Primary
-    // navigation); only the active one is bold — the rest of each header
-    // keeps the existing per-tab bold-legend convention below it. Letters
-    // were considered for the hints but collide with existing verbs
-    // (d=dismiss, u=install/unload, U=unbind), so digits it is; 'm' still
-    // cycles.
-    auto tabTitles = [&] {
-        auto name = [&](const char* key, const char* label, int tab) {
-            Element e = hbox({text(std::string("[") + key + "]"), text(label)});
-            return activeTab == tab ? e | bold : e;
-        };
-        return hbox({text(" "), name("1", "Devices", 0), text(" | "), name("2", "Modules", 1),
-                     text(" | "), name("3", "Updates", 2), text(" | "), name("4", "Snapshots", 3),
-                     text("  (m: next tab) ")});
-    };
-
+    // Each tab body is a pure per-view render function (tui/src/views/): the
+    // shell hands it the active tab, the pre-rendered interactive components and
+    // the resolved theme; the view composes tab bar, legend, master-detail split
+    // and status line. Extracted with no behaviour change (DESIGN.md §9
+    // navigation, §3.2 status edge).
     auto ui = Renderer(tabs, [&] {
         marqueeNeeded = false;  // re-set by the menu transform while an overflowing row is selected
         // Minimum-size guard (DESIGN.md §3.2): below 80x24 the list/detail split
@@ -385,104 +377,56 @@ int runTuiApp(bool selfTest) {
                    flex;
         }
         if (activeTab == 1) {
-            return vbox({
-                       tabTitles(),
-                       text(" Modules (/=filter  l=load  u=unload  q=quit) ") | bold,
-                       text(" " + bannerText + " "),
-                       separator(),
-                       hbox({
-                           vbox({
-                               moduleFilterInput->Render(),
-                               separator(),
-                               modulesMenu->Render() | vscroll_indicator | yframe | flex,
-                           }) | size(WIDTH, EQUAL, 72) |
-                               border,
-                           moduleDetail->Render() | border | flex,
-                       }) | flex,
-                       text(" " + statusLine() + " ") | inverted,
-                   }) |
-                   flex;
+            return views::renderModulesView({.activeTab = activeTab,
+                                             .banner = bannerText,
+                                             .filterInput = moduleFilterInput->Render(),
+                                             .list = modulesMenu->Render(),
+                                             .detail = moduleDetail->Render(),
+                                             .statusText = statusLine(),
+                                             .leftPaneWidth = kWidePaneWidth},
+                                            theme);
         }
         if (activeTab == 2) {
-            Elements top = {
-                tabTitles(),
-                text(" Updates (u=install  r=refresh  d=dismiss  q=quit) ") | bold,
-                text(" " + bannerText + " "),
-            };
-            const auto reqBanner = updatesVm.requestBanner();
-            if (!reqBanner.empty()) top.push_back(text(" " + reqBanner + " ") | bold);
-            top.push_back(separator());
-            top.push_back(hbox({
-                              vbox({
-                                  updatesMenu->Render() | vscroll_indicator | yframe | flex,
-                              }) | size(WIDTH, EQUAL, 72) |
-                                  border,
-                              updatesDetail->Render() | border | flex,
-                          }) |
-                          flex);
-            top.push_back(text(" " + updatesStatusLine() + " ") | inverted);
-            return vbox(std::move(top)) | flex;
+            return views::renderUpdatesView({.activeTab = activeTab,
+                                             .banner = bannerText,
+                                             .requestBanner = updatesVm.requestBanner(),
+                                             .list = updatesMenu->Render(),
+                                             .detail = updatesDetail->Render(),
+                                             .statusText = updatesStatusLine(),
+                                             .leftPaneWidth = kWidePaneWidth},
+                                            theme);
         }
         if (activeTab == 3) {
-            Elements top = {
-                tabTitles(),
-                text(" Snapshots (/=filter  s=create…  r=restore  d=diff  h=history  x=delete  "
-                     "q=quit) ") |
-                    bold,
-                text(" " + bannerText + " "),
-            };
-            top.push_back(separator());
+            // The preview modal replaces the master-detail body; build only the
+            // interactive renders the active branch needs so a hidden Menu is
+            // never rendered off-screen (behaviour-preserving vs. the prior
+            // if/else that did the same).
+            views::SnapshotsView v{.activeTab = activeTab,
+                                   .banner = bannerText,
+                                   .statusText = statusLine(),
+                                   .leftPaneWidth = kWidePaneWidth};
             if (preview) {
-                // Modal body: the preview owns the pane while it is open, so
-                // the list underneath cannot be mistaken for something the
-                // confirmation applies to.
-                Elements lines;
-                for (const auto& line : snapshotsVm.previewLines()) lines.push_back(text(line));
-                top.push_back(vbox(std::move(lines)) | border | flex);
+                v.showPreview = true;
+                v.previewLines = snapshotsVm.previewLines();
             } else {
-                top.push_back(hbox({
-                                  vbox({
-                                      snapshotFilterInput->Render(),
-                                      separator(),
-                                      snapshotsMenu->Render() | vscroll_indicator | yframe | flex,
-                                  }) | size(WIDTH, EQUAL, 72) |
-                                      border,
-                                  snapshotsDetail->Render() | border | flex,
-                              }) |
-                              flex);
-                // Recovery guidance for the last restore that did not fully
-                // converge (snapshot-ui spec): durable, not a transient status
-                // line — it carries the safety id and the exact command back.
-                const auto guidance = snapshotsVm.restoreGuidanceLines();
-                if (!guidance.empty()) {
-                    Elements g;
-                    for (const auto& line : guidance) g.push_back(text(line));
-                    top.push_back(vbox(std::move(g)) | border);
-                }
+                v.filterInput = snapshotFilterInput->Render();
+                v.list = snapshotsMenu->Render();
+                v.detail = snapshotsDetail->Render();
+                v.guidanceLines = snapshotsVm.restoreGuidanceLines();
             }
-            top.push_back(text(" " + statusLine() + " ") | inverted);
-            return vbox(std::move(top)) | flex;
+            return views::renderSnapshotsView(std::move(v), theme);
         }
         // Legend is a full-width row like the other two tabs (it used to live
-        // inside the 44-column left pane, where it truncated mid-shortcut).
-        return vbox({
-                   tabTitles(),
-                   text(" Devices (/=filter  r=refresh  e=enable/disable  U=unbind  B=bind  "
-                        "q=quit) ") |
-                       bold,
-                   separator(),
-                   hbox({
-                       vbox({
-                           searchInput->Render(),
-                           separator(),
-                           deviceMenu->Render() | vscroll_indicator | yframe | flex,
-                       }) | size(WIDTH, EQUAL, kLeftPaneWidth) |
-                           border,
-                       detailRenderer->Render() | border | flex,
-                   }) | flex,
-                   text(" " + statusLine() + " ") | inverted,
-               }) |
-               flex;
+        // inside the 44-column left pane, where it truncated mid-shortcut). The
+        // whole Devices tab composition now lives in views::renderDevicesView;
+        // the shell supplies the interactive component renders and the theme.
+        return views::renderDevicesView({.activeTab = activeTab,
+                                         .filterInput = searchInput->Render(),
+                                         .deviceList = deviceMenu->Render(),
+                                         .detail = detailRenderer->Render(),
+                                         .statusText = statusLine(),
+                                         .leftPaneWidth = kLeftPaneWidth},
+                                        theme);
     });
 
     // Single tab-entry path shared by the 'm' cycle and the direct 1/2/3
