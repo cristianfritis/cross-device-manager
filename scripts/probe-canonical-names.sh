@@ -23,12 +23,16 @@ usage() {
   cat <<'EOF'
 Usage:
   probe-canonical-names.sh [--all]
+  probe-canonical-names.sh --resolve
   probe-canonical-names.sh --pci DOMAIN:BUS:SLOT.FUNCTION
   probe-canonical-names.sh DOMAIN:BUS:SLOT.FUNCTION
 
 --all (the default) inventories human-readable component names from the
-authoritative source available for each hardware class. --pci retains the
-original detailed PCI/DTO diagnostic. No mode changes the system.
+authoritative source available for each hardware class. --resolve simulates the
+core::displayDeviceName tier precedence over this box's udev data and reports
+coverage (set PREFIX_VENDOR=1 to also prefix catalogued names with the vendor).
+--pci retains the original detailed PCI/DTO diagnostic. No mode changes the
+system.
 EOF
 }
 
@@ -76,6 +80,104 @@ print_udev_database_names() {
       found=1
     }
     END { if (!found) print "  (no ID_MODEL_FROM_DATABASE properties in the current udev database)" }
+  '
+}
+
+# Simulates the core::displayDeviceName precedence over THIS box's real udev data and
+# reports coverage, so the resolver design is chosen from measurements rather than guesses.
+# The tiers below mirror the formatter exactly; every input is a udev property that
+# udev_device_mapper.cpp ALREADY copies into core::Device::properties (no DTO change).
+simulate_resolver() {
+  if ! command -v udevadm >/dev/null 2>&1; then
+    echo "  (udevadm unavailable)"
+    return
+  fi
+
+  udevadm info --export-db 2>/dev/null | awk -v prefix_vendor="${PREFIX_VENDOR:-0}" '
+    # "Advanced Micro Devices, Inc. [AMD]" -> "AMD"; "Chicony Electronics Co., Ltd" ->
+    # "Chicony Electronics". A bracketed alias is the vendor pci.ids itself considers
+    # canonical, so it wins; otherwise strip the legal-form suffix only.
+    function short_vendor(v,   out) {
+      if (v == "") return ""
+      if (match(v, /\[[^]]+\][[:space:]]*$/)) {
+        out = substr(v, RSTART + 1, RLENGTH - 2)
+        sub(/\][[:space:]]*$/, "", out)
+        return out
+      }
+      out = v
+      sub(/[[:space:]]*,?[[:space:]]*(Inc\.?|Incorporated|Corporation|Corp\.?|Co\.?,?[[:space:]]*Ltd\.?|Ltd\.?|Limited|GmbH|LLC|AG|S\.A\.|B\.V\.)[[:space:]]*$/, "", out)
+      sub(/[[:space:]]*,[[:space:]]*$/, "", out)
+      return out
+    }
+    # Self-reported USB product strings are underscored and sometimes are just the hex
+    # PID ("0174"), which is noise, not a name.
+    function clean_model(m, pid,   out) {
+      out = m
+      gsub(/_/, " ", out)
+      sub(/^[[:space:]]+/, "", out); sub(/[[:space:]]+$/, "", out)
+      if (out == "") return ""
+      if (tolower(out) == tolower(pid)) return ""
+      if (out ~ /^[0-9a-fA-F]{4}$/) return ""
+      return out
+    }
+    function join_vendor(v, rest) {
+      if (v == "") return rest
+      if (rest == "") return v
+      if (tolower(substr(rest, 1, length(v))) == tolower(v)) return rest  # already prefixed
+      return v " " rest
+    }
+    BEGIN { RS=""; FS="\n" }
+    {
+      path=""; subsys=""
+      for (k in e) delete e[k]
+      for (i=1; i<=NF; i++) {
+        line=$i
+        if (line ~ /^P: /) path=substr(line, 4)
+        else if (line ~ /^U: /) subsys=substr(line, 4)
+        else if (line ~ /^E: /) {
+          a=substr(line, 4); q=index(a, "=")
+          if (q > 1) e[substr(a, 1, q-1)]=substr(a, q+1)
+        }
+      }
+      if (subsys != "pci" && !(subsys == "usb" && e["DEVTYPE"] == "usb_device")) next
+      sysname=path; sub(/^.*\//, "", sysname)
+      total++
+
+      vendor = short_vendor(e["ID_VENDOR_FROM_DATABASE"])
+      pid    = e["ID_MODEL_ID"]
+      # Tier 0 mirrors udev_device_mapper.cpp: what core::Device::name holds today.
+      current = e["ID_MODEL_FROM_DATABASE"]
+      if (current == "") current = clean_model(e["ID_MODEL"], pid)
+      if (current == "") current = sysname
+      if (current == sysname) positional++
+
+      tier=""; name=""
+      if (e["ID_MODEL_FROM_DATABASE"] != "") { tier="1 model_from_db"; name=e["ID_MODEL_FROM_DATABASE"] }
+      else if (clean_model(e["ID_MODEL"], pid) != "") { tier="2 self_model"; name=clean_model(e["ID_MODEL"], pid) }
+      else if (e["ID_PCI_SUBCLASS_FROM_DATABASE"] != "") { tier="3 vendor+subclass"; name=e["ID_PCI_SUBCLASS_FROM_DATABASE"] }
+      else if (e["ID_PCI_CLASS_FROM_DATABASE"] != "") { tier="4 vendor+class"; name=e["ID_PCI_CLASS_FROM_DATABASE"] }
+      else if (vendor != "") { tier="5 vendor only"; name="device" }
+      else { tier="6 raw id"; name=sysname }
+
+      # Tiers 3-5 are meaningless without the vendor; tier 1/2 take it only when asked.
+      if (tier ~ /^[345]/ || (prefix_vendor == "1" && tier ~ /^[12]/)) name = join_vendor(vendor, name)
+
+      count[tier]++
+      if (length(name) > widest) widest = length(name)
+      if (tier !~ /^1 /) printf "  %-4s %-14s %-16s %-28s -> %s\n", subsys, sysname, current, tier, name
+      resolved[NR] = name
+      seen[name]++
+    }
+    END {
+      dupes=0
+      for (n in seen) if (seen[n] > 1) dupes += seen[n]
+      printf "\n  DEVICES: %d | today positional/bare: %d (%.0f%%) | after resolver: %d\n",
+             total, positional, (total ? 100*positional/total : 0), count["6 raw id"]
+      printf "  TIERS: "
+      for (t in count) printf "[%s=%d] ", t, count[t]
+      printf "\n  widest primary label: %d cols | rows sharing a label (secondary line disambiguates): %d\n",
+             widest, dupes
+    }
   '
 }
 
@@ -152,6 +254,14 @@ inventory_all() {
     '
   fi
 
+  section "RESOLVER SIMULATION (core::displayDeviceName precedence over the data above)"
+  echo "  Rows shown are the ones tier 1 (ID_MODEL_FROM_DATABASE, today's core::Device::name)"
+  echo "  does NOT already answer — i.e. exactly the rows that render as a bare address today."
+  echo "  Columns: subsystem, sysname, today's label, tier chosen, proposed label."
+  simulate_resolver
+  echo
+  echo "  Re-run with PREFIX_VENDOR=1 to also prefix catalogued (tier 1/2) names with the vendor."
+
   section "LIMITS / VERDICT"
   echo "  There is no single universal canonical-name database. PCI and USB names come from"
   echo "  distro-maintained ID databases; CPU, board, storage, and DIMM names come from firmware;"
@@ -162,6 +272,11 @@ inventory_all() {
 case "${1:-}" in
   ""|--all)
     inventory_all
+    exit 0
+    ;;
+  --resolve)
+    echo "=== RESOLVER SIMULATION (non-tier-1 rows only) ==="
+    simulate_resolver
     exit 0
     ;;
   -h|--help)

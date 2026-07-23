@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "devmgr/core/device_presentation.hpp"
+
 namespace devmgr::app {
 namespace {
 
@@ -62,7 +64,9 @@ std::vector<std::string> DeviceDetailVM::lines(const std::optional<core::DeviceI
 
     const core::Device& d = *dev;
     std::vector<std::string> out;
-    out.push_back(kv("Name:", d.name));
+    // The same canonical formatter the list rows use, so a device cannot be
+    // called one thing in the list and another in the detail pane.
+    out.push_back(kv("Name:", core::displayDeviceName(d)));
     out.push_back(kv("Id:", d.id.value));
     out.push_back(kv("Bus:", core::displayBus(d.bus)));
     out.push_back(kv("Status:", core::to_string(d.status)));

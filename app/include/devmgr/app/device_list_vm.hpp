@@ -7,6 +7,7 @@
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/ui_dispatcher.hpp"
+#include "devmgr/core/criticality.hpp"
 #include "devmgr/core/models.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 
@@ -34,6 +35,17 @@ class DeviceListVM {
     // and out-of-range rows — exactly the rows isHeader()/selectedDeviceId()
     // treat as non-device. The role→colour mapping lives in the TUI, not here.
     std::optional<core::DeviceStatus> statusForRow(int row) const;
+    // The canonical device name for `row` — the SAME string the row text and
+    // the detail pane's "Name:" render, so no frontend re-derives a label and
+    // GUI and TUI cannot drift apart (DESIGN.md §9). nullopt on the same
+    // non-device rows as statusForRow().
+    std::optional<std::string> nameForRow(int row) const;
+    // Per-row criticality for the essential/important marker. Computed from the
+    // guard's own facts, probed ONCE per snapshot refresh, so a marked row is
+    // exactly a row the guard would refuse to disable. Ordinary (no marker)
+    // whenever no prober is wired or the probe failed; nullopt on non-device
+    // rows. The marker glyph and colour live in the frontend, not here.
+    std::optional<core::Criticality> criticalityForRow(int row) const;
     // Frontend hooks invoked at entry/exit of every rebuild() — the single
     // funnel for all row mutation (delta-triggered posts and setFilter alike).
     // Qt uses them for beginResetModel()/endResetModel(); the TUI leaves them
@@ -48,8 +60,13 @@ class DeviceListVM {
    private:
     void onModelChanged();   // EventBus handler — marshals one coalesced rebuild() via dispatcher
     void refreshSnapshot();  // UI-thread: re-copy the model and rebuild filter haystacks
-    // Sorts `group` by name and appends its header + device rows to rows_/rowIds_.
-    void appendRows(core::BusType bus, std::vector<const core::Device*>& group);
+    // The only two ways the parallel row vectors may be reset or given a
+    // header/placeholder row — see the definitions for why.
+    void clearRows();
+    void pushNonDeviceRow(std::string text);
+    // Appends `group`'s header + device rows to rows_/rowIds_, ordered by the
+    // canonical label each device renders under.
+    void appendRows(core::BusType bus, const std::vector<const core::Device*>& group);
     // Re-resolves `keep` to its new row index (stable selection), then clamps.
     void restoreSelection(const std::optional<core::DeviceId>& keep);
 
@@ -62,12 +79,19 @@ class DeviceListVM {
     // Captured from the grouped Device* during rebuild so statusForRow() is a
     // pure lookup (status only changes via a delta, which rebuilds anyway).
     std::vector<std::optional<core::DeviceStatus>> rowStatus_;
+    // Same 1:1 alignment and same nullopt-on-non-device-rows rule as rowStatus_.
+    std::vector<std::optional<std::string>> rowName_;
+    std::vector<std::optional<core::Criticality>> rowCriticality_;
     // Model snapshot cached on the UI thread so filter keystrokes rebuild rows
     // without re-copying the whole model out of DeviceService. haystacks_ holds
     // the per-device lowercase filter text, aligned with snapshot_, computed
     // once per snapshot refresh instead of once per device per keystroke.
     std::vector<core::Device> snapshot_;
     std::vector<std::string> haystacks_;
+    // Probed alongside the snapshot, never per row and never per keystroke:
+    // probing reads the filesystem, and a filter rebuild must stay cheap.
+    // nullopt => no advisory facts available, so nothing is marked.
+    std::optional<pal::CriticalityFacts> facts_;
     // false => snapshot_ is stale and the next rebuild() must re-fetch. Written
     // by onModelChanged() on publisher threads, claimed (exchange) on the UI
     // thread; a store(false) racing a rebuild's fetch is followed by that

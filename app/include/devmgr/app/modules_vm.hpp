@@ -10,6 +10,7 @@
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/ui_dispatcher.hpp"
+#include "devmgr/core/criticality.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 
@@ -44,6 +45,11 @@ class ModulesVM {
     // nullopt for the placeholder and out-of-range rows. Reads the same
     // signature cell the row already shows, so colour and text never disagree.
     std::optional<ModuleSignature> signedForRow(int row) const;
+    // Per-row criticality for the essential/important marker. Reads the same
+    // refcount and holders the row already shows, plus the curated essential
+    // list, so the marker cannot contradict the row's own numbers. nullopt for
+    // the placeholder and out-of-range rows.
+    std::optional<core::Criticality> criticalityForRow(int row) const;
     std::vector<std::string> detailLines() const;  // selected module deep info
     std::string banner() const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);

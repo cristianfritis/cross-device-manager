@@ -5,6 +5,9 @@ add_executable(devmgr_tests
     unit/test_version.cpp
     unit/test_result.cpp
     unit/test_models.cpp
+    unit/test_device_presentation.cpp
+    unit/test_criticality.cpp
+    unit/test_vm_criticality_accessors.cpp
     unit/test_snapshot_models.cpp
     unit/test_snapshot_json.cpp
     unit/test_snapshot_diff.cpp

@@ -7,6 +7,7 @@
 #include <iterator>
 #include <utility>
 
+#include "devmgr/core/device_presentation.hpp"
 #include "devmgr/core/events.hpp"
 
 namespace devmgr::app {
@@ -17,8 +18,12 @@ std::string toLower(std::string s) {
     return s;
 }
 
+// The canonical name joins the haystack alongside the raw one: a user who reads
+// "AMD USB controller" in the list must be able to type it into the filter and
+// match, and a user who knows the kernel's own name must keep matching too.
 std::string haystackFor(const core::Device& d) {
-    return toLower(d.name + " " + d.vendorId + ":" + d.productId + " " + core::to_string(d.bus));
+    return toLower(core::displayDeviceName(d) + " " + d.name + " " + d.vendorId + ":" +
+                   d.productId + " " + core::to_string(d.bus));
 }
 
 }  // namespace
@@ -54,22 +59,64 @@ void DeviceListVM::setFilter(std::string filter) {
 
 void DeviceListVM::refreshSnapshot() {
     snapshot_ = facade_.devices();
+    // Probed here and nowhere else: this runs once per model change, whereas
+    // rebuild() also runs on every filter keystroke.
+    facts_ = facade_.criticalityFacts();
     haystacks_.clear();
     haystacks_.reserve(snapshot_.size());
     for (const auto& d : snapshot_) haystacks_.push_back(haystackFor(d));
 }
 
-void DeviceListVM::appendRows(core::BusType bus, std::vector<const core::Device*>& group) {
+// The row vectors are parallel by contract — statusForRow/nameForRow/
+// criticalityForRow all index them with the same row number. Every append and
+// every reset goes through these two helpers so a new per-row vector cannot be
+// half-wired and silently misalign the others.
+void DeviceListVM::clearRows() {
+    rows_.clear();
+    rowIds_.clear();
+    rowStatus_.clear();
+    rowName_.clear();
+    rowCriticality_.clear();
+}
+
+void DeviceListVM::pushNonDeviceRow(std::string text) {
+    rows_.push_back(std::move(text));
+    rowIds_.emplace_back(std::nullopt);
+    rowStatus_.emplace_back(std::nullopt);
+    rowName_.emplace_back(std::nullopt);
+    rowCriticality_.emplace_back(std::nullopt);
+}
+
+void DeviceListVM::appendRows(core::BusType bus, const std::vector<const core::Device*>& group) {
     if (group.empty()) return;
-    std::ranges::sort(
-        group, [](const core::Device* a, const core::Device* b) { return a->name < b->name; });
-    rows_.push_back(std::string("── ") + core::displayBus(bus) + " ──");
-    rowIds_.emplace_back(std::nullopt);     // header
-    rowStatus_.emplace_back(std::nullopt);  // header carries no device status
-    for (const core::Device* d : group) {
-        rows_.push_back("  " + d->name + "  (" + d->vendorId + ":" + d->productId + ")");
+    // Order by the label the user actually reads. Sorting on Device::name would
+    // file every uncatalogued device under its kernel address, scattering rows
+    // that read "AMD USB controller" across the group.
+    std::vector<std::pair<std::string, const core::Device*>> labelled;
+    labelled.reserve(group.size());
+    for (const core::Device* d : group) labelled.emplace_back(core::displayDeviceName(*d), d);
+    std::ranges::sort(labelled, [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    pushNonDeviceRow(std::string("── ") + core::displayBus(bus) + " ──");
+    for (const auto& [label, d] : labelled) {
+        // Names repeat (a machine has six identically named bridges), so the
+        // identity carries the ids AND the position that tell the rows apart.
+        const std::string identity = core::displayDeviceIdentity(*d);
+        std::string row = "  " + label;
+        if (!identity.empty()) {
+            row += "  (";
+            row += identity;
+            row += ")";
+        }
+        rows_.push_back(std::move(row));
         rowIds_.emplace_back(d->id);
         rowStatus_.emplace_back(d->status);
+        rowName_.emplace_back(label);
+        // Pure policy over the facts probed with the snapshot — no filesystem
+        // work here. Without facts nothing is marked, matching how the advisory
+        // guard degrades to "allowed".
+        rowCriticality_.emplace_back(facts_ ? core::classifyDevice(*facts_, d->sysfsPath)
+                                            : core::Criticality::Ordinary);
     }
 }
 
@@ -95,16 +142,9 @@ void DeviceListVM::rebuild() {
         if (slot < groups.size()) groups[slot].push_back(&snapshot_[i]);
     }
 
-    rows_.clear();
-    rowIds_.clear();
-    rowStatus_.clear();
+    clearRows();
     for (std::size_t g = 0; g < kOrder.size(); ++g) appendRows(kOrder.at(g), groups[g]);
-
-    if (rows_.empty()) {
-        rows_.emplace_back("(no devices)");
-        rowIds_.emplace_back(std::nullopt);
-        rowStatus_.emplace_back(std::nullopt);
-    }
+    if (rows_.empty()) pushNonDeviceRow("(no devices)");
     restoreSelection(keep);
     if (afterRebuild_) afterRebuild_();
 }
@@ -131,6 +171,16 @@ bool DeviceListVM::isHeader(int row) const {
 std::optional<core::DeviceStatus> DeviceListVM::statusForRow(int row) const {
     if (row < 0 || std::cmp_greater_equal(row, rowStatus_.size())) return std::nullopt;
     return rowStatus_[static_cast<std::size_t>(row)];
+}
+
+std::optional<std::string> DeviceListVM::nameForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowName_.size())) return std::nullopt;
+    return rowName_[static_cast<std::size_t>(row)];
+}
+
+std::optional<core::Criticality> DeviceListVM::criticalityForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowCriticality_.size())) return std::nullopt;
+    return rowCriticality_[static_cast<std::size_t>(row)];
 }
 
 }  // namespace devmgr::app

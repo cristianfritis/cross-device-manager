@@ -68,6 +68,14 @@ class ApplicationFacade {
     // request — this result is never a substitute for that.
     services::GuardVerdict canDisable(const core::DeviceId& id) const;
 
+    // The probed facts behind canDisable(), for callers that must classify MANY
+    // devices at once: canDisable() re-probes the filesystem per call, which a
+    // per-row loop must never do. Probe once, then apply the pure policy
+    // (services::evaluateDisable / core::classifyDevice) to every row.
+    // nullopt when no prober is wired or the probe failed — callers degrade to
+    // "unmarked", exactly as the advisory guard degrades to "allowed".
+    std::optional<pal::CriticalityFacts> criticalityFacts() const;
+
     std::vector<core::Device> devices() const { return service_.devices(); }
     std::optional<core::Device> findById(const core::DeviceId& id) const {
         return service_.findById(id);

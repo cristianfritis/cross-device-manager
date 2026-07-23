@@ -80,6 +80,13 @@ services::GuardVerdict ApplicationFacade::canDisable(const core::DeviceId& id) c
     return services::evaluateDisable(*facts, device->sysfsPath);
 }
 
+std::optional<pal::CriticalityFacts> ApplicationFacade::criticalityFacts() const {
+    if (prober_ == nullptr) return std::nullopt;
+    auto facts = prober_->probe();
+    if (!facts) return std::nullopt;
+    return *facts;
+}
+
 std::vector<core::Driver> ApplicationFacade::driverInfo(const core::DeviceId& id) const {
     if (drivers_ == nullptr) return {};
     const auto device = service_.findById(id);

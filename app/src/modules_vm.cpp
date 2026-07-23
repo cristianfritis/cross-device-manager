@@ -185,6 +185,17 @@ std::optional<ModuleSignature> ModulesVM::signedForRow(int row) const {
     return classifySignatureCell(it != signatureCell_.end() ? it->second : std::string("…"));
 }
 
+std::optional<core::Criticality> ModulesVM::criticalityForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowNames_.size())) return std::nullopt;
+    const auto& name = rowNames_[static_cast<std::size_t>(row)];
+    if (!name) return std::nullopt;  // placeholder row carries no module
+    // Classify from the snapshot entry the row was formatted from, so the
+    // marker and the Ref/Used-by columns can never describe different states.
+    const auto it = std::ranges::find(snapshot_, *name, &core::LoadedModule::name);
+    if (it == snapshot_.end()) return core::Criticality::Ordinary;
+    return core::classifyModule(it->name, it->refCount, it->holders);
+}
+
 std::shared_future<void> ModulesVM::fillSignatures() {
     // FIX ROUND 1 (i-1 sub-issue), coalescing option (a): if a fill is
     // already in flight (valid and not yet ready), return that handle
