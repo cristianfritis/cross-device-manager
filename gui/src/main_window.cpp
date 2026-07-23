@@ -384,6 +384,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // task 3.3 adds the filter field, the Diff/History views and the durable
     // recovery-guidance surface, keeping parity with the TUI tab.
     snapshotsBannerLabel_ = new QLabel;
+    snapshotsBannerLabel_->setVisible(false);  // no counts to show until the tab is entered (B4)
     snapshotModel_ = new SnapshotListModel(snapshotsVm_, this);
     snapshotsView_ = new QListView;
     snapshotsView_->setModel(snapshotModel_);
@@ -536,7 +537,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             updatesVm_.rebuild();
             pruneAndPushPending(facade_.refreshUpdates());
         } else if (index == 3) {
-            snapshotsBannerLabel_->setText(QString::fromStdString(snapshotsVm_.banner()));
+            updateSnapshotsBannerLabel();
             snapshotsVm_.rebuild();
             pruneAndPushPending(facade_.refreshSnapshots());
         }
@@ -613,7 +614,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         // counts banner in step with the list, and re-gate the verbs — but only
         // while the Snapshots tab is current (F-1 gating, extended here).
         if (tabs_->currentIndex() == 3) {
-            snapshotsBannerLabel_->setText(QString::fromStdString(snapshotsVm_.banner()));
+            updateSnapshotsBannerLabel();
             updateActionEnablement();
         }
     });
@@ -634,7 +635,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             // A create/restore/delete completion wakes here (TaskCompletedEvent →
             // StatusLineVM); the banner reads the rebuilt metas, so refresh it
             // and re-gate the verbs while the Snapshots tab stays current.
-            snapshotsBannerLabel_->setText(QString::fromStdString(snapshotsVm_.banner()));
+            updateSnapshotsBannerLabel();
             updateActionEnablement();
         }
     });
@@ -761,6 +762,16 @@ void MainWindow::updateSnapshotsDetailPane() {
         }
     }
     snapshotsDetailTree_->resizeColumnToContents(0);
+}
+
+// The counts banner is empty exactly when the store is empty, and the list's
+// "(no snapshots)" placeholder is then the single empty indicator (pass-2 bug
+// B4) — hide the label rather than reserve a blank row for it, matching how the
+// TUI drops the banner row and how the durable request banner above behaves.
+void MainWindow::updateSnapshotsBannerLabel() {
+    const std::string banner = snapshotsVm_.banner();
+    snapshotsBannerLabel_->setText(QString::fromStdString(banner));
+    snapshotsBannerLabel_->setVisible(!banner.empty());
 }
 
 void MainWindow::updateRequestBannerLabel() {

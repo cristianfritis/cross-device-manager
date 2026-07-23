@@ -51,6 +51,10 @@ class ModulesVM {
     // the placeholder and out-of-range rows.
     std::optional<core::Criticality> criticalityForRow(int row) const;
     std::vector<std::string> detailLines() const;  // selected module deep info
+    // One muted, non-selectable header row naming the columns (R5). Built from
+    // the row formatter's own widths so header and rows cannot drift apart; it
+    // is NOT a list entry, so it can never take the cursor.
+    std::string columnHeader() const;
     std::string banner() const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     void rebuild();  // UI thread: snapshot + rows

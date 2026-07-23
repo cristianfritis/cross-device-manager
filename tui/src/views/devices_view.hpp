@@ -10,17 +10,21 @@
 namespace devmgr::tui::views {
 
 // Selection/focus marker policy for a single Devices-list row (docs/DESIGN.md
-// §2.3 master-detail, §4.5 selection emphasis, §4.1 semantic colour): active →
-// "> " prefix + bold, focused → reverse video, otherwise a two-space alignment
-// prefix. `statusGlyph`/`role` colour and glyph-mark the row by its device
-// status (the shell maps DeviceStatus → glyph+role; header/placeholder rows pass
-// nullopt). Pure — the marquee windowing stays in the shell (it needs live tick
-// state) and hands the already-windowed label in. The default arguments preserve
-// the earlier no-colour signature for callers/tests that do not colour.
-ftxui::Element renderDeviceRow(const std::string& label, bool active, bool focused,
+// §2.3 master-detail, §4.5 selection emphasis, §4.1 semantic colour): selected →
+// "> " prefix + bold, plus reverse video while the list owns the keyboard
+// (`listFocused`); otherwise a two-space alignment prefix. Both signals key off
+// `selected` alone so the marker, the bar and the detail pane can never name
+// different rows (pass-2 bug B1). `statusGlyph`/`role` colour and glyph-mark the
+// row by its device status (the shell maps DeviceStatus → glyph+role;
+// header/placeholder rows pass nullopt). Pure — the label windowing stays in the
+// shell (it needs live tick state) and hands the already-windowed label in. The
+// default arguments preserve the earlier no-colour signature for callers/tests
+// that do not colour.
+ftxui::Element renderDeviceRow(const std::string& label, bool selected, bool listFocused,
                                std::optional<render::Glyph> statusGlyph = std::nullopt,
                                std::optional<Role> role = std::nullopt,
-                               const Theme& theme = Theme{});
+                               const Theme& theme = Theme{},
+                               std::optional<render::Badge> badge = std::nullopt);
 
 // Complete Devices tab composition: navigation bar, bold legend, master-detail
 // split (filter + scrolling device list on the left, detail on the right) and a

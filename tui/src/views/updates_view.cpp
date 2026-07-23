@@ -20,11 +20,15 @@ ftxui::Element renderUpdatesView(UpdatesView v, const Theme& theme) {
     };
     if (!v.requestBanner.empty()) top.push_back(text(" " + v.requestBanner + " ") | bold);
     top.push_back(render::hsep(theme));
+    Elements listPane;
+    if (!v.columnHeader.empty()) {
+        listPane.push_back(text(" " + v.columnHeader) | theme.decorate(Role::Muted));
+        listPane.push_back(render::hsep(theme));
+    }
+    listPane.push_back(std::move(v.list) | vscroll_indicator | yframe | flex);
     top.push_back(hbox({
-                      render::regionFrame(vbox({
-                                              std::move(v.list) | vscroll_indicator | yframe | flex,
-                                          }) | size(WIDTH, EQUAL, v.leftPaneWidth),
-                                          theme),
+                      render::regionFrame(
+                          vbox(std::move(listPane)) | size(WIDTH, EQUAL, v.leftPaneWidth), theme),
                       render::regionFrame(std::move(v.detail), theme) | flex,
                   }) |
                   flex);

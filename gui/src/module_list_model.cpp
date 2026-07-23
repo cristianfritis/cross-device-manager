@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include "devmgr/core/criticality.hpp"
+
 namespace devmgr::gui {
 
 ModuleListModel::ModuleListModel(app::ModulesVM& vm, QObject* parent)
@@ -21,7 +23,16 @@ int ModuleListModel::rowCount(const QModelIndex& parent) const {
 QVariant ModuleListModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.row() >= rowCount({})) return {};
     if (role != Qt::DisplayRole) return {};
-    return QString::fromStdString(vm_.rowsRef()[static_cast<std::size_t>(index.row())]);
+    QString text = QString::fromStdString(vm_.rowsRef()[static_cast<std::size_t>(index.row())]);
+    // R6 parity: the TUI marks a load-bearing module with a warning-coloured
+    // glyph badge; the GUI has no colour this cycle (DESIGN §9 exception), so it
+    // spells the same shared fact out in words. Both read the SAME
+    // criticalityForRow() — neither surface re-derives it.
+    if (const auto level = vm_.criticalityForRow(index.row());
+        level && *level != core::Criticality::Ordinary) {
+        text += QString("  [%1]").arg(QString::fromStdString(core::displayCriticality(*level)));
+    }
+    return text;
 }
 
 }  // namespace devmgr::gui

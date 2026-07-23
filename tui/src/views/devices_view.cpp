@@ -8,13 +8,13 @@
 
 namespace devmgr::tui::views {
 
-ftxui::Element renderDeviceRow(const std::string& label, bool active, bool focused,
+ftxui::Element renderDeviceRow(const std::string& label, bool selected, bool listFocused,
                                std::optional<render::Glyph> statusGlyph, std::optional<Role> role,
-                               const Theme& theme) {
-    // The alignment prefix, reverse-video focus and bold selection are the prior
-    // menu-entry transform verbatim; render::menuRow layers the status glyph and
-    // role colour on top (both nullopt here reproduce the old row byte-for-byte).
-    return render::menuRow(label, active, focused, statusGlyph, role, theme);
+                               const Theme& theme, std::optional<render::Badge> badge) {
+    // Devices share the one selection treatment every list uses; render::menuRow
+    // layers the status glyph and role colour on top (both nullopt here reproduce
+    // the plain row byte-for-byte).
+    return render::menuRow(label, selected, listFocused, statusGlyph, role, theme, badge);
 }
 
 ftxui::Element renderDevicesView(DevicesView v, const Theme& theme) {

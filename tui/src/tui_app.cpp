@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <ftxui/component/component.hpp>
@@ -17,7 +18,6 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
-#include <ftxui/screen/string.hpp>
 #include <ftxui/screen/terminal.hpp>
 
 #include "devmgr/app/application_facade.hpp"
@@ -46,6 +46,9 @@
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "tui/src/ftxui_ui_dispatcher.hpp"
 #include "tui/src/render_util.hpp"
+#include "tui/src/selection.hpp"
+#include "tui/src/state_roles.hpp"
+#include "tui/src/views/detail_pane.hpp"
 #include "tui/src/views/devices_view.hpp"
 #include "tui/src/views/modules_view.hpp"
 #include "tui/src/views/snapshots_view.hpp"
@@ -63,134 +66,6 @@ void drainPending(std::vector<std::future<void>>& pending) {
     }
 }
 
-// Loop-scrolls a string that exceeds `width` cells: pause at the start,
-// advance one glyph per tick to the end, pause, restart from the beginning
-// (DESIGN.md §2.4 — long identifiers "scroll within a bounded region").
-// Glyph-based so multi-byte names (e.g. "…Webcam™") never split mid-codepoint.
-// width (cells) and tick (frame counter) are distinct roles a caller cannot
-// meaningfully confuse, so the swappable-parameter warning is suppressed:
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-std::string marqueeWindow(const std::string& s, int width, int tick) {
-    const auto glyphs = ftxui::Utf8ToGlyphs(s);
-    const int n = static_cast<int>(glyphs.size());
-    if (n <= width) return s;
-    constexpr int kEndPauseTicks = 7;  // ~1 s at the 150 ms tick rate
-    const int overflow = n - width;
-    const int cycle = overflow + 2 * kEndPauseTicks;
-    const int offset = std::clamp(tick % cycle - kEndPauseTicks, 0, overflow);
-    std::string out;
-    for (int i = offset; i < offset + width; ++i) out += glyphs[static_cast<std::size_t>(i)];
-    return out;
-}
-
-// ---- Per-row state → semantic role/glyph mapping (DESIGN.md §4.1 TUI table) ----
-// The role→colour mapping deliberately lives in the TUI (per-surface presentation)
-// while the *state* comes from the ViewModel accessors (design decision 1a). Kept
-// here in the shell so the pure render library stays free of app/core types; the
-// render functions receive only tui `Role`/`Glyph` values. nullopt state (header,
-// placeholder, out-of-range) maps to no colour and no glyph — those rows stay plain.
-
-std::optional<Role> roleForDeviceStatus(std::optional<core::DeviceStatus> status) {
-    if (!status) return std::nullopt;
-    switch (*status) {
-        case core::DeviceStatus::Active:
-            return Role::Success;
-        case core::DeviceStatus::Disabled:
-            return Role::Danger;
-        case core::DeviceStatus::Transitioning:
-            return Role::Warning;
-        case core::DeviceStatus::Error:
-            return Role::Danger;
-        case core::DeviceStatus::Unknown:
-            return Role::Muted;
-    }
-    return std::nullopt;
-}
-
-std::optional<render::Glyph> glyphForDeviceStatus(std::optional<core::DeviceStatus> status) {
-    if (!status) return std::nullopt;
-    switch (*status) {
-        case core::DeviceStatus::Active:
-            return render::Glyph::Enabled;  // +
-        case core::DeviceStatus::Disabled:
-            return render::Glyph::Disabled;  // -
-        case core::DeviceStatus::Transitioning:
-            return render::Glyph::Unavailable;  // ? (in-flight/indeterminate)
-        case core::DeviceStatus::Error:
-            return render::Glyph::Unsigned;  // ! (fault)
-        case core::DeviceStatus::Unknown:
-            return render::Glyph::Unavailable;  // ?
-    }
-    return std::nullopt;
-}
-
-std::optional<Role> roleForSignature(std::optional<app::ModuleSignature> sig) {
-    if (!sig) return std::nullopt;
-    switch (*sig) {
-        case app::ModuleSignature::Signed:
-            return Role::Success;
-        case app::ModuleSignature::Unsigned:
-            return Role::Danger;
-        case app::ModuleSignature::Undetermined:
-            return Role::Muted;
-    }
-    return std::nullopt;
-}
-
-std::optional<Role> roleForUpdateState(std::optional<app::UpdateRowState> state) {
-    if (!state) return std::nullopt;
-    switch (*state) {
-        case app::UpdateRowState::Available:
-            return Role::Info;
-        case app::UpdateRowState::UpToDate:
-            return Role::Muted;  // muted-success: settled, no action
-        case app::UpdateRowState::Error:
-            return Role::Danger;
-    }
-    return std::nullopt;
-}
-
-// Health wins over the HEAD/last-good accent: a corrupt HEAD must read danger,
-// not accent. Healthy HEAD/last-good rows take the accent (the history-view text
-// markers carry the same fact without colour, §10).
-std::optional<Role> roleForSnapshotRow(std::optional<core::SnapshotHealth> health, bool isHead,
-                                       bool isLastGood) {
-    if (!health) return std::nullopt;
-    switch (*health) {
-        case core::SnapshotHealth::Corrupt:
-            return Role::Danger;
-        case core::SnapshotHealth::Unsupported:
-            return Role::Warning;
-        case core::SnapshotHealth::Ok:
-            break;
-    }
-    if (isHead || isLastGood) return Role::Accent;
-    return std::nullopt;
-}
-
-std::optional<Role> roleForSeverity(app::StatusSeverity severity) {
-    switch (severity) {
-        case app::StatusSeverity::Ok:
-            return std::nullopt;
-        case app::StatusSeverity::Success:
-            return Role::Success;
-        case app::StatusSeverity::Warning:
-            return Role::Warning;
-        case app::StatusSeverity::Danger:
-            return Role::Danger;
-        case app::StatusSeverity::Info:
-            return Role::Info;
-    }
-    return std::nullopt;
-}
-
-// Modules banner valence: banner() (modules_vm.cpp) appends "unsigned modules
-// will be rejected" exactly when Secure Boot / lockdown would reject them — warn
-// only then; the steady-state posture is informational.
-std::optional<Role> modulesBannerRole(const std::string& banner) {
-    if (banner.find("will be rejected") != std::string::npos) return Role::Warning;
-    return Role::Info;
-}
 }  // namespace
 
 // runTuiApp is the top-level FTXUI event-loop composition — component tree,
@@ -265,18 +140,15 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         std::function<void()> onConfirm;
     };
     std::optional<PendingPreview> preview;
-    auto statusLine = [&]() -> std::string {
-        if (textPrompt) return textPrompt->prompt + textPrompt->buffer + "_";
-        if (confirm) return confirm->prompt;
-        if (preview) return "restore this snapshot? (y/n)";
-        return statusVm.text();
-    };
-    // Outcome valence for the status bar (§4.1): only the ViewModel-owned status
-    // message carries a severity; an active modal is an interactive prompt, shown
-    // neutral. Mirrors statusLine()'s modal precedence.
-    auto statusRole = [&]() -> std::optional<Role> {
-        if (textPrompt || confirm || preview) return std::nullopt;
-        return roleForSeverity(statusVm.severity());
+    // The status row's text and its valence are decided together (§4.1): an
+    // active modal is an interactive prompt and shows neutral; otherwise the
+    // ViewModel-owned message carries its own severity. One function, so the two
+    // can never drift into disagreeing about which source the row is showing.
+    auto statusRow = [&]() -> StatusRow {
+        if (textPrompt) return {.text = textPrompt->prompt + textPrompt->buffer + "_"};
+        if (confirm) return {.text = confirm->prompt};
+        if (preview) return {.text = "restore this snapshot? (y/n)"};
+        return composeStatus({{statusVm.text(), statusVm.severity()}});
     };
 
     auto prunePending = [&] {
@@ -314,35 +186,62 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     inputOpt.on_change = [&] { listVm.setFilter(filter); };
     auto searchInput = Input(inputOpt);
 
-    // Marquee for the selected device row (user request): when its text
-    // overflows the fixed-width left pane, loop-scroll it instead of
-    // truncating. Deliberate, documented deviation from DESIGN.md §4.5
-    // (motion beyond a task indicator): sanctioned by §2.4's bounded-region
-    // scroll, and the ticker below only fires while an overflowing row is
-    // actually selected — an idle screen stays static.
-    int marqueeTick = 0;                     // UI thread only (render + tick event)
-    std::atomic<bool> marqueeNeeded{false};  // render thread → ticker thread
-    const Event kMarqueeTick = Event::Special("devmgr-marquee-tick");
+    // Bounded reveal of an overflowing selected row (design Decision 9, R3).
+    // Pass 1 loop-scrolled the Devices row forever (`tick % cycle`), which is
+    // exactly the idle decoration DESIGN.md §4.5 forbids and needs a redraw loop
+    // that never stops. The reveal now slides once and RESTS: the pure offset
+    // maths lives in render_util, and this tick counter is the single live time
+    // source — reset whenever the selection moves, and advanced only while
+    // `revealRunning` says an overflowing row is selected and not yet at rest.
+    // All four lists share it, not just Devices.
+    int revealTick = 0;                      // UI thread only (render + tick event)
+    std::atomic<bool> revealRunning{false};  // render thread → ticker thread
+    // (tab, selected row) the current reveal belongs to; a change restarts it.
+    std::pair<int, int> revealKey{-1, -1};
+    const Event kRevealTick = Event::Special("devmgr-reveal-tick");
+    // Two narrower than the pane: the border, the "> " prefix and the scroll
+    // affordance, plus a glyph+space for the lists that carry a status glyph.
+    static constexpr int kRowWidthMargin = 6;
+    static constexpr int kWideRowWidth = kWidePaneWidth - kRowWidthMargin;
+    // A criticality badge costs the row its glyph plus a space (R4).
+    static constexpr int kBadgeWidth = 2;
+    // Windows `label` for the selected row of a list whose rows are `rowWidth`
+    // cells wide, and reports (via revealRunning) whether the reveal still has
+    // somewhere to go. Non-selected rows are not windowed at all: render::menuRow
+    // elides them on the right.
+    auto revealLabel = [&](const std::string& label, int rowWidth) {
+        const int maxOffset = render::revealMaxOffset(label, rowWidth);
+        if (maxOffset == 0) return label;  // fits: static, no ticker
+        const int offset = render::revealOffset(revealTick, maxOffset);
+        if (offset < maxOffset) revealRunning = true;
+        return render::revealWindow(label, rowWidth, offset);
+    };
+    // Declared before the option so the entry transform can ask the menu whether
+    // it owns the keyboard (B1); assigned immediately below.
+    Component deviceMenu;
     MenuOption deviceMenuOpt = MenuOption::Vertical();
     deviceMenuOpt.entries_option.transform = [&](const EntryState& s) {
-        // Two narrower than before: the status glyph takes a glyph+space before
-        // the label (border + "> " prefix + glyph + space + scrollbar).
-        constexpr int kRowWidth = kLeftPaneWidth - 6;
-        std::string label = s.label;
-        if (s.active && string_width(label) > kRowWidth) {
-            marqueeNeeded = true;
-            label = marqueeWindow(label, kRowWidth, marqueeTick);
-        }
+        const bool hasBadge = badgeForCriticality(listVm.criticalityForRow(s.index)).has_value();
+        const int kRowWidth = kLeftPaneWidth - kRowWidthMargin - (hasBadge ? kBadgeWidth : 0);
+        const std::string label = s.active ? revealLabel(s.label, kRowWidth) : s.label;
+        // B1: every selection signal keys off the selected index and the list's
+        // own focus, never off FTXUI's focused entry (the mouse moves that one
+        // independently of `selected`, which is what split the marker, the bar
+        // and the detail pane across three rows in pass 1).
+        const bool listFocused = deviceMenu->Focused();
         // Group headers and the "(no devices)" placeholder carry no status: mute
-        // them (§4.3) and add no glyph. Device rows colour + glyph by status.
+        // them (§4.3), add no glyph, and never show the cursor on them (B3 — the
+        // snap below keeps the selection off them, and this makes the empty list,
+        // where nothing at all is selectable, render with no cursor).
         if (listVm.isHeader(s.index))
-            return views::renderDeviceRow(label, s.active, s.focused, std::nullopt, Role::Muted,
-                                          theme);
+            return views::renderDeviceRow(label, /*selected=*/false, listFocused, std::nullopt,
+                                          Role::Muted, theme);
         const auto status = listVm.statusForRow(s.index);
-        return views::renderDeviceRow(label, s.active, s.focused, glyphForDeviceStatus(status),
-                                      roleForDeviceStatus(status), theme);
+        return views::renderDeviceRow(label, s.active, listFocused, glyphForDeviceStatus(status),
+                                      roleForDeviceStatus(status), theme,
+                                      badgeForCriticality(listVm.criticalityForRow(s.index)));
     };
-    auto deviceMenu = Menu(&listVm.rowsRef(), &listVm.selectedRef(), deviceMenuOpt);
+    deviceMenu = Menu(&listVm.rowsRef(), &listVm.selectedRef(), deviceMenuOpt);
 
     auto leftPane = Container::Vertical({searchInput, deviceMenu});
 
@@ -362,22 +261,28 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             detailForId = id;
             detailDirty = false;
         }
-        Elements els;
-        els.reserve(detailLines.size());
-        for (const auto& line : detailLines) els.push_back(text(line));
-        return vbox(std::move(els)) | flex;
+        return views::renderDetailPane(detailLines, theme);
     });
 
     auto layout = Container::Horizontal({leftPane, detailRenderer});
 
+    Component modulesMenu;  // declared first for the B1 focus query, assigned below
     MenuOption modulesMenuOpt = MenuOption::Vertical();
     modulesMenuOpt.entries_option.transform = [&](const EntryState& s) {
         // Colour by signature state; the "yes/NO/…" cell already in the row is the
-        // paired non-colour signal (§10), so no glyph is added.
-        return render::menuRow(s.label, s.active, s.focused, std::nullopt,
-                               roleForSignature(modulesVm.signedForRow(s.index)), theme);
+        // paired non-colour signal (§10), so no glyph is added. A row with no
+        // signature state is the placeholder — never the cursor (B3).
+        const auto sig = modulesVm.signedForRow(s.index);
+        const bool selected = s.active && sig.has_value();
+        // R4: the criticality badge is its own element with its own warning
+        // role, so it never recolours the signature cell inside the label.
+        const auto badge = badgeForCriticality(modulesVm.criticalityForRow(s.index));
+        const int rowWidth = badge ? kWideRowWidth - kBadgeWidth : kWideRowWidth;
+        const std::string label = selected ? revealLabel(s.label, rowWidth) : s.label;
+        return render::menuRow(label, selected, modulesMenu->Focused(), std::nullopt,
+                               roleForSignature(sig), theme, badge);
     };
-    auto modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), modulesMenuOpt);
+    modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), modulesMenuOpt);
     std::string bannerText;  // computed on tab entry — banner() reads sysfs, never per frame
     std::string moduleFilter;
     InputOption modFilterOpt;
@@ -401,24 +306,26 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             modDetailForName = name;
             modDetailDirty = false;
         }
-        Elements els;
-        els.reserve(modDetailLines.size());
-        for (const auto& line : modDetailLines) els.push_back(text(line));
-        return vbox(std::move(els)) | flex;
+        return views::renderDetailPane(modDetailLines, theme);
     });
     auto modulesPane = Container::Vertical({moduleFilterInput, modulesMenu});
     auto modulesLayout = Container::Horizontal({modulesPane, moduleDetail});
 
     // No filter on the updates list (UpdatesVM exposes none) — mirrors modules
     // shape minus the filter input.
+    Component updatesMenu;  // declared first for the B1 focus query, assigned below
     MenuOption updatesMenuOpt = MenuOption::Vertical();
     updatesMenuOpt.entries_option.transform = [&](const EntryState& s) {
         // Colour by availability; the "-> <version>"/marker text in the row is the
-        // paired non-colour signal (§10).
-        return render::menuRow(s.label, s.active, s.focused, std::nullopt,
-                               roleForUpdateState(updatesVm.stateForRow(s.index)), theme);
+        // paired non-colour signal (§10). No state == the placeholder row, which
+        // never takes the cursor (B3).
+        const auto state = updatesVm.stateForRow(s.index);
+        const bool selected = s.active && state.has_value();
+        const std::string label = selected ? revealLabel(s.label, kWideRowWidth) : s.label;
+        return render::menuRow(label, selected, updatesMenu->Focused(), std::nullopt,
+                               roleForUpdateState(state), theme);
     };
-    auto updatesMenu = Menu(&updatesVm.rowsRef(), &updatesVm.selectedRef(), updatesMenuOpt);
+    updatesMenu = Menu(&updatesVm.rowsRef(), &updatesVm.selectedRef(), updatesMenuOpt);
 
     // detailLines() is cheap (no disk/D-Bus I/O — it reads the last snapshot_,
     // T10), but still cache like the devices/modules panes above: cheap or
@@ -438,10 +345,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             updDetailForIndex = idx;
             updDetailDirty = false;
         }
-        Elements els;
-        els.reserve(updDetailLines.size());
-        for (const auto& line : updDetailLines) els.push_back(text(line));
-        return vbox(std::move(els)) | flex;
+        return views::renderDetailPane(updDetailLines, theme);
     });
     auto updatesLayout = Container::Horizontal({updatesMenu, updatesDetail});
 
@@ -454,18 +358,22 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     snapFilterOpt.on_change = [&] { snapshotsVm.setFilter(snapshotFilter); };
     auto snapshotFilterInput = Input(snapFilterOpt);
 
+    Component snapshotsMenu;  // declared first for the B1 focus query, assigned below
     MenuOption snapshotsMenuOpt = MenuOption::Vertical();
     snapshotsMenuOpt.entries_option.transform = [&](const EntryState& s) {
         // Colour by health, with HEAD/last-good taking the accent when healthy;
         // the health word (non-Ok rows) and the history-view chain markers are the
-        // paired non-colour signals (§10).
-        return render::menuRow(
-            s.label, s.active, s.focused, std::nullopt,
-            roleForSnapshotRow(snapshotsVm.healthForRow(s.index), snapshotsVm.isHeadRow(s.index),
-                               snapshotsVm.isLastGoodRow(s.index)),
-            theme);
+        // paired non-colour signals (§10). No health == the placeholder row, which
+        // never takes the cursor (B3).
+        const auto health = snapshotsVm.healthForRow(s.index);
+        const bool selected = s.active && health.has_value();
+        const std::string label = selected ? revealLabel(s.label, kWideRowWidth) : s.label;
+        return render::menuRow(label, selected, snapshotsMenu->Focused(), std::nullopt,
+                               roleForSnapshotRow(health, snapshotsVm.isHeadRow(s.index),
+                                                  snapshotsVm.isLastGoodRow(s.index)),
+                               theme);
     };
-    auto snapshotsMenu = Menu(&snapshotsVm.rowsRef(), &snapshotsVm.selectedRef(), snapshotsMenuOpt);
+    snapshotsMenu = Menu(&snapshotsVm.rowsRef(), &snapshotsVm.selectedRef(), snapshotsMenuOpt);
 
     // detailLines() is cheap (reads the last rebuilt metas_), but cache like
     // the other panes (A-1 idiom): identity is the row index.
@@ -486,7 +394,8 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                 text("Differences: " + core::snapshotShortId(snapDiffForId) + " -> current state") |
                 bold);
             els.push_back(separator());
-            for (const auto& line : snapshotsVm.diffLines()) els.push_back(text(line));
+            for (const auto& line : snapshotsVm.diffLines())
+                els.push_back(render::elidedText(line, theme));
             return vbox(std::move(els)) | flex;
         }
         const int idx = snapshotsVm.selectedRef();
@@ -495,33 +404,60 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             snapDetailForIndex = idx;
             snapDetailDirty = false;
         }
-        Elements els;
-        els.reserve(snapDetailLines.size());
-        for (const auto& line : snapDetailLines) els.push_back(text(line));
-        return vbox(std::move(els)) | flex;
+        return views::renderDetailPane(snapDetailLines, theme);
     });
     auto snapshotsLayout =
         Container::Horizontal({snapshotFilterInput, snapshotsMenu, snapshotsDetail});
 
-    // Status/prompt line for the updates tab (DESIGN.md §3.2: one row, stable
-    // edge): modal text wins, then the durable install-progress text (spec
-    // §5.5), else the shared transient status line.
-    auto updatesStatusLine = [&]() -> std::string {
-        if (textPrompt) return textPrompt->prompt + textPrompt->buffer + "_";
-        if (confirm) return confirm->prompt;
-        const auto progress = updatesVm.installProgressText();
-        return progress.empty() ? statusVm.text() : progress;
-    };
-    // Valence for the updates status bar: modal prompt and in-flight install
-    // progress are both neutral; otherwise the shared status message's severity.
-    auto updatesStatusRole = [&]() -> std::optional<Role> {
-        if (textPrompt || confirm) return std::nullopt;
-        if (!updatesVm.installProgressText().empty()) return std::nullopt;
-        return roleForSeverity(statusVm.severity());
+    // Status/prompt row for the updates tab (DESIGN.md §3.2: one row, stable
+    // edge). A modal still owns the row outright, but the install-progress text
+    // (spec §5.5) and the shared status message now COMPOSE instead of one
+    // shadowing the other: `UpdatesVM::onCompleted` clears the progress text only
+    // for install task ids, so a guard refusal raised during an install
+    // ("not installable from here…", Danger) used to be dropped from the row
+    // entirely. Progress itself is neutral; composeStatus takes the max severity,
+    // so the refusal keeps both its words and its colour (K2).
+    auto updatesStatusRow = [&]() -> StatusRow {
+        if (textPrompt) return {.text = textPrompt->prompt + textPrompt->buffer + "_"};
+        if (confirm) return {.text = confirm->prompt};
+        return composeStatus({{updatesVm.installProgressText(), app::StatusSeverity::Ok},
+                              {statusVm.text(), statusVm.severity()}});
     };
 
     int activeTab = 0;  // 0 = devices, 1 = modules, 2 = updates, 3 = snapshots
     auto tabs = Container::Tab({layout, modulesLayout, updatesLayout, snapshotsLayout}, &activeTab);
+
+    // B3: the cursor may only rest on a data row. Which rows those are comes
+    // from the ViewModels — Devices name their headers directly, the other three
+    // return no per-row state for their "(no …)" placeholder — so the frontend
+    // re-derives nothing (§11).
+    const nav::Selectable deviceSelectable = [&](int row) { return !listVm.isHeader(row); };
+    const nav::Selectable moduleSelectable = [&](int row) {
+        return modulesVm.signedForRow(row).has_value();
+    };
+    const nav::Selectable updateSelectable = [&](int row) {
+        return updatesVm.stateForRow(row).has_value();
+    };
+    const nav::Selectable snapshotSelectable = [&](int row) {
+        return snapshotsVm.healthForRow(row).has_value();
+    };
+    // Per-list memory of where the cursor was, so the snap can continue the
+    // direction of travel instead of always falling downwards past a header.
+    int lastDeviceRow = 0;
+    int lastModuleRow = 0;
+    int lastUpdateRow = 0;
+    int lastSnapshotRow = 0;
+    // Applied once per render pass for the active tab only. Render-time fix-up
+    // is deliberate and mirrors FTXUI's own Menu::Clamp(): it is the single
+    // point every path that can move the selection (arrow keys, a mouse click on
+    // a header, a rebuild that changed the row layout) funnels through, and the
+    // snap itself is pure and idempotent.
+    auto snapSelection = [](int& selected, int& last, std::size_t rowCount,
+                            const nav::Selectable& selectable) {
+        const int dir = selected > last ? 1 : (selected < last ? -1 : 0);
+        selected = nav::snapToSelectable(selected, static_cast<int>(rowCount), dir, selectable);
+        last = selected;
+    };
 
     // Each tab body is a pure per-view render function (tui/src/views/): the
     // shell hands it the active tab, the pre-rendered interactive components and
@@ -529,7 +465,32 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // and status line. Extracted with no behaviour change (DESIGN.md §9
     // navigation, §3.2 status edge).
     auto ui = Renderer(tabs, [&] {
-        marqueeNeeded = false;  // re-set by the menu transform while an overflowing row is selected
+        revealRunning = false;  // re-set by the menu transform while a reveal is still moving
+        if (activeTab == 1) {
+            snapSelection(modulesVm.selectedRef(), lastModuleRow, modulesVm.rowsRef().size(),
+                          moduleSelectable);
+        } else if (activeTab == 2) {
+            snapSelection(updatesVm.selectedRef(), lastUpdateRow, updatesVm.rowsRef().size(),
+                          updateSelectable);
+        } else if (activeTab == 3) {
+            snapSelection(snapshotsVm.selectedRef(), lastSnapshotRow, snapshotsVm.rowsRef().size(),
+                          snapshotSelectable);
+        } else {
+            snapSelection(listVm.selectedRef(), lastDeviceRow, listVm.rowsRef().size(),
+                          deviceSelectable);
+        }
+        // Restart the reveal whenever the cursor lands somewhere else — read
+        // AFTER the snap, so a cursor nudged off a header does not register as a
+        // second move. The new row's name must be readable from its start rather
+        // than resumed mid-slide.
+        const int selectedRow = activeTab == 1   ? modulesVm.selectedRef()
+                                : activeTab == 2 ? updatesVm.selectedRef()
+                                : activeTab == 3 ? snapshotsVm.selectedRef()
+                                                 : listVm.selectedRef();
+        if (revealKey != std::pair{activeTab, selectedRow}) {
+            revealKey = {activeTab, selectedRow};
+            revealTick = 0;
+        }
         // Minimum-size guard (DESIGN.md §3.2): below 80x24 the list/detail split
         // would overflow the screen, so show a concise message instead. 'q'
         // still quits (the CatchEvent wrapper is unaffected) and a resize
@@ -544,26 +505,30 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                    flex;
         }
         if (activeTab == 1) {
+            const StatusRow status = statusRow();
             return views::renderModulesView({.activeTab = activeTab,
                                              .banner = bannerText,
                                              .filterInput = moduleFilterInput->Render(),
+                                             .columnHeader = modulesVm.columnHeader(),
                                              .list = modulesMenu->Render(),
                                              .detail = moduleDetail->Render(),
-                                             .statusText = statusLine(),
+                                             .statusText = status.text,
                                              .leftPaneWidth = kWidePaneWidth,
                                              .bannerRole = modulesBannerRole(bannerText),
-                                             .statusRole = statusRole()},
+                                             .statusRole = status.role},
                                             theme);
         }
         if (activeTab == 2) {
+            const StatusRow status = updatesStatusRow();
             return views::renderUpdatesView({.activeTab = activeTab,
                                              .banner = bannerText,
                                              .requestBanner = updatesVm.requestBanner(),
+                                             .columnHeader = updatesVm.columnHeader(),
                                              .list = updatesMenu->Render(),
                                              .detail = updatesDetail->Render(),
-                                             .statusText = updatesStatusLine(),
+                                             .statusText = status.text,
                                              .leftPaneWidth = kWidePaneWidth,
-                                             .statusRole = updatesStatusRole()},
+                                             .statusRole = status.role},
                                             theme);
         }
         if (activeTab == 3) {
@@ -571,11 +536,12 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             // interactive renders the active branch needs so a hidden Menu is
             // never rendered off-screen (behaviour-preserving vs. the prior
             // if/else that did the same).
+            const StatusRow status = statusRow();
             views::SnapshotsView v{.activeTab = activeTab,
                                    .banner = bannerText,
-                                   .statusText = statusLine(),
+                                   .statusText = status.text,
                                    .leftPaneWidth = kWidePaneWidth,
-                                   .statusRole = statusRole()};
+                                   .statusRole = status.role};
             if (preview) {
                 v.showPreview = true;
                 v.previewLines = snapshotsVm.previewLines();
@@ -591,13 +557,14 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // inside the 44-column left pane, where it truncated mid-shortcut). The
         // whole Devices tab composition now lives in views::renderDevicesView;
         // the shell supplies the interactive component renders and the theme.
+        const StatusRow status = statusRow();
         return views::renderDevicesView({.activeTab = activeTab,
                                          .filterInput = searchInput->Render(),
                                          .deviceList = deviceMenu->Render(),
                                          .detail = detailRenderer->Render(),
-                                         .statusText = statusLine(),
+                                         .statusText = status.text,
                                          .leftPaneWidth = kLeftPaneWidth,
-                                         .statusRole = statusRole()},
+                                         .statusRole = status.role},
                                         theme);
     });
 
@@ -634,9 +601,9 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     };
 
     auto root = CatchEvent(ui, [&](const Event& event) {
-        if (event == kMarqueeTick) {
-            ++marqueeTick;
-            return true;  // handled → FTXUI re-renders → the transform scrolls
+        if (event == kRevealTick) {
+            ++revealTick;
+            return true;  // handled → FTXUI re-renders → the reveal advances one glyph
         }
         if (event == Event::Custom) {
             detailDirty = true;
@@ -984,21 +951,23 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // immediately; '/' reaches the filter.
     deviceMenu->TakeFocus();
 
-    // Marquee ticker: wakes every 150 ms but posts (→ re-render) only while
-    // the last render flagged an overflowing selected row — an idle screen
-    // stays static (DESIGN.md §4.5). Joined on both exit paths below, before
-    // the screen and VM locals unwind.
-    std::atomic<bool> marqueeTickerRun{true};
-    constexpr auto kMarqueeTickPeriod = std::chrono::milliseconds(150);  // DESIGN.md §4.5
-    std::thread marqueeTicker([&] {
-        while (marqueeTickerRun.load()) {
-            std::this_thread::sleep_for(kMarqueeTickPeriod);
-            if (marqueeTickerRun.load() && marqueeNeeded.load()) screen.PostEvent(kMarqueeTick);
+    // Reveal ticker: wakes every 150 ms but posts (→ re-render) only while the
+    // last render flagged a selected row whose reveal has NOT yet come to rest.
+    // Once it rests — or the selection moves to a row that fits — the flag stays
+    // false and the screen goes completely static (DESIGN.md §4.5; design
+    // Decision 9). Joined on both exit paths below, before the screen and VM
+    // locals unwind.
+    std::atomic<bool> revealTickerRun{true};
+    constexpr auto kRevealTickPeriod = std::chrono::milliseconds(150);  // DESIGN.md §4.5
+    std::thread revealTicker([&] {
+        while (revealTickerRun.load()) {
+            std::this_thread::sleep_for(kRevealTickPeriod);
+            if (revealTickerRun.load() && revealRunning.load()) screen.PostEvent(kRevealTick);
         }
     });
-    auto stopMarqueeTicker = [&] {
-        marqueeTickerRun = false;
-        if (marqueeTicker.joinable()) marqueeTicker.join();
+    auto stopRevealTicker = [&] {
+        revealTickerRun = false;
+        if (revealTicker.joinable()) revealTicker.join();
     };
 
     // Initial populate synchronously so the first frame is not empty and so the
@@ -1047,7 +1016,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // normal-path sequence (stop event sources -> drain pending refreshes ->
         // return) instead of reordering it the way a plain scope guard destroyed at
         // function-return time would. stop()/shutdown() are each idempotent regardless.
-        stopMarqueeTicker();  // ticker posts into `screen` — join before unwind
+        stopRevealTicker();  // ticker posts into `screen` — join before unwind
         hotplug.stop();
         delayed.shutdown();
         // Mirror the normal-path drain below: an enumeration still running on the
@@ -1058,12 +1027,12 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         throw;
     }
 
-    // Stop event sources before the VMs/dispatcher unwind: join the marquee
+    // Stop event sources before the VMs/dispatcher unwind: join the reveal
     // ticker (posts into `screen`), then the monitor reader thread (no new
     // events into the debounce map), then the timer thread (no flush/clear
     // callback can still publish into a VM being torn down). Order:
     // ticker -> monitor -> timer -> drain in-flight refreshes.
-    stopMarqueeTicker();
+    stopRevealTicker();
     hotplug.stop();
     delayed.shutdown();
 

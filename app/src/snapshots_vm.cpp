@@ -317,7 +317,11 @@ bool SnapshotsVM::isLastGoodRow(int row) const {
 }
 
 std::string SnapshotsVM::banner() const {
-    if (metas_.empty()) return "no snapshots";
+    // Empty store: no counts to summarise, and no banner. The list's
+    // "(no snapshots)" placeholder is the ONE empty indicator (pass-2 bug B4) —
+    // it sits in the region that is actually empty, and saying it twice made the
+    // screen read as two separate facts. Both frontends hide an empty banner.
+    if (metas_.empty()) return "";
     std::size_t autoCount = 0;
     std::size_t manualCount = 0;
     std::size_t unhealthy = 0;

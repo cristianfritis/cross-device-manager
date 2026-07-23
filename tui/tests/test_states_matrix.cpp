@@ -491,5 +491,82 @@ TEST(RoleDecorators, ModulesBannerColoursByRoleInFull) {
     EXPECT_TRUE(hasRolePixel(screen, Color::Blue, false));  // info banner
 }
 
+// =========================================================================
+// 9.1 / K1 — per-view colour matrix. state_roles.hpp maps each documented state
+// to a role (asserted in devmgr_tests); this is the other half of that chain:
+// each role actually paints in FULL, and in MONO the row keeps its state WORD
+// with no hue at all. Devices' four non-green states are included because the
+// manual pass could only ever see Active on the dev box.
+// =========================================================================
+
+struct RowState {
+    const char* label;  // carries the state word, the mono-mode signal
+    Role role;          // what state_roles.hpp maps this state to
+    Color fg;           // expected 16-colour ANSI in FULL
+    bool dim;           // Muted is dim-on-default rather than a hue
+};
+
+void expectRowMatrix(const std::vector<RowState>& states, const char* view) {
+    const Theme full(ColorMode::Full, false);
+    const Theme mono(ColorMode::Mono, false);
+    for (const RowState& st : states) {
+        // Unselected: the selected row wears the one accent treatment (B2), so
+        // per-state colour is a property of the rows around the cursor.
+        ftxui::Screen coloured =
+            renderTo(render::menuRow(st.label, false, false, std::nullopt, st.role, full), {60, 1});
+        EXPECT_TRUE(hasRolePixel(coloured, st.fg, st.dim)) << view << " / " << st.label;
+        ftxui::Screen plain =
+            renderTo(render::menuRow(st.label, false, false, std::nullopt, st.role, mono), {60, 1});
+        EXPECT_FALSE(screenHasColour(plain)) << view << " / " << st.label;
+        EXPECT_TRUE(screenContains(plain, st.label)) << view << " / " << st.label;
+    }
+}
+
+TEST(PerViewColourMatrix, UpdatesEveryState) {
+    expectRowMatrix({{"Dock fw    1.0 -> 1.1 available", Role::Info, Color::Blue, false},
+                     {"SSD fw     up to date", Role::Muted, Color::Default, true},
+                     {"BIOS       error: refresh failed", Role::Danger, Color::Red, false}},
+                    "updates");
+}
+
+TEST(PerViewColourMatrix, SnapshotsEveryState) {
+    expectRowMatrix({{"a1b2c3 boot   HEAD", Role::Accent, Color::Cyan, false},
+                     {"d4e5f6 manual corrupt", Role::Danger, Color::Red, false},
+                     {"99aa88 auto   unsupported", Role::Warning, Color::Yellow, false}},
+                    "snapshots");
+}
+
+TEST(PerViewColourMatrix, ModulesEveryState) {
+    expectRowMatrix({{"i915     signed: yes", Role::Success, Color::Green, false},
+                     {"nvidia   signed: NO", Role::Danger, Color::Red, false},
+                     {"acpi     signed: ?", Role::Muted, Color::Default, true}},
+                    "modules");
+}
+
+// Devices carry a glyph as well as a colour; the four non-Active states are the
+// ones pass 1 never rendered on real hardware.
+TEST(PerViewColourMatrix, DevicesNonGreenStatesRender) {
+    const Theme full(ColorMode::Full, false);
+    const Theme mono(ColorMode::Mono, false);
+    const std::array<std::tuple<const char*, Role, Color, bool, render::Glyph, const char*>, 4>
+        cases{{
+            {"eth0 disabled", Role::Danger, Color::Red, false, render::Glyph::Disabled, "-"},
+            {"usb0 transitioning", Role::Warning, Color::Yellow, false, render::Glyph::Unavailable,
+             "?"},
+            {"nvme0n1 error", Role::Danger, Color::Red, false, render::Glyph::Unsigned, "!"},
+            {"wlan0 unknown", Role::Muted, Color::Default, true, render::Glyph::Unavailable, "?"},
+        }};
+    for (const auto& [label, role, fg, dim, glyph, glyphStr] : cases) {
+        ftxui::Screen coloured =
+            renderTo(views::renderDeviceRow(label, false, false, glyph, role, full), {60, 1});
+        EXPECT_TRUE(hasRolePixel(coloured, fg, dim)) << label;
+        ftxui::Screen plain =
+            renderTo(views::renderDeviceRow(label, false, false, glyph, role, mono), {60, 1});
+        EXPECT_FALSE(screenHasColour(plain)) << label;
+        EXPECT_NE(rowText(plain, 0).find(glyphStr), std::string::npos) << label;
+        EXPECT_TRUE(screenContains(plain, label)) << label;
+    }
+}
+
 }  // namespace
 }  // namespace devmgr::tui

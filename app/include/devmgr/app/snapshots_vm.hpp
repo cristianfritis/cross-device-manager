@@ -35,8 +35,10 @@ class SnapshotsVM {
 
     std::vector<std::string>& rowsRef() { return rows_; }
     int& selectedRef() { return selected_; }
-    void rebuild();                                // UI thread: facade snapshot list → rows
-    std::string banner() const;                    // counts summary ("no snapshots" when empty)
+    void rebuild();  // UI thread: facade snapshot list → rows
+    // Counts summary; "" when the store is empty — the list placeholder is then
+    // the single empty indicator (B4), and both frontends hide an empty banner.
+    std::string banner() const;
     std::vector<std::string> detailLines() const;  // full id, parent, payload counts
 
     // Case-insensitive substring over id, trigger and reason (snapshot-ui

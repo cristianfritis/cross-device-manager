@@ -19,8 +19,12 @@ struct UpdatesView {
     int activeTab;
     std::string banner;
     std::string requestBanner;  // empty → row omitted (updatesVm.requestBanner())
-    ftxui::Element list;        // updatesMenu->Render() (raw; scroll-framed here)
-    ftxui::Element detail;      // updatesDetail->Render()
+    // One muted, non-selectable column header from UpdatesVM::columnHeader()
+    // (R5). Rendered here rather than pushed into the Menu, so it is
+    // structurally incapable of taking the cursor. Empty string = no header.
+    std::string columnHeader;
+    ftxui::Element list;    // updatesMenu->Render() (raw; scroll-framed here)
+    ftxui::Element detail;  // updatesDetail->Render()
     std::string statusText;
     int leftPaneWidth;
     std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)

@@ -48,4 +48,12 @@ std::string displayDeviceName(const Device& device);
 // empty when the device carries neither ids nor a sysfs path.
 std::string displayDeviceIdentity(const Device& device);
 
+// The kernel's positional address alone — a PCI BDF ("0000:c5:00.4"), a USB port
+// chain ("3-3"), or whatever the last sysfs path segment is. This is what the
+// user needs to correlate a row with `lspci`/`lsusb` output or a dmesg line, and
+// the detail pane shows it on its own "Address:" row now that the label above it
+// is a canonical name rather than this string (R1). Empty when the device has no
+// sysfs path.
+std::string displayDeviceAddress(const Device& device);
+
 }  // namespace devmgr::core

@@ -100,5 +100,49 @@ TEST(SnapshotsViewRender, GuidancePanelShownOnlyWhenPresent) {
     EXPECT_TRUE(screenContains(with, "safety snapshot: f0e1d2"));
 }
 
+// B4 (task 8.4): the empty store shows exactly ONE empty indicator. The counts
+// banner is empty when there is nothing to count, and an empty banner renders no
+// row at all — so the list's "(no snapshots)" placeholder stands alone instead
+// of being repeated above the separator.
+TEST(SnapshotsViewRender, EmptyStoreShowsASingleEmptyIndicator) {
+    const Theme theme(ColorMode::Full, false);
+    for (Size s : kSizes) {
+        views::SnapshotsView v = masterDetailView();
+        v.banner = "";  // SnapshotsVM::banner() with an empty store
+        v.list = ftxui::text("(no snapshots)");
+        v.detail = ftxui::text("(no snapshot selected)");
+        ftxui::Screen screen = renderTo(views::renderSnapshotsView(std::move(v), theme), s);
+        int hits = 0;
+        for (int y = 0; y < screen.dimy(); ++y) {
+            if (rowText(screen, y).find("no snapshots") != std::string::npos) ++hits;
+        }
+        EXPECT_EQ(hits, 1) << "empty indicators @" << s.w;
+        EXPECT_TRUE(screenContains(screen, "(no snapshots)")) << s.w;
+    }
+}
+
+// An empty banner costs no row: the frame is one row shorter than the same view
+// with a banner, which is what returns the line to the 80x24 budget.
+TEST(SnapshotsViewRender, EmptyBannerRendersNoRow) {
+    const Theme theme(ColorMode::Full, false);
+    views::SnapshotsView withBanner = masterDetailView();
+    ftxui::Screen banner =
+        renderTo(views::renderSnapshotsView(std::move(withBanner), theme), {120, 32});
+    views::SnapshotsView withoutBanner = masterDetailView();
+    withoutBanner.banner = "";
+    ftxui::Screen blank =
+        renderTo(views::renderSnapshotsView(std::move(withoutBanner), theme), {120, 32});
+    // The whole body below the banner shifts up exactly one row.
+    auto rowOf = [](const ftxui::Screen& s, const std::string& needle) {
+        for (int y = 0; y < s.dimy(); ++y) {
+            if (rowText(s, y).find(needle) != std::string::npos) return y;
+        }
+        return -1;
+    };
+    EXPECT_GE(rowOf(banner, "filter snapshots"), 0);
+    EXPECT_EQ(rowOf(blank, "filter snapshots"), rowOf(banner, "filter snapshots") - 1);
+    EXPECT_FALSE(screenContains(blank, "12 snapshots"));
+}
+
 }  // namespace
 }  // namespace devmgr::tui

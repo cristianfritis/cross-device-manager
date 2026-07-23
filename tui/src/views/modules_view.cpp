@@ -15,18 +15,21 @@ ftxui::Element renderModulesView(ModulesView v, const Theme& theme) {
     // semantic role (info in steady state, warning when a refusal is likely).
     Element banner = text(" " + v.banner + " ");
     if (v.bannerRole) banner = banner | theme.decorate(*v.bannerRole);
+    // Filter, then the column header, then the rows. The header is a plain muted
+    // row in the pane — never a Menu entry — so it cannot be selected (R5).
+    Elements listPane{std::move(v.filterInput), render::hsep(theme)};
+    if (!v.columnHeader.empty()) {
+        listPane.push_back(text(" " + v.columnHeader) | theme.decorate(Role::Muted));
+    }
+    listPane.push_back(std::move(v.list) | vscroll_indicator | yframe | flex);
     return vbox({
                renderTabBar(v.activeTab, theme),
                text(" Modules (/=filter  l=load  u=unload  q=quit) ") | bold,
                banner,
                render::hsep(theme),
                hbox({
-                   render::regionFrame(vbox({
-                                           std::move(v.filterInput),
-                                           render::hsep(theme),
-                                           std::move(v.list) | vscroll_indicator | yframe | flex,
-                                       }) | size(WIDTH, EQUAL, v.leftPaneWidth),
-                                       theme),
+                   render::regionFrame(
+                       vbox(std::move(listPane)) | size(WIDTH, EQUAL, v.leftPaneWidth), theme),
                    render::regionFrame(std::move(v.detail), theme) | flex,
                }) | flex,
                renderStatusBar(v.statusText, v.statusRole, theme),

@@ -120,6 +120,7 @@ class MainWindow final : public QMainWindow {
     void updateStatusBar();
     void updateActionEnablement();                  // tab-aware; folds the old updateToggleAction()
     void updateRequestBannerLabel();                // requestBanner() text + visibility
+    void updateSnapshotsBannerLabel();              // counts banner text + visibility (B4)
     void pruneAndPushPending(std::future<void> f);  // this window's own future custody
 
     app::ApplicationFacade& facade_;

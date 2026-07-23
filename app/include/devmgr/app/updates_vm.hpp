@@ -42,7 +42,11 @@ class UpdatesVM {
 
     std::vector<std::string>& rowsRef() { return rows_; }
     int& selectedRef() { return selected_; }
-    void rebuild();                     // UI thread: snapshot → rows
+    void rebuild();  // UI thread: snapshot → rows
+    // One muted, non-selectable header row naming the columns (R5). Built from
+    // the row formatter's own widths so header and rows cannot drift apart; it
+    // is NOT a list entry, so it can never take the cursor.
+    std::string columnHeader() const;
     std::string banner() const;         // availability + version + reboot marker + Secure Boot
     std::string requestBanner() const;  // "" when none; DURABLE until dismiss (spec §9)
     void dismissRequest();

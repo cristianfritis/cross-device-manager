@@ -346,3 +346,22 @@ TEST_F(UpdatesVmTest, TeardownStormNoPostAfterDrain) {  // review test 14 (VM le
     for (auto& fn : orphans) fn();  // must not crash; must be a no-op (alive token)
     EXPECT_EQ(rebuilds.load(), 0);  // never drained while alive → never rebuilt
 }
+
+// R5 (task 10.4): the column header is built from the row formatter's own
+// widths, so header and rows cannot drift out of alignment.
+TEST_F(UpdatesVmTest, ColumnHeaderNamesTheColumnsAndAlignsWithTheRows) {
+    fwupd_.enumerateResult_ = std::vector<core::UpdateCandidate>{webcam()};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    const std::string header = vm.columnHeader();
+    EXPECT_NE(header.find("Src"), std::string::npos) << header;
+    EXPECT_NE(header.find("Device"), std::string::npos) << header;
+    EXPECT_NE(header.find("Version"), std::string::npos) << header;
+    EXPECT_NE(header.find("-> New"), std::string::npos) << header;
+    // The header's columns line up with the rows byte-for-byte: "Device" begins
+    // where the device name begins, "-> " where the row's arrow is.
+    ASSERT_FALSE(vm.rowsRef().empty());
+    EXPECT_EQ(header.find("Device"), vm.rowsRef()[0].find("Webcam")) << header;
+    EXPECT_EQ(header.find("->"), vm.rowsRef()[0].find("->")) << header;
+}

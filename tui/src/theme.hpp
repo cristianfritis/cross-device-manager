@@ -3,6 +3,8 @@
 #include <ftxui/dom/elements.hpp>  // Decorator, color, dim, nothing
 #include <ftxui/screen/color.hpp>  // Color
 
+#include "tui/src/semantics.hpp"  // Role (toolkit-free)
+
 namespace devmgr::tui {
 
 // Terminal colour capability, resolved once at startup and never changed after.
@@ -13,11 +15,6 @@ namespace devmgr::tui {
 //   Plain — no colour and ASCII everything, borders and separators included.
 //           Triggered by --ascii / TERM=dumb.
 enum class ColorMode : std::uint8_t { Full, Mono, Plain };
-
-// Semantic colour roles from docs/DESIGN.md §4.1, mapped to 16-colour ANSI in
-// Full mode and to identity (no colour) in Mono/Plain. Meaning never rides on
-// colour alone (§10): callers pair every role with a glyph and text.
-enum class Role : std::uint8_t { Accent, Success, Warning, Danger, Info, Muted };
 
 // Presentation-only: maps semantic roles to FTXUI decorators and reports the
 // active capability so views can pick ASCII vs Unicode glyphs/borders. Holds no

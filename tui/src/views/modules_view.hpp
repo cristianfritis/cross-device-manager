@@ -21,8 +21,12 @@ struct ModulesView {
     int activeTab;
     std::string banner;
     ftxui::Element filterInput;  // moduleFilterInput->Render()
-    ftxui::Element list;         // modulesMenu->Render() (raw; scroll-framed here)
-    ftxui::Element detail;       // moduleDetail->Render()
+    // One muted, non-selectable column header from ModulesVM::columnHeader()
+    // (R5). Rendered here rather than pushed into the Menu, so it is
+    // structurally incapable of taking the cursor. Empty string = no header.
+    std::string columnHeader;
+    ftxui::Element list;    // modulesMenu->Render() (raw; scroll-framed here)
+    ftxui::Element detail;  // moduleDetail->Render()
     std::string statusText;
     int leftPaneWidth;
     // Secure Boot / lockdown banner valence: Info in the steady state, Warning

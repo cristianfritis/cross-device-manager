@@ -259,6 +259,19 @@ std::optional<std::pair<std::string, std::string>> UpdatesVM::selectedKey() cons
                      snapshot_[ref->first].candidates[ref->second].id};
 }
 
+std::string UpdatesVM::columnHeader() const {
+    // Same widths as formatRow(), including the literal "->" separator column,
+    // so the header stays aligned with the rows beneath it (R5).
+    static constexpr std::size_t kRowBufferSize = 128;
+    std::array<char, kRowBufferSize> row{};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    std::snprintf(row.data(), row.size(), "%-6s %-30.30s %-12.12s -> %-12.12s %s", "Src", "Device",
+                  "Version", "New", "");
+    std::string out{row.data()};
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
 std::string UpdatesVM::banner() const {
     std::string b;
     for (const auto& s : facade_.updatesSnapshot()) {

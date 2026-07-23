@@ -17,8 +17,12 @@ ftxui::Element renderSnapshotsView(SnapshotsView v, const Theme& theme) {
         text(" Snapshots (/=filter  s=create…  r=restore  d=diff  h=history  x=delete  "
              "q=quit) ") |
             bold,
-        text(" " + v.banner + " "),
     };
+    // An empty banner is no banner: with no snapshots there are no counts to
+    // summarise, and the list's "(no snapshots)" placeholder is the single empty
+    // indicator (pass-2 bug B4). Skipping the row also returns it to the 80x24
+    // budget rather than spending it on a blank line.
+    if (!v.banner.empty()) top.push_back(text(" " + v.banner + " "));
     top.push_back(render::hsep(theme));
     if (v.showPreview) {
         // Modal body: the preview owns the pane while it is open, so the list

@@ -117,7 +117,10 @@ TEST_F(SnapshotsVmTest, PlaceholderRowWhenEmptyNeverActionable) {
     EXPECT_EQ(vm.rowsRef()[0], "(no snapshots)");
     EXPECT_FALSE(vm.selectedRestore().has_value());
     EXPECT_FALSE(vm.selectedDelete().has_value());
-    EXPECT_EQ(vm.banner(), "no snapshots");
+    // B4: the placeholder row is the ONE empty indicator; the counts banner has
+    // nothing to summarise and stays empty so neither frontend renders a second
+    // "no snapshots" above the list.
+    EXPECT_EQ(vm.banner(), "");
     EXPECT_EQ(vm.detailLines(), std::vector<std::string>{"(no snapshot selected)"});
 }
 

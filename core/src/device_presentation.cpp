@@ -202,6 +202,10 @@ std::string displayDeviceName(const Device& device) {
     return device.name.empty() ? std::string("(unknown device)") : device.name;
 }
 
+std::string displayDeviceAddress(const Device& device) {
+    return lastSegment(device.sysfsPath);
+}
+
 std::string displayDeviceIdentity(const Device& device) {
     std::string ids;
     if (!device.vendorId.empty() || !device.productId.empty())
