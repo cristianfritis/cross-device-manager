@@ -18,16 +18,18 @@ ftxui::Element renderTabBar(int activeTab, const Theme& theme) {
     // other markers in play: the focus cursor ">", the criticality "#" and the
     // snapshot "*". Accent and never warning/yellow — yellow is the risk role
     // (docs/DESIGN.md §4.1) and "current mode" is not a risk (design Decision 6).
-    auto name = [&](const char* key, const char* label, int tab) {
+    // The direct-access digit is always tab+1, so it is derived rather than
+    // passed — that also leaves the lambda with one `const char*` and one `int`
+    // (not two adjacent same-typed params a caller could transpose).
+    auto name = [&](const char* label, int tab) {
         const bool active = tab == activeTab;
-        const std::string bracketed =
-            active ? "{" + std::string(key) + "}" : "[" + std::string(key) + "]";
+        const std::string key = std::to_string(tab + 1);
+        const std::string bracketed = active ? "{" + key + "}" : "[" + key + "]";
         Element e = hbox({text(bracketed), text(label)});
         return active ? e | theme.decorate(Role::Accent) | bold : e;
     };
-    return hbox({text(" "), name("1", "Devices", 0), text(" | "), name("2", "Modules", 1),
-                 text(" | "), name("3", "Updates", 2), text(" | "), name("4", "Snapshots", 3),
-                 text("  (m: next tab) ")});
+    return hbox({text(" "), name("Devices", 0), text(" | "), name("Modules", 1), text(" | "),
+                 name("Updates", 2), text(" | "), name("Snapshots", 3), text("  (m: next tab) ")});
 }
 
 }  // namespace devmgr::tui::views

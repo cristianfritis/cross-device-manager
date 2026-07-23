@@ -12,6 +12,7 @@ add_library(devmgr_tui_render STATIC
     src/views/tab_bar.cpp
     src/views/status_bar.cpp
     src/views/detail_pane.cpp
+    src/views/min_size.cpp
     src/views/devices_view.cpp
     src/views/modules_view.cpp
     src/views/updates_view.cpp
@@ -59,8 +60,18 @@ add_executable(devmgr_tui_tests
     tests/test_snapshots_view_render.cpp
     tests/test_states_matrix.cpp
     tests/test_selection_render.cpp
-    tests/test_detail_pane_render.cpp)
+    tests/test_detail_pane_render.cpp
+    tests/test_min_size_render.cpp)
 target_include_directories(devmgr_tui_tests PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(devmgr_tui_tests
     PRIVATE devmgr_tui_render GTest::gtest GTest::gtest_main)
 gtest_discover_tests(devmgr_tui_tests)
+
+# K4 filter-routing tests. The routing decision is over a real ftxui::Event, so
+# this binary links ftxui::component (which the pure render lib deliberately
+# omits) — kept in its own exe to keep that boundary clean.
+add_executable(devmgr_tui_input_tests tests/test_filter_routing.cpp)
+target_include_directories(devmgr_tui_input_tests PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(devmgr_tui_input_tests
+    PRIVATE ftxui::component ftxui::dom ftxui::screen GTest::gtest GTest::gtest_main)
+gtest_discover_tests(devmgr_tui_input_tests)

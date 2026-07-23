@@ -45,11 +45,13 @@
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "tui/src/ftxui_ui_dispatcher.hpp"
+#include "tui/src/key_routing.hpp"
 #include "tui/src/render_util.hpp"
 #include "tui/src/selection.hpp"
 #include "tui/src/state_roles.hpp"
 #include "tui/src/views/detail_pane.hpp"
 #include "tui/src/views/devices_view.hpp"
+#include "tui/src/views/min_size.hpp"
 #include "tui/src/views/modules_view.hpp"
 #include "tui/src/views/snapshots_view.hpp"
 #include "tui/src/views/updates_view.hpp"
@@ -173,11 +175,6 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // Modules/Updates/Snapshots use a wider left pane than Devices (their rows
     // carry longer identifiers); shared here so the three views stay in step.
     static constexpr int kWidePaneWidth = 72;
-    // Below this the side-by-side panes cannot render without writing outside
-    // the screen; DESIGN.md §3.2 asks for a concise minimum-size message that
-    // still honors quit and resize instead of a broken layout.
-    static constexpr int kMinCols = 80;
-    static constexpr int kMinRows = 24;
 
     std::string filter;
     InputOption inputOpt;
@@ -494,15 +491,11 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // Minimum-size guard (DESIGN.md §3.2): below 80x24 the list/detail split
         // would overflow the screen, so show a concise message instead. 'q'
         // still quits (the CatchEvent wrapper is unaffected) and a resize
-        // re-renders straight back into the full UI.
+        // re-renders straight back into the full UI. The toggle boundary and the
+        // notice are pure (views::), so K3 verifies both off-screen.
         const Dimensions term = Terminal::Size();
-        if (term.dimx < kMinCols || term.dimy < kMinRows) {
-            return vbox({
-                       text("Terminal too small") | bold | center,
-                       text("Minimum size is 80x24.") | center,
-                       text("Resize the window, or press q to quit.") | center,
-                   }) |
-                   flex;
+        if (views::belowMinimumSize(term.dimx, term.dimy)) {
+            return views::renderMinSizeNotice();
         }
         if (activeTab == 1) {
             const StatusRow status = statusRow();
@@ -671,25 +664,32 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             const Component menu = activeTab == 0   ? deviceMenu
                                    : activeTab == 1 ? modulesMenu
                                                     : snapshotsMenu;
-            if (event == Event::Return) {
-                menu->TakeFocus();
-                return true;
+            // The routing decision is a pure function (K4), so the whole
+            // command-key union is proved to reach the Input, not a command,
+            // off-screen in test_filter_routing.cpp; here we only perform the
+            // side effect it names.
+            switch (nav::routeFilterKey(true, event)) {
+                case nav::FilterKeyAction::HandBackToList:
+                    menu->TakeFocus();
+                    return true;
+                case nav::FilterKeyAction::ClearAndHandBack:
+                    if (activeTab == 0) {
+                        filter.clear();
+                        listVm.setFilter(filter);
+                    } else if (activeTab == 1) {
+                        moduleFilter.clear();
+                        modulesVm.setFilter(moduleFilter);
+                    } else {
+                        snapshotFilter.clear();
+                        snapshotsVm.setFilter(snapshotFilter);
+                    }
+                    menu->TakeFocus();
+                    return true;
+                case nav::FilterKeyAction::PassToInput:
+                    return false;  // characters, backspace, arrows, mouse → the Input
+                case nav::FilterKeyAction::NotFiltering:
+                    break;  // unreachable: guarded by filterInput->Focused() above
             }
-            if (event == Event::Escape) {
-                if (activeTab == 0) {
-                    filter.clear();
-                    listVm.setFilter(filter);
-                } else if (activeTab == 1) {
-                    moduleFilter.clear();
-                    modulesVm.setFilter(moduleFilter);
-                } else {
-                    snapshotFilter.clear();
-                    snapshotsVm.setFilter(snapshotFilter);
-                }
-                menu->TakeFocus();
-                return true;
-            }
-            return false;  // characters, backspace, arrows, mouse → the Input
         }
         if (event == Event::Character('/') &&
             (activeTab == 0 || activeTab == 1 || activeTab == 3)) {  // updates has no filter
