@@ -38,4 +38,4 @@ jobs:
       - name: Static analysis (clang-tidy)
         # Reuses the image built above (toolchain + deps + compile_commands.json baked in).
         # Hard gate: any clang-tidy diagnostic in core/src fails the build.
-        run: docker compose -f test/docker-compose.yml run --rm unit bash -c "clang-tidy -p build/linux-debug --warnings-as-errors='*' core/src/*.cpp app/src/*.cpp platform/linux/src/*.cpp gui/src/*.cpp daemon/src/*.cpp cli/src/*.cpp"
+        run: docker compose -f test/docker-compose.yml run --rm unit bash -c "clang-tidy -p build/linux-debug --warnings-as-errors='*' core/src/*.cpp app/src/*.cpp platform/linux/src/*.cpp gui/src/*.cpp daemon/src/*.cpp cli/src/*.cpp tui/src/*.cpp tui/src/views/*.cpp"

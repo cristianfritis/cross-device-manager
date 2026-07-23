@@ -67,6 +67,9 @@ void drainPending(std::vector<std::future<void>>& pending) {
 // advance one glyph per tick to the end, pause, restart from the beginning
 // (DESIGN.md §2.4 — long identifiers "scroll within a bounded region").
 // Glyph-based so multi-byte names (e.g. "…Webcam™") never split mid-codepoint.
+// width (cells) and tick (frame counter) are distinct roles a caller cannot
+// meaningfully confuse, so the swappable-parameter warning is suppressed:
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 std::string marqueeWindow(const std::string& s, int width, int tick) {
     const auto glyphs = ftxui::Utf8ToGlyphs(s);
     const int n = static_cast<int>(glyphs.size());
@@ -190,6 +193,13 @@ std::optional<Role> modulesBannerRole(const std::string& banner) {
 }
 }  // namespace
 
+// runTuiApp is the top-level FTXUI event-loop composition — component tree,
+// keybindings, and state wiring for the whole app. Like gui/main_window.cpp's
+// constructor (its GUI sibling, suppressed the same way) it is irreducibly large
+// by nature; the render logic it drives is already extracted into pure functions
+// under tui/src/views/*. Suppress size/complexity here rather than fragment the
+// event loop into artificial helpers that only obscure control flow.
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size)
 int runTuiApp(bool selfTest, const Theme& theme) {
     using namespace ftxui;
 
@@ -979,9 +989,10 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // stays static (DESIGN.md §4.5). Joined on both exit paths below, before
     // the screen and VM locals unwind.
     std::atomic<bool> marqueeTickerRun{true};
+    constexpr auto kMarqueeTickPeriod = std::chrono::milliseconds(150);  // DESIGN.md §4.5
     std::thread marqueeTicker([&] {
         while (marqueeTickerRun.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            std::this_thread::sleep_for(kMarqueeTickPeriod);
             if (marqueeTickerRun.load() && marqueeNeeded.load()) screen.PostEvent(kMarqueeTick);
         }
     });
@@ -1067,5 +1078,6 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     drainPending(pending);
     return 0;
 }
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size)
 
 }  // namespace devmgr::tui

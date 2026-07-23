@@ -64,6 +64,13 @@ Views SHALL color state semantically: Devices — enabled→success, disabled→
 - **WHEN** Secure Boot is on and no operation is blocked
 - **THEN** the security banner renders as information, not warning or danger
 
+### Requirement: GUI color parity — temporary DESIGN §9 exception
+The semantic color introduced here applies to the TUI only; the GUI does not yet color from these roles. This is a temporary docs/DESIGN.md §9 cross-surface parity exception, bounded by §10: because no state is conveyed by color alone, the GUI SHALL continue to convey every state the TUI colors through text and iconography, keeping facts, choices, consequences, and wording at parity — only the additive color differs between surfaces. The per-row state accessors this change adds to the ViewModels SHALL remain GUI-consumable so a later change can adopt the same roles for the GUI and lift this exception without reworking the seam.
+
+#### Scenario: GUI keeps word and fact parity without color
+- **WHEN** a device, module, update, or snapshot state that the TUI colors is presented in the GUI
+- **THEN** the GUI conveys that state through text and iconography sourced from the same ViewModel state the TUI reads, with no meaning depending on color and no wording divergence
+
 ### Requirement: Region border discipline
 Borders SHALL appear only on major interactive regions (collection, detail, status); sub-regions SHALL use separators and muted group headers. The TUI SHALL keep exactly one shortcut legend line and one status line, and SHALL preserve the master-detail structure including the 80–109 column list/detail switching layout.
 

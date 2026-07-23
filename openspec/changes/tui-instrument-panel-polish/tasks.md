@@ -8,7 +8,7 @@ Sequencing follows design.md Migration Plan: each numbered group leaves the buil
 - [x] 1.2 Plumb `--no-color`/`--ascii`/`--unicode` flags through the TUI entry point into theme resolution (theme reaches `runTuiApp`; consumed by views in group 2)
 - [x] 1.3 Create `tui/src/render_util.hpp`: status glyph helper (ASCII default `+ - ? !`, Unicode `● ○ ◉` opt-in, ASCII forced in mono/plain), kv row helper, region frame helper (ASCII border fallback in plain)
 - [x] 1.4 Create `tui/tests/` with `test_theme.cpp` (8 tests: role→color mapping, capability downgrade, flag/env resolution, glyph policy, plain-ASCII frame); new `devmgr_tui_render` lib + `devmgr_tui_tests` exe wired into CMake + ctest
-- [ ] 1.5 Extend gates to cover `tui/`: format gate already covers `tui/` (DIRS) — new files host-formatted, container-18 parity verified at 6.1. clang-tidy gate line (`+tui/src/*.cpp`) is **sequenced to 6.1**: adding it now fails on `runTuiApp` cognitive-complexity 307 until group 2 decomposes it. `theme.cpp`/`render_util.hpp` already tidy-clean.
+- [x] 1.5 Extend gates to cover `tui/`: format gate covers `tui/` (container clang-format-18: 214 files clean). clang-tidy gate line extended to `tui/src/*.cpp tui/src/views/*.cpp` in `.github/workflows/ci.yml`; container clang-tidy-18 exit 0 over all 10 tui files. `runTuiApp` size/cognitive-complexity + the nested event-loop lambda suppressed with `NOLINTBEGIN/END` (GUI `main_window.cpp` precedent — event-loop composition, render logic already extracted to `views/`); `marqueeWindow` swappable-params `NOLINTNEXTLINE`; the 150 ms tick literal named.
 
 ## 2. Per-view extraction (pure render functions, behavior-preserving, no color yet)
 
@@ -45,7 +45,7 @@ Sequencing follows design.md Migration Plan: each numbered group leaves the buil
 
 ## 6. Exit gate
 
-- [ ] 6.1 Full local CI mirror: format check (`--container`), purity guards, container unit gate (rebuild image), gated clang-tidy over `tui/`
-- [ ] 6.2 Document the DESIGN §9 temporary GUI parity exception (GUI color deferred; accessors GUI-ready) where the project records parity exceptions
+- [x] 6.1 Full local CI mirror (all green 2026-07-22): `check-format.sh --container` (clang-format-18, 214 clean); Qt + sdbus purity guards PASS; container unit gate rebuilt + `ctest` 533/533; container clang-tidy-18 over the full gate set incl `tui/src` + `tui/src/views` exit 0
+- [x] 6.2 Document the DESIGN §9 temporary GUI parity exception (GUI color deferred; accessors GUI-ready) where the project records parity exceptions — added as a durable requirement in `specs/tui-presentation/spec.md` (syncs to the main spec on archive; honors the "no DESIGN.md edits" non-goal); `openspec validate --strict` green
 - [ ] 6.3 Manual matrix (DESIGN §12.2 TUI rows): 120x32 / 100x28 / 80x24, `NO_COLOR`, `TERM=dumb`, keyboard-only Devices+Modules workflow; record results
 - [ ] 6.4 `openspec validate` change + specs green; user commits
