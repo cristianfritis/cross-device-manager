@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>  // std::move
 
+#include "tui/src/render_util.hpp"  // render::hsep, render::regionFrame
 #include "tui/src/views/status_bar.hpp"
 #include "tui/src/views/tab_bar.hpp"
 
@@ -18,15 +19,15 @@ ftxui::Element renderModulesView(ModulesView v, const Theme& theme) {
                renderTabBar(v.activeTab, theme),
                text(" Modules (/=filter  l=load  u=unload  q=quit) ") | bold,
                banner,
-               separator(),
+               render::hsep(theme),
                hbox({
-                   vbox({
-                       std::move(v.filterInput),
-                       separator(),
-                       std::move(v.list) | vscroll_indicator | yframe | flex,
-                   }) | size(WIDTH, EQUAL, v.leftPaneWidth) |
-                       border,
-                   std::move(v.detail) | border | flex,
+                   render::regionFrame(vbox({
+                                           std::move(v.filterInput),
+                                           render::hsep(theme),
+                                           std::move(v.list) | vscroll_indicator | yframe | flex,
+                                       }) | size(WIDTH, EQUAL, v.leftPaneWidth),
+                                       theme),
+                   render::regionFrame(std::move(v.detail), theme) | flex,
                }) | flex,
                renderStatusBar(v.statusText, v.statusRole, theme),
            }) |

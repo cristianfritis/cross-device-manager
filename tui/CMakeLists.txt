@@ -53,7 +53,8 @@ add_executable(devmgr_tui_tests
     tests/test_devices_view_render.cpp
     tests/test_modules_view_render.cpp
     tests/test_updates_view_render.cpp
-    tests/test_snapshots_view_render.cpp)
+    tests/test_snapshots_view_render.cpp
+    tests/test_states_matrix.cpp)
 target_include_directories(devmgr_tui_tests PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(devmgr_tui_tests
     PRIVATE devmgr_tui_render GTest::gtest GTest::gtest_main)

@@ -27,15 +27,16 @@ ftxui::Element renderDevicesView(DevicesView v, const Theme& theme) {
                text(" Devices (/=filter  r=refresh  e=enable/disable  U=unbind  B=bind  "
                     "q=quit) ") |
                    bold,
-               separator(),
+               render::hsep(theme),
                hbox({
-                   vbox({
-                       std::move(v.filterInput),
-                       separator(),
-                       std::move(v.deviceList) | vscroll_indicator | yframe | flex,
-                   }) | size(WIDTH, EQUAL, v.leftPaneWidth) |
-                       border,
-                   std::move(v.detail) | border | flex,
+                   render::regionFrame(
+                       vbox({
+                           std::move(v.filterInput),
+                           render::hsep(theme),
+                           std::move(v.deviceList) | vscroll_indicator | yframe | flex,
+                       }) | size(WIDTH, EQUAL, v.leftPaneWidth),
+                       theme),
+                   render::regionFrame(std::move(v.detail), theme) | flex,
                }) | flex,
                renderStatusBar(v.statusText, v.statusRole, theme),
            }) |

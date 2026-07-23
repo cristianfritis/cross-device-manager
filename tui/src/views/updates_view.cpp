@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>  // std::move
 
+#include "tui/src/render_util.hpp"  // render::hsep, render::regionFrame
 #include "tui/src/views/status_bar.hpp"
 #include "tui/src/views/tab_bar.hpp"
 
@@ -18,13 +19,13 @@ ftxui::Element renderUpdatesView(UpdatesView v, const Theme& theme) {
         text(" " + v.banner + " "),
     };
     if (!v.requestBanner.empty()) top.push_back(text(" " + v.requestBanner + " ") | bold);
-    top.push_back(separator());
+    top.push_back(render::hsep(theme));
     top.push_back(hbox({
-                      vbox({
-                          std::move(v.list) | vscroll_indicator | yframe | flex,
-                      }) | size(WIDTH, EQUAL, v.leftPaneWidth) |
-                          border,
-                      std::move(v.detail) | border | flex,
+                      render::regionFrame(vbox({
+                                              std::move(v.list) | vscroll_indicator | yframe | flex,
+                                          }) | size(WIDTH, EQUAL, v.leftPaneWidth),
+                                          theme),
+                      render::regionFrame(std::move(v.detail), theme) | flex,
                   }) |
                   flex);
     top.push_back(renderStatusBar(v.statusText, v.statusRole, theme));

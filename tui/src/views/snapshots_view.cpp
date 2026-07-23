@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>  // std::move
 
+#include "tui/src/render_util.hpp"  // render::hsep, render::regionFrame
 #include "tui/src/views/status_bar.hpp"
 #include "tui/src/views/tab_bar.hpp"
 
@@ -18,25 +19,26 @@ ftxui::Element renderSnapshotsView(SnapshotsView v, const Theme& theme) {
             bold,
         text(" " + v.banner + " "),
     };
-    top.push_back(separator());
+    top.push_back(render::hsep(theme));
     if (v.showPreview) {
         // Modal body: the preview owns the pane while it is open, so the list
         // underneath cannot be mistaken for something the confirmation applies to.
         Elements lines;
         lines.reserve(v.previewLines.size());
         for (const auto& line : v.previewLines) lines.push_back(text(line));
-        top.push_back(vbox(std::move(lines)) | border | flex);
+        top.push_back(render::regionFrame(vbox(std::move(lines)), theme) | flex);
     } else {
-        top.push_back(hbox({
-                          vbox({
-                              std::move(v.filterInput),
-                              separator(),
-                              std::move(v.list) | vscroll_indicator | yframe | flex,
-                          }) | size(WIDTH, EQUAL, v.leftPaneWidth) |
-                              border,
-                          std::move(v.detail) | border | flex,
-                      }) |
-                      flex);
+        top.push_back(
+            hbox({
+                render::regionFrame(vbox({
+                                        std::move(v.filterInput),
+                                        render::hsep(theme),
+                                        std::move(v.list) | vscroll_indicator | yframe | flex,
+                                    }) | size(WIDTH, EQUAL, v.leftPaneWidth),
+                                    theme),
+                render::regionFrame(std::move(v.detail), theme) | flex,
+            }) |
+            flex);
         // Recovery guidance for the last restore that did not fully converge
         // (snapshot-ui spec): durable, not a transient status line — it carries
         // the safety id and the exact command back.
@@ -44,7 +46,7 @@ ftxui::Element renderSnapshotsView(SnapshotsView v, const Theme& theme) {
             Elements g;
             g.reserve(v.guidanceLines.size());
             for (const auto& line : v.guidanceLines) g.push_back(text(line));
-            top.push_back(vbox(std::move(g)) | border);
+            top.push_back(render::regionFrame(vbox(std::move(g)), theme));
         }
     }
     top.push_back(renderStatusBar(v.statusText, v.statusRole, theme));

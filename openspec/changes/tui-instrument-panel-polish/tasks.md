@@ -39,9 +39,9 @@ Sequencing follows design.md Migration Plan: each numbered group leaves the buil
 
 ## 5. States matrix and color-independence proof
 
-- [ ] 5.1 Per-view states-matrix render tests: empty, loading, prompt, confirmation, refusal, failure
-- [ ] 5.2 Mono-mode assertions per view: state glyph AND state text present for every represented state (color-independence proof); plain-mode ASCII border check
-- [ ] 5.3 Update coloring tests to assert semantic role decorators in full mode
+- [x] 5.1 Per-view states-matrix render tests: empty, loading, prompt, confirmation, refusal, failure
+- [x] 5.2 Mono-mode assertions per view: state glyph AND state text present for every represented state (color-independence proof); plain-mode ASCII border check
+- [x] 5.3 Update coloring tests to assert semantic role decorators in full mode
 
 ## 6. Exit gate
 
