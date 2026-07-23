@@ -88,3 +88,105 @@ The TUI SHALL have automated render tests in `tui/tests/`, wired into ctest, cov
 #### Scenario: Mono proves color independence
 - **WHEN** a view is rendered in mono mode in tests
 - **THEN** assertions find the state glyph and state text for every represented state
+
+### Requirement: Canonical device names
+The system SHALL display a canonical vendor+product device name, produced by `core::displayDeviceName(...)` from fields the daemon already provides (no bundled hardware database, no frontend parsing of identifiers), as the primary device label in both the TUI and the GUI; the raw bus address and VID:PID SHALL be shown as secondary muted text; the device detail SHALL present `Name:` (canonical), `Address:`, `VID:PID:`, and `Id:` rows; where no canonical name resolves, the system SHALL fall back to the raw identifier without error.
+
+#### Scenario: Device with a canonical name
+- **WHEN** a device resolves to a vendor+product name
+- **THEN** the list primary label and the detail `Name:` show that name and the raw id appears only as secondary muted text
+
+#### Scenario: Device without a canonical name
+- **WHEN** no canonical name resolves
+- **THEN** the raw identifier is shown as the label and no error is raised
+
+#### Scenario: GUI and TUI detail parity
+- **WHEN** the same device is selected in the GUI and the TUI
+- **THEN** both surfaces show the identical canonical name from the same VM/core field
+
+#### Scenario: Long canonical name
+- **WHEN** the canonical name overflows the list region
+- **THEN** it feeds the bounded reveal rather than wrapping or overflowing
+
+### Requirement: Active tab distinguishable without color
+The tab bar SHALL make the currently active tab unmistakable without color: in FULL mode via accent color + bold, and in MONO/PLAIN via bold + an ASCII width-safe marker that is distinct from the focus marker and the criticality marker; the `(m: next tab)` legend SHALL be retained; the active tab SHALL NOT use the warning (yellow) role.
+
+#### Scenario: Each tab active in MONO and FULL
+- **WHEN** each of the four tabs is the active tab
+- **THEN** in MONO/PLAIN the ASCII marker is present and in FULL the accent color is present
+
+#### Scenario: Active tab never yellow
+- **WHEN** any tab is active
+- **THEN** its highlight is not rendered with the warning/yellow role
+
+#### Scenario: Markers are distinct
+- **WHEN** focus, an essential row, and the active tab are all visible
+- **THEN** the focus marker (`>`), the criticality marker (`#`), and the active-tab marker (bold + bracket change) are three different glyphs
+
+### Requirement: Bounded reveal of overflowing selected names
+On selection or focus of a row whose name overflows its region, the system SHALL reveal the elided portion of that name by a bounded, finite horizontal reveal that comes to rest; the system SHALL NOT run a perpetual idle animation for this; non-selected rows SHALL elide right; the reveal SHALL be bounded within the list region and SHALL work at 80 columns. The reveal helper SHALL be a pure function of an explicit offset so it is deterministically renderable off-screen.
+
+#### Scenario: Long selected name reveals then rests
+- **WHEN** a row with an overflowing name is selected at 80/100/120 columns
+- **THEN** the elided tail becomes visible over a finite sequence of offsets and then rests, with element width never exceeding the region at any offset
+
+#### Scenario: Short name is static
+- **WHEN** the selected name fits the region
+- **THEN** no reveal runs and the row is static
+
+#### Scenario: At rest, no out-of-bounds write
+- **WHEN** the reveal is at rest (offset 0 and offset max)
+- **THEN** the rendered element width is within the region and no content writes outside screen bounds
+
+#### Scenario: Mono and plain parity
+- **WHEN** the reveal runs in MONO or PLAIN
+- **THEN** behaviour is identical to FULL (the reveal is text/offset only)
+
+### Requirement: Per-row criticality marker
+For components whose unbind or unload risks system usability, the Modules view SHALL render a non-color marker together with a warning-colored, bold name marker and a detail line naming the risk; the marker SHALL appear on the name only and SHALL NOT recolor the enable/disable state glyph or the signed glyph and SHALL NOT use the danger role; the classification SHALL come from a curated core classifier exposed via `ModulesVM::criticalityForRow`; the Devices view MAY expose the same accessor and render it (phase-2).
+
+#### Scenario: Essential module in MONO and PLAIN
+- **WHEN** an essential module is rendered in MONO or PLAIN
+- **THEN** the marker glyph and the word "Essential" are present without color
+
+#### Scenario: Criticality and signed state coexist
+- **WHEN** a module is both essential and unsigned/blacklisted
+- **THEN** both signals are visible (warning on the name marker and on the signed glyph, in different columns) without being treated as a collision
+
+#### Scenario: Ordinary module has no marker
+- **WHEN** an ordinary module is rendered
+- **THEN** no criticality marker appears
+
+#### Scenario: State glyph keeps its own color
+- **WHEN** any module is rendered
+- **THEN** the +/- state glyph retains its own semantic color regardless of criticality
+
+### Requirement: Muted column headers
+The Modules and Updates lists SHALL show exactly one muted, non-selectable header row naming the columns (Modules: `Name Signed Ref Size Used-by`; Updates: `Source Device Version -> New`); the values SHALL NOT be individually bordered; the header SHALL also render in the collapsed 80-column list-only view and the list SHALL still satisfy the 80x24 row budget.
+
+#### Scenario: Header present and non-selectable
+- **WHEN** the Modules or Updates list is rendered
+- **THEN** the header row is present, muted, and cannot receive selection
+
+#### Scenario: 80x24 row budget holds
+- **WHEN** the list is rendered at 80x24 with the header
+- **THEN** the header, legend, tab line, status line, and at least one data row all fit
+
+#### Scenario: Header in collapsed list view
+- **WHEN** the layout is in the 80-column list-only mode
+- **THEN** the header renders in the list (not the detail view)
+
+#### Scenario: Mono and plain text
+- **WHEN** the header is rendered in MONO or PLAIN
+- **THEN** it is plain muted text with no color dependence
+
+### Requirement: Canonical name and criticality text parity
+Canonical device names and criticality marker text SHALL be shared facts rendered on both surfaces from the same shared VM/core fields; only their color is TUI-only under the DESIGN §9 temporary parity exception.
+
+#### Scenario: GUI shows the same canonical name
+- **WHEN** a device is shown in the GUI list and detail
+- **THEN** the canonical name matches the TUI for the same device
+
+#### Scenario: GUI shows criticality text without color
+- **WHEN** an essential component is shown in the GUI
+- **THEN** the criticality text is present; no color is required
