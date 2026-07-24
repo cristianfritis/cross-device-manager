@@ -18,5 +18,5 @@ No state SHALL be conveyed by color alone in either UI. The TUI SHALL honor `NO_
 - **THEN** the active tab is identifiable by bold + an ASCII marker, with no color dependence
 
 #### Scenario: Essential module identifiable without color
-- **WHEN** an essential module is rendered in MONO or PLAIN
-- **THEN** it is identifiable by its marker glyph and the word "Essential", with no color dependence
+- **WHEN** an essential module is selected in MONO or PLAIN
+- **THEN** it is identifiable by the marker glyph on its list row together with the criticality word in the detail pane on the same screen, with no color dependence

@@ -1,6 +1,16 @@
-# tui-presentation Delta Specification
+# tui-presentation Specification
 
-## ADDED Requirements
+## Purpose
+
+Presentation contract for the terminal frontend: a semantic 16-color theme with
+capability degradation, ASCII-first status glyphs, pure per-view render
+functions over ViewModel-owned state, canonical device naming, criticality
+marking, and fixed-screen render test coverage. Color is additive only — every
+state it expresses is also carried by a glyph and a word, which is what keeps
+the GUI at fact and wording parity while the docs/DESIGN.md §9 color exception
+stands.
+
+## Requirements
 
 ### Requirement: Semantic 16-color theme
 The TUI SHALL render all status color through a single theme layer mapping docs/DESIGN.md §4.1 roles to 16-color ANSI via FTXUI decorators only: accent→cyan (with inverted video for selection/focus), success→green, warning→yellow, danger→red, information→blue, muted→dim. The TUI SHALL NOT emit hand-written ANSI escape sequences, true-color, or 256-color output, and SHALL NOT color decoratively (no per-metric color, colored header blocks, gauges, or graphs).
