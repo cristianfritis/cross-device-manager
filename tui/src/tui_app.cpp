@@ -53,6 +53,7 @@
 #include "tui/src/views/devices_view.hpp"
 #include "tui/src/views/min_size.hpp"
 #include "tui/src/views/modules_view.hpp"
+#include "tui/src/views/pane_layout.hpp"
 #include "tui/src/views/snapshots_view.hpp"
 #include "tui/src/views/updates_view.hpp"
 
@@ -174,7 +175,10 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     static constexpr int kLeftPaneWidth = 44;
     // Modules/Updates/Snapshots use a wider left pane than Devices (their rows
     // carry longer identifiers); shared here so the three views stay in step.
-    static constexpr int kWidePaneWidth = 72;
+    // Computed from the LIVE terminal width, not fixed: a hard 72 left the
+    // detail pane six columns wide at the 80-column minimum, where it could
+    // render nothing (views::wideLeftPaneWidth).
+    auto widePaneWidth = [&] { return views::wideLeftPaneWidth(screen.dimx()); };
 
     std::string filter;
     InputOption inputOpt;
@@ -199,7 +203,10 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // Two narrower than the pane: the border, the "> " prefix and the scroll
     // affordance, plus a glyph+space for the lists that carry a status glyph.
     static constexpr int kRowWidthMargin = 6;
-    static constexpr int kWideRowWidth = kWidePaneWidth - kRowWidthMargin;
+    // Tracks the pane, so the bounded reveal windows a row to the width the row
+    // is actually given — a fixed 66 here would window past the pane's right
+    // edge at 80 columns and the tail would never come into view.
+    auto wideRowWidth = [&] { return widePaneWidth() - kRowWidthMargin; };
     // A criticality badge costs the row its glyph plus a space (R4).
     static constexpr int kBadgeWidth = 2;
     // Windows `label` for the selected row of a list whose rows are `rowWidth`
@@ -274,7 +281,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // R4: the criticality badge is its own element with its own warning
         // role, so it never recolours the signature cell inside the label.
         const auto badge = badgeForCriticality(modulesVm.criticalityForRow(s.index));
-        const int rowWidth = badge ? kWideRowWidth - kBadgeWidth : kWideRowWidth;
+        const int rowWidth = badge ? wideRowWidth() - kBadgeWidth : wideRowWidth();
         const std::string label = selected ? revealLabel(s.label, rowWidth) : s.label;
         return render::menuRow(label, selected, modulesMenu->Focused(), std::nullopt,
                                roleForSignature(sig), theme, badge);
@@ -318,7 +325,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // never takes the cursor (B3).
         const auto state = updatesVm.stateForRow(s.index);
         const bool selected = s.active && state.has_value();
-        const std::string label = selected ? revealLabel(s.label, kWideRowWidth) : s.label;
+        const std::string label = selected ? revealLabel(s.label, wideRowWidth()) : s.label;
         return render::menuRow(label, selected, updatesMenu->Focused(), std::nullopt,
                                roleForUpdateState(state), theme);
     };
@@ -364,7 +371,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // never takes the cursor (B3).
         const auto health = snapshotsVm.healthForRow(s.index);
         const bool selected = s.active && health.has_value();
-        const std::string label = selected ? revealLabel(s.label, kWideRowWidth) : s.label;
+        const std::string label = selected ? revealLabel(s.label, wideRowWidth()) : s.label;
         return render::menuRow(label, selected, snapshotsMenu->Focused(), std::nullopt,
                                roleForSnapshotRow(health, snapshotsVm.isHeadRow(s.index),
                                                   snapshotsVm.isLastGoodRow(s.index)),
@@ -506,7 +513,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .list = modulesMenu->Render(),
                                              .detail = moduleDetail->Render(),
                                              .statusText = status.text,
-                                             .leftPaneWidth = kWidePaneWidth,
+                                             .leftPaneWidth = widePaneWidth(),
                                              .bannerRole = modulesBannerRole(bannerText),
                                              .statusRole = status.role},
                                             theme);
@@ -520,7 +527,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .list = updatesMenu->Render(),
                                              .detail = updatesDetail->Render(),
                                              .statusText = status.text,
-                                             .leftPaneWidth = kWidePaneWidth,
+                                             .leftPaneWidth = widePaneWidth(),
                                              .statusRole = status.role},
                                             theme);
         }
@@ -533,7 +540,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             views::SnapshotsView v{.activeTab = activeTab,
                                    .banner = bannerText,
                                    .statusText = status.text,
-                                   .leftPaneWidth = kWidePaneWidth,
+                                   .leftPaneWidth = widePaneWidth(),
                                    .statusRole = status.role};
             if (preview) {
                 v.showPreview = true;

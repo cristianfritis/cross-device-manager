@@ -13,6 +13,7 @@ add_library(devmgr_tui_render STATIC
     src/views/status_bar.cpp
     src/views/detail_pane.cpp
     src/views/min_size.cpp
+    src/views/pane_layout.cpp
     src/views/devices_view.cpp
     src/views/modules_view.cpp
     src/views/updates_view.cpp
@@ -61,7 +62,8 @@ add_executable(devmgr_tui_tests
     tests/test_states_matrix.cpp
     tests/test_selection_render.cpp
     tests/test_detail_pane_render.cpp
-    tests/test_min_size_render.cpp)
+    tests/test_min_size_render.cpp
+    tests/test_pane_layout.cpp)
 target_include_directories(devmgr_tui_tests PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(devmgr_tui_tests
     PRIVATE devmgr_tui_render GTest::gtest GTest::gtest_main)

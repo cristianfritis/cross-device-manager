@@ -6,15 +6,22 @@
 
 #include <algorithm>  // std::min
 #include <array>
+#include <optional>
 #include <string>
+#include <vector>
 
-#include <ftxui/dom/node.hpp>  // Render
+#include <ftxui/dom/elements.hpp>  // text, vbox
+#include <ftxui/dom/node.hpp>      // Render
 #include <ftxui/screen/screen.hpp>
 #include <ftxui/screen/string.hpp>  // string_width
 
 #include <gtest/gtest.h>
 
+#include "tui/src/render_util.hpp"  // render::menuRow, render::glyph
+#include "tui/src/semantics.hpp"    // render::Badge, render::Glyph, Role
 #include "tui/src/theme.hpp"
+#include "tui/src/views/detail_pane.hpp"
+#include "tui/src/views/pane_layout.hpp"
 
 namespace devmgr::tui {
 namespace {
@@ -161,6 +168,94 @@ TEST(ModulesViewRender, ColumnHeaderIsPlainTextWithoutColour) {
         for (int x = 0; x < screen.dimx(); ++x) {
             EXPECT_EQ(screen.PixelAt(x, header).foreground_color, ftxui::Color::Default);
             EXPECT_FALSE(screen.PixelAt(x, header).dim);  // decorators are identity here
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R4 (task 12.3b): the colour-independent criticality signal has TWO halves —
+// the marker glyph on the list row and the criticality WORD in the detail pane
+// — and the whole point of the pairing is that both are on screen AT ONCE.
+// Every other test proves one half in isolation: test_selection_render.cpp
+// asserts the badge glyph on a bare row, and the word is covered only by the VM
+// tests and the GUI parity test. This renders the whole Modules screen in
+// MONO/PLAIN with an essential module selected and asserts the two halves
+// together, with no colour anywhere left to carry the meaning.
+// ---------------------------------------------------------------------------
+
+std::string paneText(const ftxui::Screen& screen, int y, int x0, int x1) {
+    std::string out;
+    for (int x = std::max(0, x0); x < std::min(x1, screen.dimx()); ++x)
+        out += screen.PixelAt(x, y).character;
+    return out;
+}
+
+bool paneContains(const ftxui::Screen& screen, const std::string& needle, int x0, int x1) {
+    for (int y = 0; y < screen.dimy(); ++y) {
+        if (paneText(screen, y, x0, x1).find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+// Exactly what the shell composes when an essential module is selected: the row
+// carries the R4 badge, and the detail pane carries the ModulesVM::detailLines()
+// "Risk:" line, whose wording pairs the word with the risk it names.
+views::ModulesView essentialSelectedView(const Theme& theme, int cols) {
+    views::ModulesView v = viewWithHeader();
+    // The split the shell computes for this width — a fixed 72 here would leave
+    // the detail pane six columns wide at 80 and the word could not render.
+    v.leftPaneWidth = views::wideLeftPaneWidth(cols);
+    v.list = ftxui::vbox({
+        render::menuRow("amdgpu   yes (kernel)   0   12288K", /*selected=*/true,
+                        /*listFocused=*/true, std::nullopt, std::nullopt, theme,
+                        render::Badge{render::Glyph::Essential, Role::Warning}),
+        render::menuRow("nvidia   NO             0    4096K", false, false, std::nullopt,
+                        std::nullopt, theme),
+    });
+    v.detail = views::renderDetailPane(
+        {"Module:  amdgpu", "Risk:    essential — unloading this may make the system unusable"},
+        theme);
+    return v;
+}
+
+TEST(ModulesViewRender, EssentialModuleShowsMarkerAndWordOnOneScreenWithoutColour) {
+    for (const ColorMode mode : {ColorMode::Mono, ColorMode::Plain}) {
+        for (Size sz : kSizes) {
+            const Theme theme(mode, false);
+            const int pane = views::wideLeftPaneWidth(sz.w);
+            ftxui::Screen screen =
+                renderTo(views::renderModulesView(essentialSelectedView(theme, sz.w), theme), sz);
+            const std::string marker(render::glyph(render::Glyph::Essential, theme));
+            const std::string where = "@" + std::to_string(sz.w) + "x" + std::to_string(sz.h) +
+                                      " mode " + std::to_string(static_cast<int>(mode));
+
+            // Half 1 — the marker glyph, on the selected module's list row.
+            const int row = listRowOf(screen, "amdgpu", pane);
+            ASSERT_GE(row, 0) << where;
+            const std::string listRow = paneText(screen, row, 0, pane);
+            EXPECT_NE(listRow.find(marker), std::string::npos) << where << " [" << listRow << "]";
+            // ...and it IS the selected row.
+            EXPECT_NE(listRow.find("> "), std::string::npos) << where << " [" << listRow << "]";
+            // The ordinary module below it is unmarked, so the glyph means something.
+            const int ordinary = listRowOf(screen, "nvidia", pane);
+            ASSERT_GE(ordinary, 0) << where;
+            EXPECT_EQ(paneText(screen, ordinary, 0, pane).find(marker), std::string::npos) << where;
+
+            // Half 2 — the criticality WORD, in the detail pane, on the same
+            // screen. (+2 clears the list pane's own border column.)
+            EXPECT_TRUE(paneContains(screen, "essential", pane + 2, screen.dimx())) << where;
+
+            // ...and nothing on the screen is coloured, so neither half can be
+            // leaning on a hue the terminal may not render (§10).
+            bool anyColour = false;
+            for (int y = 0; y < screen.dimy(); ++y) {
+                for (int x = 0; x < screen.dimx(); ++x) {
+                    const ftxui::Pixel& p = screen.PixelAt(x, y);
+                    if (p.foreground_color != ftxui::Color::Default) anyColour = true;
+                    if (p.background_color != ftxui::Color::Default) anyColour = true;
+                }
+            }
+            EXPECT_FALSE(anyColour) << where;
         }
     }
 }
