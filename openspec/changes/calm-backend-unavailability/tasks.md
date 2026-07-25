@@ -65,7 +65,7 @@
 
 - [x] 10.1 Build with `-j24` and run the full test suite; record the pass count and confirm zero regressions.
 - [x] 10.2 Run `scripts/check-format.sh --container` before any push — host clang-format 21 and CI/container 18 diverge.
-- [ ] 10.3 Run the container clang-tidy gate. Rebuild the container image first: docker-compose has no volume mount, so a stale image reports phantom results.
+- [x] 10.3 Container clang-tidy gate run after a fresh `docker compose build unit`. First run FAILED: `bugprone-unchecked-optional-access` in `app/src/backend_status_vm.cpp:94` (the transition check called `.at()` twice, so the guard could not be tied to the dereference) — fixed by binding the slot once. Re-run over the seven files this change touches: clean, exit 0; the other 68 files passed in the full run and are unchanged since.
 - [x] 10.4 Run `openspec validate --strict` for this change and confirm it passes.
 
 ## 11. Manual verification — user-gated

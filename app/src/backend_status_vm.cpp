@@ -91,10 +91,14 @@ void BackendStatusVM::observe(core::BackendId backend, const std::optional<core:
         return;
     }
     const core::UnavailabilityKind kind = core::kindFor(error->code);
-    const bool transition = !logged_.at(slot) || *logged_.at(slot) != kind;
+    // Bind the slot once: two separate .at() calls are two separate optionals as
+    // far as the analyzer can prove, so the guarded dereference reads as
+    // unchecked (bugprone-unchecked-optional-access).
+    auto& logged = logged_.at(slot);
+    const bool transition = !logged.has_value() || *logged != kind;
     entries_.at(slot) = Entry{.kind = kind, .diagnostic = error->message};
     if (!transition) return;  // same state, another poll — nothing new to record
-    logged_.at(slot) = kind;
+    logged = kind;
     // Logged under the lock: transitions are rare, and serialising them keeps a
     // concurrent recovery from interleaving a stale line after this one.
     spdlog::warn("{} unavailable ({}): {}", logName(backend), kindLabel(kind), error->message);

@@ -85,6 +85,19 @@ purely, which is precisely the cut-condition set for this group. It is
 therefore left exactly as found, and is worth its own change with the owner's
 input on which side should move.
 
+## The gate that caught something
+
+The container clang-tidy gate (10.3) had never run against the groups 1–2 code,
+and it failed on `app/src/backend_status_vm.cpp`:
+
+    const bool transition = !logged_.at(slot) || *logged_.at(slot) != kind;
+
+`bugprone-unchecked-optional-access` — two separate `.at()` calls are two
+separate optionals as far as the analyzer can prove, so the guarded dereference
+reads as unchecked. Fixed by binding the slot once. Worth remembering that the
+groups 1–2 commit went out with host gates only; the container tidy gate is the
+one that sees this class of defect.
+
 ## Gate results
 
 | Gate | Result |
@@ -92,5 +105,5 @@ input on which side should move.
 | Host build `-j24` + full suite | 717/717, zero regressions (was 695 at group 2) |
 | Container build + unit | 718/718 (one sysfs test skipped as designed) |
 | `scripts/check-format.sh --container` | OK, 248 files clean (clang-format-18) |
-| Container clang-tidy | see task 10.3 |
+| Container clang-tidy | clean after one fix — see below |
 | `openspec validate --strict` | valid |
