@@ -160,8 +160,13 @@ core::ProviderAvailability DkmsStatusProvider::availability() const {
     core::ProviderAvailability a;
     a.available = available;
     if (!available) {
+        // Diagnostic only — it names the actual root it looked for, which is
+        // configurable, so the old hardcoded path could also be wrong. The
+        // sentence the user reads comes from core::unavailabilityText(Dkms,
+        // Absent); a filesystem path must never be the presented explanation
+        // (docs/DESIGN.md §6).
         a.error = core::Error{.code = core::Error::Code::NotFound,
-                              .message = "no /var/lib/dkms — DKMS not present"};
+                              .message = "DKMS root not found: " + dkmsRoot_};
     }
     return a;
 }

@@ -11,6 +11,7 @@
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/updates_vm.hpp"
+#include "devmgr/core/backend_wording.hpp"
 #include "devmgr/core/events.hpp"
 #include "devmgr/core/update_models.hpp"
 #include "devmgr/runtime/event_bus.hpp"
@@ -22,6 +23,12 @@
 using namespace devmgr;
 
 namespace {
+
+// The verbatim shape fwupd::mapError composes ("<dbus-name>: <dbus-message>") —
+// the string the beta user saw in the Updates banner.
+constexpr const char* kRawServiceUnknown =
+    "org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.fwupd was not provided "
+    "by any .service files";
 
 constexpr int kEarlierPercent = 10;
 constexpr int kProgressPercent = 42;
@@ -122,12 +129,120 @@ TEST_F(UpdatesVmTest, RowsAreByteFrozenFormat) {
 }
 
 TEST_F(UpdatesVmTest, PlaceholderRowWhenEmptyNeverActionable) {  // V1 + Phase 5 rule
-    refresh();  // both providers return zero candidates
+    refresh();  // both providers available and returning zero candidates
     app::UpdatesVM vm(facade_, bus_, dispatcher_);
     vm.rebuild();
     ASSERT_EQ(vm.rowsRef().size(), 1U);
     EXPECT_EQ(vm.rowsRef()[0], "(no updates available)");
     EXPECT_FALSE(vm.selectedInstall().has_value());
+    // "Checked, nothing to report" — so no degraded note accompanies it.
+    EXPECT_TRUE(vm.availabilityNotes().empty());
+}
+
+// The Updates view's empty-result string is a whole-view claim ("nothing to
+// update"), so an unreachable provider must suppress it: the user is owed "could
+// not check", not "nothing found" (design D5).
+TEST_F(UpdatesVmTest, UnreachableProviderSuppressesEmptyResultString) {
+    fwupd_.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    refresh();  // dkms available with zero candidates, fwupd unreachable
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    EXPECT_EQ(joined(vm.rowsRef()).find("(no updates available)"), std::string::npos);
+    ASSERT_EQ(vm.availabilityNotes().size(), 1U);
+    EXPECT_EQ(
+        vm.availabilityNotes()[0].text,
+        core::unavailabilityText(core::BackendId::Fwupd, core::UnavailabilityKind::Unreachable));
+}
+
+TEST_F(UpdatesVmTest, MixedAvailabilityShowsRowsAndNoteWithoutPlaceholder) {
+    dkms_.enumerateResult_ = std::vector<core::UpdateCandidate>{dkmsRow()};
+    fwupd_.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    const auto rows = joined(vm.rowsRef());
+    EXPECT_NE(rows.find("nvidia"), std::string::npos);  // reachable provider's row
+    EXPECT_EQ(rows.find("(no updates available)"), std::string::npos);
+    ASSERT_EQ(vm.availabilityNotes().size(), 1U);  // and the degraded note
+    EXPECT_EQ(vm.availabilityNotes()[0].backend, core::BackendId::Fwupd);
+}
+
+// §6 "Initial loading — keep layout stable; show what is being loaded" plus
+// §6.1 "the first frame is never empty": before any provider has reported, the
+// view has not checked anything, so it must not claim an empty result either.
+TEST_F(UpdatesVmTest, InitialLoadShowsLoadingRowNotEmptyResult) {
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();  // no refresh() — the snapshot has no providers yet
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_EQ(vm.rowsRef()[0], "(checking for updates)");
+    EXPECT_FALSE(vm.stateForRow(0).has_value());  // never actionable
+    EXPECT_FALSE(vm.selectedInstall().has_value());
+}
+
+// The raw D-Bus name the beta user reported: it must reach the diagnostic field
+// and the log, and nothing else.
+TEST_F(UpdatesVmTest, BannerTranslatesUnavailabilityAndHidesRawDbusName) {
+    fwupd_.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    const auto b = vm.banner();
+    EXPECT_EQ(b.find("org.freedesktop"), std::string::npos);
+    EXPECT_EQ(b.find("DBus.Error"), std::string::npos);
+    EXPECT_EQ(b.find("ServiceUnknown"), std::string::npos);
+    EXPECT_NE(b.find(core::unavailabilityText(core::BackendId::Fwupd,
+                                              core::UnavailabilityKind::Unreachable)),
+              std::string::npos);
+}
+
+// D2: text and diagnostic are separate fields, so no surface can concatenate
+// them by accident — the raw detail stays reachable without being primary.
+TEST_F(UpdatesVmTest, AvailabilityNotesCarryDiagnosticSeparately) {
+    fwupd_.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    const auto notes = vm.availabilityNotes();
+    ASSERT_EQ(notes.size(), 1U);
+    const auto& note = notes[0];
+    EXPECT_EQ(note.diagnostic, kRawServiceUnknown);
+    EXPECT_EQ(note.text.find("org.freedesktop"), std::string::npos);
+    EXPECT_EQ(note.role, app::StatusSeverity::Warning);  // present but not serving
+}
+
+// dkms absent is a steady-state configuration, not a fault (§5.5): information,
+// and its sentence names no filesystem path.
+TEST_F(UpdatesVmTest, AbsentOptionalProviderStaysInformationWithNoPath) {
+    dkms_.availability_ = {.available = false,
+                           .version = {},
+                           .error = core::Error{.code = core::Error::Code::NotFound,
+                                                .message = "DKMS root not found: /var/lib/dkms"},
+                           .notices = {}};
+    refresh();
+    app::UpdatesVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    const auto notes = vm.availabilityNotes();
+    ASSERT_EQ(notes.size(), 1U);
+    const auto& note = notes[0];
+    EXPECT_EQ(note.backend, core::BackendId::Dkms);
+    EXPECT_EQ(note.role, app::StatusSeverity::Info);
+    EXPECT_EQ(note.text.find('/'), std::string::npos);
+    EXPECT_EQ(vm.banner().find("/var/lib/dkms"), std::string::npos);
 }
 
 TEST_F(UpdatesVmTest, RemoteOnlyReleaseNotInstallableWithGuidance) {  // review test 4
@@ -178,7 +293,14 @@ TEST_F(UpdatesVmTest, BannerShowsAvailabilityRebootAndSecureBoot) {
     refresh();
     app::UpdatesVM vm(facade_, bus_, dispatcher_);
     const auto b = vm.banner();
-    EXPECT_NE(b.find("daemon down"), std::string::npos);
+    // The availability segment is the shared sentence, not the provider's raw
+    // message — which stays reachable as the note's diagnostic.
+    EXPECT_EQ(b.find("daemon down"), std::string::npos);
+    EXPECT_NE(b.find(core::unavailabilityText(core::BackendId::Fwupd,
+                                              core::UnavailabilityKind::Unreachable)),
+              std::string::npos);
+    ASSERT_EQ(vm.availabilityNotes().size(), 1U);
+    EXPECT_EQ(vm.availabilityNotes()[0].diagnostic, "daemon down");
     EXPECT_NE(b.find("reboot required"), std::string::npos);
     EXPECT_NE(b.find("Secure Boot"), std::string::npos);
 }

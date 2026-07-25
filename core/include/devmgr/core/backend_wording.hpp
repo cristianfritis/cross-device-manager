@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -50,5 +51,11 @@ std::string_view backendName(BackendId backend);
 // yields a calm generic sentence naming the backend, never an empty string and
 // never a substituted diagnostic.
 std::string unavailabilityText(BackendId backend, UnavailabilityKind kind);
+
+// Update-provider id (core::UpdateProviderState::providerId) to backend
+// identity. Lives beside the table so a new provider is a row here, never a
+// branch in a view. nullopt for an unrecognized provider — a caller then has no
+// sentence to offer and must stay silent rather than invent one.
+std::optional<BackendId> backendForProvider(std::string_view providerId);
 
 }  // namespace devmgr::core

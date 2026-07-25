@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "devmgr/core/backend_wording.hpp"
 #include "devmgr/platform/linux/dkms_status_provider.hpp"
 
 namespace fs = std::filesystem;
@@ -39,6 +40,19 @@ class DkmsStatusProviderTest : public ::testing::Test {
 TEST_F(DkmsStatusProviderTest, UnavailableWithoutRoot) {
     DkmsStatusProvider p((root_ / "nope").string(), mods_.string());
     EXPECT_FALSE(p.availability().available);
+}
+// The availability error is a DIAGNOSTIC: it may name the path it looked for,
+// and its code must map to "absent" so the presented sentence is the calm
+// core::unavailabilityText(Dkms, Absent) — which carries no path at all.
+TEST_F(DkmsStatusProviderTest, MissingRootIsAbsentWithPathOnlyInDiagnostic) {
+    DkmsStatusProvider p((root_ / "nope").string(), mods_.string());
+    const auto a = p.availability();
+    ASSERT_TRUE(a.error.has_value());
+    EXPECT_EQ(a.error->code, devmgr::core::Error::Code::NotFound);
+    EXPECT_NE(a.error->message.find((root_ / "nope").string()), std::string::npos);
+    const auto presented = devmgr::core::unavailabilityText(devmgr::core::BackendId::Dkms,
+                                                            devmgr::core::kindFor(a.error->code));
+    EXPECT_EQ(presented.find('/'), std::string::npos);
 }
 TEST_F(DkmsStatusProviderTest, BuiltAndInstalledStates) {
     addBuilt("nvidia", "565.1", "6.8.0-49-generic", "nvidia.ko");

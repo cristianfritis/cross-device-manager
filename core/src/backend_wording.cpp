@@ -57,4 +57,10 @@ std::string unavailabilityText(BackendId backend, UnavailabilityKind kind) {
     return std::string(backendName(backend)) + " unavailable — this cannot be read right now.";
 }
 
+std::optional<BackendId> backendForProvider(std::string_view providerId) {
+    if (providerId == "fwupd") return BackendId::Fwupd;
+    if (providerId == "dkms") return BackendId::Dkms;
+    return std::nullopt;
+}
+
 }  // namespace devmgr::core

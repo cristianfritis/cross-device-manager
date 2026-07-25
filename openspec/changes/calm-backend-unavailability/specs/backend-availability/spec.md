@@ -58,7 +58,7 @@ The raw backend error text SHALL be retained and reachable, and SHALL NOT be ren
 - **THEN** the raw diagnostic is logged once for that transition, not once per poll
 
 ### Requirement: Empty result and unreachable source are distinct states
-A view whose empty-state string asserts a completed query SHALL NOT render that string while any source feeding it is unreachable. The Updates view SHALL render `(no updates available)` only when every provider reported availability and returned zero candidates. Where some providers are reachable and others are not, the view SHALL render the reachable providers' rows together with the degraded note, and SHALL omit the empty-result string.
+A view whose empty-state string asserts a completed query SHALL NOT render that string while any source feeding it is unreachable, nor before its sources have reported at all. The Updates view SHALL render `(no updates available)` only when every provider reported availability and returned zero candidates. Where some providers are reachable and others are not, the view SHALL render the reachable providers' rows together with the degraded note, and SHALL omit the empty-result string. Before any provider has reported, the view SHALL show that it is still loading rather than an empty result, keeping docs/DESIGN.md §6.1's "the first frame is never empty" rule intact. The current shared loading string for the Updates view is `(checking for updates)`.
 
 #### Scenario: Unreachable source suppresses the empty-result string
 - **WHEN** the Updates view renders while `fwupd` is unreachable
@@ -67,6 +67,10 @@ A view whose empty-state string asserts a completed query SHALL NOT render that 
 #### Scenario: Genuinely empty result still says so
 - **WHEN** every update provider is available and each returns zero candidates
 - **THEN** `(no updates available)` renders and no degraded note is shown
+
+#### Scenario: Initial load does not claim an empty result
+- **WHEN** the Updates view renders before any provider has reported its availability
+- **THEN** `(checking for updates)` renders in place of the empty-result string, the row is not selectable or actionable, and `(no updates available)` is absent
 
 #### Scenario: Mixed availability shows both truths
 - **WHEN** one update provider is available with candidates and another is unreachable

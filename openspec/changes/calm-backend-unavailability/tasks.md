@@ -14,17 +14,17 @@
 
 ## 3. UpdatesVM — stop leaking, stop lying
 
-- [ ] 3.1 Write the failing tests first in the updates VM test file: with a provider whose `availability.error->message` is `"org.freedesktop.DBus.Error.ServiceUnknown: The name ..."`, `banner()` contains none of `org.freedesktop`, `DBus.Error`, `ServiceUnknown`; and with that provider unreachable, the row set contains no `(no updates available)`.
-- [ ] 3.2 Replace `availabilityCell()` (`app/src/updates_vm.cpp:71-76`) so the per-provider cell comes from the shared accessor and never concatenates `error->message`.
-- [ ] 3.3 Gate `kPlaceholderRow` (`app/src/updates_vm.cpp:12`) on the whole-view predicate: emitted only when every provider reported available and all returned zero candidates (design D5).
-- [ ] 3.4 Add the mixed-availability test: one provider available with candidates, one unreachable → candidate rows present, degraded note present, no empty-result string.
-- [ ] 3.5 Add the genuinely-empty test: all providers available, zero candidates → `(no updates available)` present, no degraded note.
-- [ ] 3.6 Confirm the per-provider notices path (`updates_vm.cpp:284`) still appends notices in provider order for available providers.
+- [x] 3.1 Write the failing tests first in the updates VM test file: with a provider whose `availability.error->message` is `"org.freedesktop.DBus.Error.ServiceUnknown: The name ..."`, `banner()` contains none of `org.freedesktop`, `DBus.Error`, `ServiceUnknown`; and with that provider unreachable, the row set contains no `(no updates available)`.
+- [x] 3.2 Replace `availabilityCell()` (`app/src/updates_vm.cpp:71-76`) so the per-provider cell comes from the shared accessor and never concatenates `error->message`.
+- [x] 3.3 Gate `kPlaceholderRow` (`app/src/updates_vm.cpp:12`) on the whole-view predicate: emitted only when every provider reported available and all returned zero candidates (design D5).
+- [x] 3.4 Add the mixed-availability test: one provider available with candidates, one unreachable → candidate rows present, degraded note present, no empty-result string.
+- [x] 3.5 Add the genuinely-empty test: all providers available, zero candidates → `(no updates available)` present, no degraded note.
+- [x] 3.6 Confirm the per-provider notices path (`updates_vm.cpp:284`) still appends notices in provider order for available providers.
 
 ## 4. DKMS provider text
 
-- [ ] 4.1 Change `platform/linux/src/dkms_status_provider.cpp:163` so the availability error message is treated as diagnostic only, and the presented sentence comes from the table. The `/var/lib/dkms` path stays in the diagnostic, never in the presented text.
-- [ ] 4.2 Add or update a provider test asserting the presented text contains no `/`.
+- [x] 4.1 Change `platform/linux/src/dkms_status_provider.cpp:163` so the availability error message is treated as diagnostic only, and the presented sentence comes from the table. The `/var/lib/dkms` path stays in the diagnostic, never in the presented text.
+- [x] 4.2 Add or update a provider test asserting the presented text contains no `/`.
 
 ## 5. GUI — sentence visible, raw detail behind a disclosure
 

@@ -68,6 +68,10 @@ class BackendStatusVM {
 
     // Degraded backends only, in core::kAllBackends order. Empty when every
     // observed backend is healthy — a surface renders no region at all then.
+    //
+    // This is the PERSISTENT channel: every note's role here is a pure function
+    // of its kind. It does not change on focus, on selection, or because a verb
+    // was attempted — a standing note must not pulse.
     std::vector<BackendNote> notes() const;
 
     // The note for one backend, or nullopt when it is healthy or unobserved.
@@ -75,6 +79,10 @@ class BackendStatusVM {
     // attempted, which escalates an otherwise calm note to Warning — the
     // "blocked verb reuses the shared sentence" rule, so a disabled control
     // never gets a separately authored reason.
+    //
+    // That escalation is the TRANSIENT channel only: the disabled-action reason
+    // and the status line (docs/DESIGN.md §5.3). It is computed per call and
+    // stored nowhere, so it cannot bleed back into notes().
     std::optional<BackendNote> noteFor(core::BackendId backend,
                                        bool blocksAttemptedVerb = false) const;
 

@@ -34,7 +34,7 @@ constexpr const char* kFwupdRaw =
 // the CLI hint matcher depend on this string, so it must not be repurposed as
 // presentation text.
 constexpr const char* kDevmgrdRaw = "helper devmgrd is not available";
-constexpr const char* kDkmsRaw = "no /var/lib/dkms — DKMS not present";
+constexpr const char* kDkmsRaw = "DKMS root not found: /var/lib/dkms";
 
 Error err(Error::Code code, const char* message) {
     return Error{code, message};
@@ -221,6 +221,27 @@ TEST(BackendStatusVM, BlockedVerbEscalatesAnOtherwiseCalmNote) {
     EXPECT_EQ(blocked->role, StatusSeverity::Warning);
     // Same sentence, raised role — the verb does not get its own wording.
     EXPECT_EQ(blocked->text, calm->text);
+}
+
+// Channel separation: the persistent note's role is a pure function of kind, so
+// asking for the blocked-verb reason (the transient §5.3 channel) cannot leave
+// the standing note escalated. No banner pulse on a verb attempt.
+TEST(BackendStatusVM, PersistentNoteNeverEscalatesFromAVerbAttempt) {
+    BackendStatusVM vm;
+    vm.observe(BackendId::Dkms, err(Error::Code::NotFound, kDkmsRaw));
+
+    ASSERT_EQ(vm.notes().size(), 1U);
+    EXPECT_EQ(vm.notes()[0].role, StatusSeverity::Info);
+
+    ASSERT_TRUE(vm.noteFor(BackendId::Dkms, /*blocksAttemptedVerb=*/true).has_value());
+    EXPECT_EQ(vm.noteFor(BackendId::Dkms, true)->role, StatusSeverity::Warning);
+
+    // ...and the standing note is exactly as calm as before the attempt.
+    ASSERT_EQ(vm.notes().size(), 1U);
+    EXPECT_EQ(vm.notes()[0].role, StatusSeverity::Info);
+    // Re-observing the same state does not escalate it either.
+    vm.observe(BackendId::Dkms, err(Error::Code::NotFound, kDkmsRaw));
+    EXPECT_EQ(vm.notes()[0].role, StatusSeverity::Info);
 }
 
 TEST(BackendStatusVM, RolesOnNotesMatchTheMapping) {

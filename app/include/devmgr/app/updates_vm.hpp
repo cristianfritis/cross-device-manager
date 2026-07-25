@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "devmgr/app/application_facade.hpp"
+#include "devmgr/app/backend_status_vm.hpp"
 #include "devmgr/app/ui_dispatcher.hpp"
 #include "devmgr/core/events.hpp"
 #include "devmgr/core/update_models.hpp"
@@ -47,7 +48,11 @@ class UpdatesVM {
     // the row formatter's own widths so header and rows cannot drift apart; it
     // is NOT a list entry, so it can never take the cursor.
     std::string columnHeader() const;
-    std::string banner() const;         // availability + version + reboot marker + Secure Boot
+    std::string banner() const;  // availability + version + reboot marker + Secure Boot
+    // Degraded update providers, in backend order; empty when every provider is
+    // serving. Both surfaces render notes[i].text verbatim (the parity contract)
+    // and put notes[i].diagnostic behind a disclosure — never in the sentence.
+    std::vector<BackendNote> availabilityNotes() const;
     std::string requestBanner() const;  // "" when none; DURABLE until dismiss (spec §9)
     void dismissRequest();
     std::vector<std::string> detailLines() const;  // selected candidate: facts + releases
@@ -76,6 +81,11 @@ class UpdatesVM {
     // stable identity for selection restore across rebuilds.
     const core::UpdateCandidate* selectedCandidate() const;
     std::optional<std::pair<std::string, std::string>> selectedKey() const;
+    // Feeds each provider's availability to backendStatus_. Idempotent per
+    // frame: the note is replaced every call, but the raw diagnostic reaches the
+    // log only on a (backend, kind) transition, so calling it from the
+    // per-frame banner path does not turn a missing provider into log spam.
+    void observeAvailability(const std::vector<core::UpdateProviderState>& snapshot) const;
 
     ApplicationFacade& facade_;
     runtime::EventBus& bus_;
@@ -85,6 +95,10 @@ class UpdatesVM {
     std::vector<std::optional<std::pair<std::size_t, std::size_t>>> rowRefs_;
     std::vector<core::UpdateProviderState> snapshot_;
     std::vector<core::PendingAction> pending_;
+    // Owns the translated sentence, the raw diagnostic, and the role for every
+    // degraded provider (design D2). mutable because banner() is const and is
+    // the per-frame read path; the type is internally mutex-guarded.
+    mutable BackendStatusVM backendStatus_;
     int selected_ = 0;
     std::atomic<bool> rebuildQueued_{false};
     std::atomic<bool> refreshQueued_{false};
