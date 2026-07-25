@@ -71,6 +71,17 @@ StatusSeverity noteRole(core::UnavailabilityKind kind, bool blocksAttemptedVerb)
     return StatusSeverity::Info;
 }
 
+std::vector<std::string> diagnosticLines(const std::vector<BackendNote>& notes) {
+    std::vector<std::string> out;
+    out.reserve(notes.size());
+    for (const auto& note : notes) {
+        std::string line = std::string(core::backendName(note.backend)) + ": ";
+        line += note.diagnostic.empty() ? "no detail reported" : note.diagnostic;
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
 void BackendStatusVM::observe(core::BackendId backend, const std::optional<core::Error>& error) {
     const std::size_t slot = slotOf(backend);
     const std::lock_guard lock(mutex_);

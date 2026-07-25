@@ -392,6 +392,24 @@ change it once in the VM. The current shared list strings:
 | Updates | `(no updates available)` | — (no filter) |
 | Snapshots | `(no snapshots)` | `No snapshots match "<filter>"` |
 
+An empty-result string asserts that the query ran. It is therefore withheld
+while a source feeding the view is unreachable, and before the sources have
+reported at all — the Updates view shows `(checking for updates)` until every
+provider has answered, and shows the source's own note instead of an empty
+result when one could not be reached. The current shared source-unavailable
+sentences:
+
+| Source | State | Sentence |
+| --- | --- | --- |
+| Device service (`devmgrd`) | unreachable | `Device service unavailable — showing read-only system state.` |
+| Firmware updates (`fwupd`) | unreachable | `Firmware updates unavailable — the fwupd service is not responding.` |
+| DKMS status | absent | `DKMS status unavailable — DKMS is not installed on this system.` |
+
+These are resolved from the backend's identity and an unavailability kind, never
+from the error text, so a D-Bus name, errno value, or filesystem path cannot
+reach the sentence. The raw text stays a diagnostic: logged once per state
+transition, and revealed on request (GUI `Details`, TUI `i`).
+
 Other shared state text: an unselected device detail reads `(no device
 selected)`; a snapshot whose payload cannot be diffed reports `Differences are
 unavailable for this snapshot.`; daemon-unavailable and guard refusals surface

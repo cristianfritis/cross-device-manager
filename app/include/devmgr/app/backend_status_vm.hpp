@@ -43,6 +43,15 @@ struct BackendNote {
 // a standing warning.
 StatusSeverity noteRole(core::UnavailabilityKind kind, bool blocksAttemptedVerb);
 
+// The lines a diagnostics affordance reveals: one per degraded backend, naming
+// the backend and then its raw text verbatim. Shared by both surfaces so the
+// GUI's "Details" region and the TUI's Diagnostics region reveal byte-identical
+// bytes — parity covers the demoted detail, not only the sentence.
+//
+// Never empty for a note whose backend reported no detail: the region says so
+// rather than rendering a blank line under a heading.
+std::vector<std::string> diagnosticLines(const std::vector<BackendNote>& notes);
+
 // Toolkit-agnostic availability status for every backend a surface reads.
 //
 // observe() is safe to call once per poll: the note is replaced, but the raw

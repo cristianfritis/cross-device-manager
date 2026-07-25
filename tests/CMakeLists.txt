@@ -7,6 +7,7 @@ add_executable(devmgr_tests
     unit/test_models.cpp
     unit/test_device_presentation.cpp
     unit/test_backend_wording.cpp
+    unit/test_backend_parity.cpp
     unit/test_backend_status_vm.cpp
     unit/test_criticality.cpp
     unit/test_vm_criticality_accessors.cpp

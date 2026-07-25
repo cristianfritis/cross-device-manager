@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include "tests/fixtures/backend_sentences.hpp"
 #include "tui/src/theme.hpp"
 
 namespace devmgr::tui {
@@ -147,6 +148,122 @@ TEST(UpdatesViewRender, NoHeaderStringRendersNoHeaderRow) {
     // The header costs two rows here (header + rule), since the Updates pane has
     // no filter field to separate it from.
     EXPECT_LT(listRowOf(without, "Dock firmware"), listRowOf(with, "Dock firmware"));
+}
+
+// ---------------------------------------------------------------------------
+// Backend availability: the translated sentence is primary, the raw detail is
+// one keystroke away, and neither depends on colour (backend-availability and
+// tui-presentation specs).
+// ---------------------------------------------------------------------------
+
+// The sentence a surface is handed for an unreachable fwupd. devmgr_tui_render
+// links neither app nor core, so it cannot call the table directly; the shared
+// fixture constant is asserted equal to core::unavailabilityText() by
+// tests/unit/test_backend_parity.cpp, which is what makes this a parity check
+// rather than a second copy of the wording.
+constexpr const char* kFwupdSentence = devmgr::tests::kFwupdUnreachableSentence;
+constexpr const char* kRawDiagnostic =
+    "Firmware updates: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.fwupd "
+    "was not provided by any .service files";
+
+views::UpdatesView degradedView(bool showDiagnostics) {
+    using namespace ftxui;
+    views::UpdatesView v = sampleView("");
+    v.banner = std::string(kFwupdSentence) + " | Secure Boot: ON · Lockdown: none";
+    v.bannerRole = Role::Warning;  // present but not serving — never Danger
+    v.bannerGlyph = render::Glyph::Unavailable;
+    v.diagnosticLines = {kRawDiagnostic};
+    v.showDiagnostics = showDiagnostics;
+    return v;
+}
+
+TEST(UpdatesViewRender, DegradedBackendShowsGlyphAndSentenceAtEverySizeAndMode) {
+    for (const ColorMode mode : {ColorMode::Full, ColorMode::Mono}) {
+        const Theme theme(mode, false);
+        for (Size s : kSizes) {
+            ftxui::Screen screen =
+                renderTo(views::renderUpdatesView(degradedView(false), theme), s);
+            EXPECT_TRUE(screenContains(screen, "?")) << "@" << s.w;  // documented unavailable glyph
+            // The sentence elides on the narrow screens, so assert the head of it.
+            EXPECT_TRUE(screenContains(screen, "Firmware updates unavailable")) << "@" << s.w;
+            for (int y = 0; y < screen.dimy(); ++y)
+                EXPECT_LE(ftxui::string_width(rowText(screen, y)), s.w) << "@" << s.w;
+            // Unavailability is a state of the source, never a failed operation:
+            // no cell on the screen may be painted danger.
+            for (int y = 0; y < screen.dimy(); ++y)
+                for (int x = 0; x < screen.dimx(); ++x)
+                    EXPECT_NE(screen.PixelAt(x, y).foreground_color,
+                              ftxui::Color(ftxui::Color::Red))
+                        << "@" << s.w << " " << x << "," << y;
+        }
+    }
+}
+
+TEST(UpdatesViewRender, ClosedDiagnosticsLeakNoRawDetail) {
+    for (const ColorMode mode : {ColorMode::Full, ColorMode::Mono, ColorMode::Plain}) {
+        const Theme theme(mode, false);
+        for (Size s : kSizes) {
+            ftxui::Screen screen =
+                renderTo(views::renderUpdatesView(degradedView(false), theme), s);
+            for (const char* raw :
+                 {"org.freedesktop", "DBus.Error", "ServiceUnknown", "errno", "/var/lib"})
+                EXPECT_FALSE(screenContains(screen, raw)) << raw << " @" << s.w;
+            EXPECT_FALSE(screenContains(screen, "-- Diagnostics --")) << "@" << s.w;
+        }
+    }
+}
+
+TEST(UpdatesViewRender, OpenDiagnosticsRevealTheRawDetailWithoutOverflow) {
+    const Theme theme(ColorMode::Full, false);
+    ftxui::Screen screen = renderTo(views::renderUpdatesView(degradedView(true), theme), {80, 24});
+    EXPECT_TRUE(screenContains(screen, "-- Diagnostics --"));
+    EXPECT_TRUE(screenContains(screen, "org.freedesktop"));  // demoted, not deleted
+    // A raw string far wider than 80 columns elides rather than reflowing the
+    // layout, and the status line keeps the bottom edge.
+    for (int y = 0; y < screen.dimy(); ++y) EXPECT_LE(ftxui::string_width(rowText(screen, y)), 80);
+    EXPECT_TRUE(screenContains(screen, "Refreshed updates."));
+}
+
+TEST(UpdatesViewRender, DiagnosticsKeyIsListedOnlyWhileSomethingIsDegraded) {
+    const Theme theme(ColorMode::Full, false);
+    ftxui::Screen healthy = renderTo(views::renderUpdatesView(sampleView(""), theme), {120, 32});
+    EXPECT_FALSE(screenContains(healthy, "i=diagnostics"));
+
+    ftxui::Screen degraded =
+        renderTo(views::renderUpdatesView(degradedView(false), theme), {120, 32});
+    EXPECT_TRUE(screenContains(degraded, "i=diagnostics"));
+    EXPECT_TRUE(screenContains(degraded, "q=quit)"));  // still one legend, not two
+}
+
+// §10: the state must survive the loss of colour with its words unchanged.
+TEST(UpdatesViewRender, SentenceIsByteIdenticalAcrossColourModes) {
+    std::string full;
+    std::string mono;
+    std::string plain;
+    const auto bannerRow = [](const ftxui::Screen& screen) {
+        for (int y = 0; y < screen.dimy(); ++y) {
+            const std::string row = rowText(screen, y);
+            if (row.find("Firmware updates unavailable") != std::string::npos) return row;
+        }
+        return std::string{};
+    };
+    full = bannerRow(renderTo(
+        views::renderUpdatesView(degradedView(false), Theme(ColorMode::Full, false)), {120, 32}));
+    mono = bannerRow(renderTo(
+        views::renderUpdatesView(degradedView(false), Theme(ColorMode::Mono, false)), {120, 32}));
+    plain = bannerRow(renderTo(
+        views::renderUpdatesView(degradedView(false), Theme(ColorMode::Plain, false)), {120, 32}));
+    ASSERT_FALSE(full.empty());
+    EXPECT_EQ(full, mono);
+    EXPECT_EQ(full, plain);
+    EXPECT_NE(full.find('?'), std::string::npos);  // glyph, not colour, carries it
+
+    // And in Mono nothing on the screen is coloured at all.
+    ftxui::Screen monoScreen = renderTo(
+        views::renderUpdatesView(degradedView(false), Theme(ColorMode::Mono, false)), {120, 32});
+    for (int y = 0; y < monoScreen.dimy(); ++y)
+        for (int x = 0; x < monoScreen.dimx(); ++x)
+            EXPECT_EQ(monoScreen.PixelAt(x, y).foreground_color, ftxui::Color());
 }
 
 }  // namespace

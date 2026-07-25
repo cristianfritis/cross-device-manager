@@ -28,21 +28,21 @@
 
 ## 5. GUI — sentence visible, raw detail behind a disclosure
 
-- [ ] 5.1 Point `updatesBannerLabel_` (`gui/src/main_window.cpp:635`, `:631`) at the shared accessor's `text`, and express the note's role through weight and iconography as the existing Warning-role handling does (`main_window.cpp:38`) — no color adoption, the §9 exception stands.
-- [ ] 5.2 Add a `Details ▾` `QToolButton` on the banner row toggling an inline read-only region containing `diagnostic`. Give the button an accessible name and confirm it sits in the tab order. Render both only while a degraded note exists.
-- [ ] 5.3 Add an offscreen GUI test: with fwupd unreachable, no primary widget's text matches `org\.freedesktop|DBus\.Error|ServiceUnknown|errno`, and `(no updates available)` is absent from the Updates page.
-- [ ] 5.4 Extend that test: after activating the disclosure, the raw text is present in the revealed region — proving the detail is demoted, not deleted.
-- [ ] 5.5 Add a keyboard-only test path: reach and toggle the disclosure using key events alone.
+- [x] 5.1 Point `updatesBannerLabel_` (`gui/src/main_window.cpp:635`, `:631`) at the shared accessor's `text`, and express the note's role through weight and iconography as the existing Warning-role handling does (`main_window.cpp:38`) — no color adoption, the §9 exception stands.
+- [x] 5.2 Add a `Details ▾` `QToolButton` on the banner row toggling an inline read-only region containing `diagnostic`. Give the button an accessible name and confirm it sits in the tab order. Render both only while a degraded note exists.
+- [x] 5.3 Add an offscreen GUI test: with fwupd unreachable, no primary widget's text matches `org\.freedesktop|DBus\.Error|ServiceUnknown|errno`, and `(no updates available)` is absent from the Updates page.
+- [x] 5.4 Extend that test: after activating the disclosure, the raw text is present in the revealed region — proving the detail is demoted, not deleted.
+- [x] 5.5 Add a keyboard-only test path: reach and toggle the disclosure using key events alone.
 
 ## 6. TUI — `i` diagnostics region
 
-- [ ] 6.1 Bind `i` globally in `tui/src/tui_app.cpp` to toggle a bordered Diagnostics region; `Escape` also closes it. Do not touch `d` (bound at `tui_app.cpp:798` and `:837`).
-- [ ] 6.2 Render each degraded backend's note as the `?` glyph plus the shared sentence in its own bounded region — not a full-bleed bar — with the role from the accessor.
-- [ ] 6.3 Add the diagnostics key to the shortcut legend while any backend is degraded, keeping the single-legend and single-status-line rules intact.
-- [ ] 6.4 Add fixed-screen render tests at 120x32, 100x28, and 80x24 in FULL and MONO: degraded Updates and degraded Devices render the sentence and glyph, no row overflows, and the note's role is never `Danger`.
-- [ ] 6.5 Add a closed-state test at each size: with diagnostics closed, no rendered cell contains `org.freedesktop`, `DBus.Error`, `ServiceUnknown`, `errno`, or a filesystem path.
-- [ ] 6.6 Add an open-state test at 80x24 with a long raw diagnostic: the region renders, the raw text elides, and no row overflows the terminal width.
-- [ ] 6.7 Add a MONO/PLAIN test asserting the sentence is byte-identical to FULL mode and the state is identifiable by `?` plus the sentence with no color.
+- [x] 6.1 Bind `i` globally in `tui/src/tui_app.cpp` to toggle a Diagnostics region introduced by a muted `-- Diagnostics --` header and a rule — NOT a box (border discipline: borders are for major regions). `Escape` also closes it. Do not touch `d` (bound at `tui_app.cpp:798` and `:837`).
+- [x] 6.2 Render the degraded state as the `?` glyph plus the shared sentence on the availability banner, with the role supplied by the accessor rather than parsed from the text — not a full-bleed bar.
+- [x] 6.3 Add the diagnostics key to the shortcut legend while any backend is degraded — and only then, so an inert key is never advertised — keeping the single-legend and single-status-line rules intact.
+- [x] 6.4 Add fixed-screen render tests at 120x32, 100x28, and 80x24 in FULL and MONO: degraded Updates renders the sentence and glyph, no row overflows, and no cell is painted danger. (Devices is out of scope: only the update providers are observed in this change — design.md leaves Devices/snapshot-ui adoption of `BackendStatusVM` deliberately optional.)
+- [x] 6.5 Add a closed-state test at each size: with diagnostics closed, no rendered cell contains `org.freedesktop`, `DBus.Error`, `ServiceUnknown`, `errno`, or a filesystem path.
+- [x] 6.6 Add an open-state test at 80x24 with a long raw diagnostic: the region renders, the raw text elides, and no row overflows the terminal width.
+- [x] 6.7 Add a MONO/PLAIN test asserting the sentence is byte-identical to FULL mode and the state is identifiable by `?` plus the sentence with no color.
 
 ## 7. Banner role seam
 
@@ -53,13 +53,13 @@
 
 ## 8. Cross-surface parity
 
-- [ ] 8.1 Add a parity test asserting that for the same degraded backend, the string the GUI renders and the string the TUI renders are both equal to `notes()[i].text` — one accessor, no frontend rewording.
-- [ ] 8.2 Assert the parity test covers `devmgrd`, `fwupd`, and `dkms`.
+- [x] 8.1 Add a parity test asserting that for the same degraded backend, the string the GUI renders and the string the TUI renders are both equal to `notes()[i].text` — one accessor, no frontend rewording.
+- [x] 8.2 Assert the parity test covers `devmgrd`, `fwupd`, and `dkms`.
 
 ## 9. Docs
 
-- [ ] 9.1 Add the source-unreachable row to the `docs/DESIGN.md` §6.1 shared-wording table. Cite §6's existing prose as the source of truth; do not rewrite it.
-- [ ] 9.2 Document the TUI `i` diagnostics key wherever the TUI key set is listed for users.
+- [x] 9.1 Add the source-unreachable row to the `docs/DESIGN.md` §6.1 shared-wording table. Cite §6's existing prose as the source of truth; do not rewrite it.
+- [x] 9.2 Document the TUI `i` diagnostics key wherever the TUI key set is listed for users.
 
 ## 10. Gates
 

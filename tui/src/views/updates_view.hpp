@@ -1,9 +1,11 @@
 #pragma once
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <ftxui/dom/elements.hpp>  // Element
 
+#include "tui/src/semantics.hpp"  // render::Glyph
 #include "tui/src/theme.hpp"
 
 namespace devmgr::tui::views {
@@ -28,6 +30,17 @@ struct UpdatesView {
     std::string statusText;
     int leftPaneWidth;
     std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
+    // ---- Backend availability (backend-availability spec) ----
+    // The banner's role and glyph arrive from the ViewModel rather than being
+    // parsed back out of its text, so rewording a sentence cannot recolour it.
+    // The glyph is the documented "unavailable" one, which is what carries the
+    // state in Mono/Plain where the role decorator is identity.
+    std::optional<Role> bannerRole{};
+    std::optional<render::Glyph> bannerGlyph{};
+    // Raw diagnostics, revealed by `i` (app::diagnosticLines()). Empty ⇒ every
+    // backend is serving, so the key is inert and stays out of the legend.
+    std::vector<std::string> diagnosticLines;
+    bool showDiagnostics = false;
 };
 ftxui::Element renderUpdatesView(UpdatesView view, const Theme& theme);
 

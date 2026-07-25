@@ -17,8 +17,14 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTextEdit>
+#include <QRegularExpression>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
+#include <QtTest/QTest>
+
+#include "devmgr/core/backend_wording.hpp"
+#include "tests/fixtures/backend_sentences.hpp"
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_detail_vm.hpp"
@@ -46,6 +52,12 @@
 using namespace devmgr;
 
 namespace {
+// The raw shape fwupd::mapError composes for an absent service — what the beta
+// user saw verbatim in the Updates banner.
+constexpr const char* kRawServiceUnknown =
+    "org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.fwupd was not provided "
+    "by any .service files";
+
 core::Device dev(std::string id, core::BusType bus, std::string name) {
     core::Device d;
     d.id = core::DeviceId{std::move(id)};
@@ -604,6 +616,112 @@ TEST(MainWindowTest, InstallActionEnabledOnUpdatesTabWithLocalCab) {
     window.tabs()->setCurrentIndex(2);
     ASSERT_EQ(window.updatesView()->model()->rowCount(), 1);
     EXPECT_TRUE(window.installUpdateAction()->isEnabled());
+}
+
+// ----- Backend unavailability: sentence visible, raw detail demoted -----
+
+// The shipped defect, from the GUI side: an unreachable fwupd put
+// "org.freedesktop.DBus.Error.ServiceUnknown: …" straight into the banner, and
+// the list still claimed "(no updates available)" as though the query had run.
+TEST(MainWindowTest, UnreachableProviderShowsSentenceNotRawDbusName) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.provider.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    f.facade.refreshUpdates().wait();
+    auto window = f.makeWindow();
+    window.show();  // child visibility is only meaningful once the window is up
+    window.tabs()->setCurrentIndex(2);
+
+    const QString banner = window.updatesBannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    // The shared fixture constant, byte-pinned to the core table by
+    // tests/unit/test_backend_parity.cpp — the same string the TUI render test
+    // asserts, which is what makes the two surfaces provably agree.
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kFwupdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));        // glyph, not colour (§9 exception)
+    EXPECT_TRUE(window.updatesBannerLabel()->font().bold());  // weight carries the warning role
+
+    // No primary widget claims a completed, empty query.
+    for (int row = 0; row < window.updatesView()->model()->rowCount(); ++row)
+        EXPECT_FALSE(window.updatesView()->model()->index(row, 0).data().toString().contains(
+            QStringLiteral("(no updates available)")));
+
+    // The detail is demoted, not deleted — and stays hidden until asked for.
+    ASSERT_TRUE(window.updatesDetailsButton()->isVisible());
+    // Staged but not shown: the raw text exists in the collapsed region only,
+    // which renders nothing until the disclosure is opened.
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+}
+
+TEST(MainWindowTest, DisclosureRevealsTheRawDiagnostic) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.provider.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    f.facade.refreshUpdates().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    window.updatesDetailsButton()->setChecked(true);
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawServiceUnknown)));
+    // Read-only, and reachable without a pointer.
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->textInteractionFlags() &
+                Qt::TextSelectableByKeyboard);
+
+    window.updatesDetailsButton()->setChecked(false);
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+}
+
+// Keyboard-only path: the disclosure is in the tab order and toggles from a key
+// event alone, so the diagnostic is never pointer-gated (ui-accessibility).
+TEST(MainWindowTest, DisclosureIsReachableAndToggledByKeyboardAlone) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.provider.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    f.facade.refreshUpdates().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    EXPECT_FALSE(window.updatesDetailsButton()->accessibleName().isEmpty());
+    ASSERT_NE(window.updatesDetailsButton()->focusPolicy() & Qt::TabFocus, Qt::NoFocus);
+
+    window.updatesDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.updatesDetailsButton(), Qt::Key_Space);
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->isVisible());
+    QTest::keyClick(window.updatesDetailsButton(), Qt::Key_Space);
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+}
+
+// Healthy providers: no note, so no disclosure control and no region — the
+// affordance collapses to nothing rather than sitting there disabled.
+TEST(MainWindowTest, HealthyProvidersShowNoDisclosure) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.seedUpdateAndRefresh(/*localCab=*/true);
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    EXPECT_FALSE(window.updatesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.updatesBannerLabel()->font().bold());
 }
 
 TEST(MainWindowTest, QuitGuardBlocksCloseDuringInstall) {

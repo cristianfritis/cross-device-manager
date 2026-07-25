@@ -198,6 +198,9 @@ fwupd) and DKMS out-of-tree kernel module status.
 - **Updates tab, both UIs.** TUI: third tab in the cycle (`Devices` →
   `Modules` → `Updates`); `u` installs the selected release (confirm modal:
   version delta, needs-reboot warning, estimated duration), `r` refreshes.
+  When an update source cannot be reached, `i` reveals the raw diagnostic
+  behind the plain-language note (`Escape` closes it); the key is listed in
+  the legend only while there is something to show.
   GUI: a dedicated **Updates** tab with the same install/refresh actions on
   the toolbar and row context menu, progress shown in the status bar.
 - **fwupd, frontend-direct.** `FwupdUpdateProvider` talks to

@@ -288,6 +288,30 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     };
     modulesMenu = Menu(&modulesVm.rowsRef(), &modulesVm.selectedRef(), modulesMenuOpt);
     std::string bannerText;  // computed on tab entry — banner() reads sysfs, never per frame
+    // Backend availability for the Updates banner, recomputed with bannerText at
+    // the same points (never in Render()). The role and glyph come FROM the VM;
+    // the render path never inspects the banner string to decide how loud it is.
+    std::optional<Role> updatesBannerRole;
+    std::optional<render::Glyph> updatesBannerGlyph;
+    std::vector<std::string> updatesDiagnostics;
+    bool showDiagnostics = false;  // `i` toggle; inert while updatesDiagnostics is empty
+    auto refreshUpdatesBanner = [&] {
+        bannerText = updatesVm.banner();
+        const auto notes = updatesVm.availabilityNotes();
+        updatesDiagnostics = app::diagnosticLines(notes);
+        if (notes.empty()) {
+            updatesBannerRole.reset();
+            updatesBannerGlyph.reset();
+            showDiagnostics = false;  // nothing left to reveal; don't leave a stale region open
+            return;
+        }
+        const bool warn = std::ranges::any_of(notes, [](const app::BackendNote& n) {
+            return n.role == app::StatusSeverity::Warning;
+        });
+        updatesBannerRole =
+            roleForSeverity(warn ? app::StatusSeverity::Warning : app::StatusSeverity::Info);
+        updatesBannerGlyph = render::Glyph::Unavailable;
+    };
     std::string moduleFilter;
     InputOption modFilterOpt;
     modFilterOpt.content = &moduleFilter;
@@ -528,7 +552,11 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .detail = updatesDetail->Render(),
                                              .statusText = status.text,
                                              .leftPaneWidth = widePaneWidth(),
-                                             .statusRole = status.role},
+                                             .statusRole = status.role,
+                                             .bannerRole = updatesBannerRole,
+                                             .bannerGlyph = updatesBannerGlyph,
+                                             .diagnosticLines = updatesDiagnostics,
+                                             .showDiagnostics = showDiagnostics},
                                             theme);
         }
         if (activeTab == 3) {
@@ -582,7 +610,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             modulesVm.fillSignatures();  // cached names are skipped
             modulesMenu->TakeFocus();
         } else if (tab == 2) {
-            bannerText = updatesVm.banner();
+            refreshUpdatesBanner();
             updatesVm.rebuild();
             updDetailDirty = true;  // A-1 idiom: fresh snapshot under the cache
             prunePending();
@@ -617,7 +645,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             // so availability/version/"reboot required" don't go stale between tab
             // entries. Gated to the active tab only — same reasoning as the other
             // two A-1 dirty flags above.
-            if (activeTab == 2) bannerText = updatesVm.banner();
+            if (activeTab == 2) refreshUpdatesBanner();
             if (activeTab == 3) bannerText = snapshotsVm.banner();
             return true;
         }
@@ -704,6 +732,18 @@ int runTuiApp(bool selfTest, const Theme& theme) {
              : activeTab == 1 ? moduleFilterInput
                               : snapshotFilterInput)
                 ->TakeFocus();
+            return true;
+        }
+        // Diagnostics reveal (design D4). Global like 'm' and the digits; 'd' was
+        // the natural mnemonic but is already bound per-view. It acts only while
+        // a backend is actually degraded — otherwise the key is inert and the
+        // legend never advertises it, so it can never open an empty region.
+        if (event == Event::Character('i') && !updatesDiagnostics.empty()) {
+            showDiagnostics = !showDiagnostics;
+            return true;
+        }
+        if (event == Event::Escape && showDiagnostics) {
+            showDiagnostics = false;  // closes the reveal instead of quitting
             return true;
         }
         if (event == Event::Character('m')) {

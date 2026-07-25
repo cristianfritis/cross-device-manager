@@ -1,5 +1,6 @@
 #include "gui/src/main_window.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <optional>
@@ -11,6 +12,7 @@
 #include <QColor>
 #include <QFont>
 #include <QFontDatabase>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeySequence>
@@ -27,6 +29,7 @@
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -349,6 +352,29 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // T11 TUI Updates screen, in widgets. No filter input: UpdatesVM exposes
     // none (mirrors the TUI shape).
     updatesBannerLabel_ = new QLabel;
+    // Disclosure for the raw backend detail (backend-availability spec: the
+    // diagnostic is preserved but never primary). A checkable button rather than
+    // a tooltip: a tooltip is pointer-only, so the detail would be unreachable
+    // by keyboard and assistive technology. Both it and the region below appear
+    // only while a backend is degraded.
+    updatesDetailsButton_ = new QToolButton;
+    updatesDetailsButton_->setCheckable(true);
+    updatesDetailsButton_->setText(QStringLiteral("Details ▾"));
+    updatesDetailsButton_->setAccessibleName(QStringLiteral("Backend diagnostics"));
+    updatesDetailsButton_->setAccessibleDescription(
+        QStringLiteral("Show the raw diagnostic text for an unavailable backend"));
+    updatesDetailsButton_->setFocusPolicy(Qt::StrongFocus);  // in the tab order
+    updatesDetailsButton_->setVisible(false);
+    updatesDiagnosticLabel_ = new QLabel;
+    updatesDiagnosticLabel_->setWordWrap(true);
+    // Read-only, but selectable by keyboard as well as mouse so the text can be
+    // read and copied without a pointer.
+    updatesDiagnosticLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                                     Qt::TextSelectableByKeyboard);
+    updatesDiagnosticLabel_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    updatesDiagnosticLabel_->setVisible(false);
+    connect(updatesDetailsButton_, &QToolButton::toggled, this,
+            [this](bool) { updateAvailabilityDisclosure(); });
     requestBannerLabel_ = new QLabel;
     requestBannerLabel_->setVisible(false);  // shown only while requestBanner() is non-empty
     styleAsWarning(*requestBannerLabel_);
@@ -371,7 +397,16 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     auto* updatesLeft = new QWidget;
     auto* updatesLeftLayout = new QVBoxLayout(updatesLeft);
     updatesLeftLayout->setContentsMargins(0, 0, 0, 0);
-    updatesLeftLayout->addWidget(updatesBannerLabel_);
+    // Banner row: the sentence, then the disclosure pushed to the trailing edge.
+    // The revealed region sits directly under it, so the detail reads as
+    // belonging to the note rather than floating in the page.
+    auto* updatesBannerRow = new QWidget;
+    auto* updatesBannerRowLayout = new QHBoxLayout(updatesBannerRow);
+    updatesBannerRowLayout->setContentsMargins(0, 0, 0, 0);
+    updatesBannerRowLayout->addWidget(updatesBannerLabel_, 1);
+    updatesBannerRowLayout->addWidget(updatesDetailsButton_, 0);
+    updatesLeftLayout->addWidget(updatesBannerRow);
+    updatesLeftLayout->addWidget(updatesDiagnosticLabel_);
     updatesLeftLayout->addWidget(requestBannerLabel_);
     updatesLeftLayout->addWidget(updatesView_);
     auto* updatesSplitter = new QSplitter;
@@ -532,7 +567,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             modulesVm_.rebuild();
             modulesVm_.fillSignatures();
         } else if (index == 2) {
-            updatesBannerLabel_->setText(QString::fromStdString(updatesVm_.banner()));
+            updateUpdatesBannerLabel();
             updateRequestBannerLabel();
             updatesVm_.rebuild();
             pruneAndPushPending(facade_.refreshUpdates());
@@ -628,7 +663,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     connect(&dispatcher, &QtUiDispatcher::taskExecuted, this, [this] {
         updateStatusBar();
         if (tabs_->currentIndex() == 2) {
-            updatesBannerLabel_->setText(QString::fromStdString(updatesVm_.banner()));
+            updateUpdatesBannerLabel();
             updateRequestBannerLabel();
             updateActionEnablement();
         } else if (tabs_->currentIndex() == 3) {
@@ -772,6 +807,43 @@ void MainWindow::updateSnapshotsBannerLabel() {
     const std::string banner = snapshotsVm_.banner();
     snapshotsBannerLabel_->setText(QString::fromStdString(banner));
     snapshotsBannerLabel_->setVisible(!banner.empty());
+}
+
+// The Updates banner and its disclosure.
+//
+// The words are UpdatesVM's — the GUI adds no wording of its own. Role is
+// carried by WEIGHT and the documented "unavailable" glyph, never by colour:
+// docs/DESIGN.md §9's GUI colour exception stands, so a degraded backend has to
+// be identifiable with the palette untouched.
+void MainWindow::updateUpdatesBannerLabel() {
+    const auto notes = updatesVm_.availabilityNotes();
+    const bool degraded = !notes.empty();
+    const bool warn = std::ranges::any_of(
+        notes, [](const app::BackendNote& n) { return n.role == app::StatusSeverity::Warning; });
+    const std::string banner = updatesVm_.banner();
+    updatesBannerLabel_->setText(
+        QString::fromStdString(degraded ? std::string("? ") + banner : banner));
+    QFont font = updatesBannerLabel_->font();
+    font.setBold(warn);
+    updatesBannerLabel_->setFont(font);
+    updatesDetailsButton_->setVisible(degraded);
+    // A backend that recovered must not leave a stale region open behind it.
+    if (!degraded) updatesDetailsButton_->setChecked(false);
+    updateAvailabilityDisclosure();
+}
+
+void MainWindow::updateAvailabilityDisclosure() {
+    const auto lines = app::diagnosticLines(updatesVm_.availabilityNotes());
+    QString text;
+    for (const auto& line : lines) {
+        if (!text.isEmpty()) text += QLatin1Char('\n');
+        text += QString::fromStdString(line);
+    }
+    updatesDiagnosticLabel_->setText(text);
+    const bool open = updatesDetailsButton_->isChecked() && !lines.empty();
+    updatesDiagnosticLabel_->setVisible(open);
+    updatesDetailsButton_->setText(open ? QStringLiteral("Details ▴")
+                                        : QStringLiteral("Details ▾"));
 }
 
 void MainWindow::updateRequestBannerLabel() {

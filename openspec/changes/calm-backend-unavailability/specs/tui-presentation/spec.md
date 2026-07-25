@@ -24,7 +24,7 @@ A backend that is unavailable is a state of the source, not a failed operation, 
 ## ADDED Requirements
 
 ### Requirement: Backend diagnostics region
-The TUI SHALL expose raw backend diagnostic text behind a documented key rather than in the default render. The key SHALL be `i`; `d` is not available, being already bound per-view. Pressing it SHALL toggle a bordered diagnostics region listing the raw detail for each currently degraded backend, and pressing it again or `Escape` SHALL close it. The key SHALL appear in the shortcut legend while a degraded backend is being reported, and the region SHALL respect the existing border discipline and single-legend, single-status-line rules. With the region closed, no rendered cell SHALL contain raw exception names, D-Bus names, errno values, or filesystem paths.
+The TUI SHALL expose raw backend diagnostic text behind a documented key rather than in the default render. The key SHALL be `i`; `d` is not available, being already bound per-view. Pressing it SHALL toggle a diagnostics region listing the raw detail for each currently degraded backend, and pressing it again or `Escape` SHALL close it. The region SHALL be introduced by a muted section header and a rule rather than a border: borders belong to major regions, and a subordinate reveal under the banner it explains is not one. The key SHALL appear in the shortcut legend while a degraded backend is being reported, and SHALL be inert and unlisted otherwise, keeping the single-legend and single-status-line rules intact. With the region closed, no rendered cell SHALL contain raw exception names, D-Bus names, errno values, or filesystem paths.
 
 #### Scenario: Diagnostics stay closed by default
 - **WHEN** a view renders with a degraded backend and the diagnostics region has not been opened
@@ -32,7 +32,7 @@ The TUI SHALL expose raw backend diagnostic text behind a documented key rather 
 
 #### Scenario: Diagnostics toggle open and closed
 - **WHEN** the user presses `i` while a backend is degraded, then presses `i` again
-- **THEN** the bordered diagnostics region appears with the raw detail for each degraded backend, then disappears, and the collection and detail panes keep their structure throughout
+- **THEN** the diagnostics region appears under its muted header with the raw detail for each degraded backend, then disappears, and the collection and detail panes keep their structure throughout
 
 #### Scenario: Diagnostics region fits the minimum terminal
 - **WHEN** the diagnostics region is open at 80x24 with a long raw diagnostic

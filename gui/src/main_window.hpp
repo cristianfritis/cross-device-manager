@@ -29,6 +29,7 @@ class QListView;
 class QStackedWidget;
 class QTabWidget;
 class QTextEdit;
+class QToolButton;
 class QTreeWidget;
 
 namespace devmgr::gui {
@@ -91,6 +92,10 @@ class MainWindow final : public QMainWindow {
     QListView* updatesView() const { return updatesView_; }
     QTreeWidget* updatesDetailTree() const { return updatesDetailTree_; }
     QLabel* updatesBannerLabel() const { return updatesBannerLabel_; }
+    // Disclosure for the raw backend diagnostic, and the region it reveals.
+    // Both render only while a backend is degraded (backend-availability spec).
+    QToolButton* updatesDetailsButton() const { return updatesDetailsButton_; }
+    QLabel* updatesDiagnosticLabel() const { return updatesDiagnosticLabel_; }
     QLabel* requestBannerLabel() const { return requestBannerLabel_; }
     QAction* installUpdateAction() const { return installUpdateAction_; }
     QAction* refreshUpdatesAction() const { return refreshUpdatesAction_; }
@@ -118,9 +123,11 @@ class MainWindow final : public QMainWindow {
     void updateUpdatesDetailPane();
     void updateSnapshotsDetailPane();
     void updateStatusBar();
-    void updateActionEnablement();                  // tab-aware; folds the old updateToggleAction()
-    void updateRequestBannerLabel();                // requestBanner() text + visibility
-    void updateSnapshotsBannerLabel();              // counts banner text + visibility (B4)
+    void updateActionEnablement();        // tab-aware; folds the old updateToggleAction()
+    void updateUpdatesBannerLabel();      // banner() text + role weight/glyph + disclosure
+    void updateAvailabilityDisclosure();  // diagnostic region text + visibility
+    void updateRequestBannerLabel();      // requestBanner() text + visibility
+    void updateSnapshotsBannerLabel();    // counts banner text + visibility (B4)
     void pruneAndPushPending(std::future<void> f);  // this window's own future custody
 
     app::ApplicationFacade& facade_;
@@ -152,6 +159,8 @@ class MainWindow final : public QMainWindow {
     QListView* updatesView_ = nullptr;
     QTreeWidget* updatesDetailTree_ = nullptr;
     QLabel* updatesBannerLabel_ = nullptr;
+    QToolButton* updatesDetailsButton_ = nullptr;
+    QLabel* updatesDiagnosticLabel_ = nullptr;
     QLabel* requestBannerLabel_ = nullptr;
     QAction* installUpdateAction_ = nullptr;
     QAction* refreshUpdatesAction_ = nullptr;
