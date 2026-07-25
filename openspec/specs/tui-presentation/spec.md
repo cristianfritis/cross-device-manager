@@ -88,6 +88,17 @@ Borders SHALL appear only on major interactive regions (collection, detail, stat
 - **WHEN** any view renders at 120x32
 - **THEN** borders enclose only the major regions and no individual value or sub-group is boxed
 
+### Requirement: Master-detail split keeps both panes legible
+The width of the collection pane SHALL be derived from the terminal width by a pure function, not fixed, so that the detail pane retains enough columns to render its lines at every width the app renders at; the collection pane SHALL take its preferred width whenever the terminal affords both, and SHALL yield width to the detail pane rather than starve it when the terminal is narrow. Where a narrow terminal forces a collection row to clip, the columns it drops SHALL remain available in the detail pane for the selected row.
+
+#### Scenario: Detail pane is readable at the minimum size
+- **WHEN** a view whose collection rows carry long identifiers renders at 80x24
+- **THEN** the detail pane renders its lines as readable text rather than eliding every line to an ellipsis, and the collection pane keeps the leading columns of its rows
+
+#### Scenario: Preferred width when the terminal affords it
+- **WHEN** the terminal is wide enough for both the collection pane's preferred width and the detail pane's minimum
+- **THEN** the collection pane renders at its preferred width and the detail pane takes the remainder
+
 ### Requirement: Fixed-screen render test coverage
 The TUI SHALL have automated render tests in `tui/tests/`, wired into ctest, covering: theme role→color mapping and capability downgrade; each view rendered to fixed `ftxui::Screen` sizes 120x32, 100x28, and 80x24 with no row exceeding screen width and no out-of-bounds writes; glyph and text presence in mono mode; selection/focus markers; and the states matrix (empty, loading, prompt, confirmation, refusal, failure). Format and clang-tidy gates SHALL cover `tui/src` and `tui/tests`.
 

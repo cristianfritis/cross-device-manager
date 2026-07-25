@@ -11,6 +11,7 @@ configure_file(include/devmgr/core/version.hpp.in
 add_library(devmgr_core
     src/models.cpp
     src/device_presentation.cpp
+    src/backend_wording.cpp
     src/criticality.cpp
     src/snapshot_models.cpp
     src/snapshot_json.cpp
