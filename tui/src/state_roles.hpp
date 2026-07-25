@@ -2,7 +2,6 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <utility>  // std::pair
 
 #include "devmgr/app/modules_vm.hpp"        // app::ModuleSignature
@@ -196,14 +195,6 @@ inline StatusRow composeStatus(
     }
     row.role = roleForSeverity(severity);
     return row;
-}
-
-// Modules banner valence: banner() (modules_vm.cpp) appends "unsigned modules
-// will be rejected" exactly when Secure Boot / lockdown would reject them — warn
-// only then; the steady-state posture is informational.
-inline std::optional<Role> modulesBannerRole(std::string_view banner) {
-    if (banner.find("will be rejected") != std::string_view::npos) return Role::Warning;
-    return Role::Info;
 }
 
 }  // namespace devmgr::tui

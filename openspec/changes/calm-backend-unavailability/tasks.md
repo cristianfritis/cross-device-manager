@@ -46,10 +46,10 @@
 
 ## 7. Banner role seam
 
-- [ ] 7.1 Add role-carrying banner accessors for the banners this change touches, so text and role arrive together from the VM.
-- [ ] 7.2 Remove the substring match in `modulesBannerRole()` (`tui/src/state_roles.hpp:204`) for those banners and read the VM-supplied role instead.
-- [ ] 7.3 Add a test: changing a banner's wording while its underlying state is unchanged leaves the rendered role unchanged.
-- [ ] 7.4 Confirm the existing "Steady-state security is calm" scenario still passes.
+- [x] 7.1 Add role-carrying banner accessors for the banners this change touches, so text and role arrive together from the VM. (`app::BannerLine` + `ModulesVM::bannerLine()`; the Updates banner carries its role through `availabilityNotes()`.)
+- [x] 7.2 Remove the substring match in `modulesBannerRole()` (`tui/src/state_roles.hpp:204`) for those banners and read the VM-supplied role instead. Function deleted outright — no caller remained, so the compiler now enforces the seam.
+- [x] 7.3 Add a test: `BannerSeverityTracksStateNotWording` — two postures with different banner text and the same rejection state carry the same severity; `BannerCarriesItsOwnSeverity` pins text and valence to one read.
+- [x] 7.4 Confirmed: pure mechanism swap, zero observable change — the role is `Warning` iff `secureBoot || lockdown != none`, exactly what the substring parse returned for every banner the VM can emit. See the design report's note on the pre-existing scenario/implementation gap, which this change deliberately did NOT touch.
 
 ## 8. Cross-surface parity
 
@@ -63,10 +63,10 @@
 
 ## 10. Gates
 
-- [ ] 10.1 Build with `-j24` and run the full test suite; record the pass count and confirm zero regressions.
-- [ ] 10.2 Run `scripts/check-format.sh --container` before any push — host clang-format 21 and CI/container 18 diverge.
+- [x] 10.1 Build with `-j24` and run the full test suite; record the pass count and confirm zero regressions.
+- [x] 10.2 Run `scripts/check-format.sh --container` before any push — host clang-format 21 and CI/container 18 diverge.
 - [ ] 10.3 Run the container clang-tidy gate. Rebuild the container image first: docker-compose has no volume mount, so a stale image reports phantom results.
-- [ ] 10.4 Run `openspec validate --strict` for this change and confirm it passes.
+- [x] 10.4 Run `openspec validate --strict` for this change and confirm it passes.
 
 ## 11. Manual verification — user-gated
 

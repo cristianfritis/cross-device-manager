@@ -319,14 +319,23 @@ std::string ModulesVM::columnHeader() const {
     return {row.data()};
 }
 
-std::string ModulesVM::banner() const {
+BannerLine ModulesVM::bannerLine() const {
     const auto info = facade_.systemInfo();
-    if (!info) return "Secure Boot: unknown";
-    std::string b = std::string("Secure Boot: ") + (info->secureBoot ? "ON" : "off") +
-                    " · Lockdown: " + info->lockdownMode;
-    if (info->secureBoot || info->lockdownMode != "none")
-        b += " — unsigned modules will be rejected";
-    return b;
+    if (!info) return {.text = "Secure Boot: unknown", .severity = StatusSeverity::Info};
+    // ONE predicate decides both the sentence and its valence: the posture that
+    // makes an unsigned load fail is the same posture that is worth a warning.
+    // Reading it once here is what retires the render-path substring match — the
+    // surface can no longer disagree with the VM about which state it is in.
+    const bool rejectsUnsigned = info->secureBoot || info->lockdownMode != "none";
+    std::string text = std::string("Secure Boot: ") + (info->secureBoot ? "ON" : "off") +
+                       " · Lockdown: " + info->lockdownMode;
+    if (rejectsUnsigned) text += " — unsigned modules will be rejected";
+    return {.text = std::move(text),
+            .severity = rejectsUnsigned ? StatusSeverity::Warning : StatusSeverity::Info};
+}
+
+std::string ModulesVM::banner() const {
+    return bannerLine().text;
 }
 
 std::vector<std::string> ModulesVM::detailLines() const {

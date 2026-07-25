@@ -93,6 +93,42 @@ TEST_F(ModulesVMTest, BannerReportsSecureBootAndLockdown) {
     EXPECT_EQ(v.banner(), "Secure Boot: off · Lockdown: none");
 }
 
+// D6: text and valence leave the VM together, so a surface never has to
+// reverse-engineer one from the other. banner() stays the text half.
+TEST_F(ModulesVMTest, BannerCarriesItsOwnSeverity) {
+    pal_.info.secureBoot = true;
+    pal_.info.lockdownMode = "integrity";
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+    auto line = v.bannerLine();
+    EXPECT_EQ(line.text, v.banner());  // one source; banner() is the text half of it
+    EXPECT_EQ(line.severity, devmgr::app::StatusSeverity::Warning);
+
+    pal_.info.secureBoot = false;
+    pal_.info.lockdownMode = "none";
+    line = v.bannerLine();
+    EXPECT_EQ(line.text, v.banner());
+    EXPECT_EQ(line.severity,
+              devmgr::app::StatusSeverity::Info);  // steady posture: not an error (§5.5)
+}
+
+// The seam's whole point: the severity follows the SYSTEM STATE, not the words.
+// Two postures that produce different banner strings but the same rejection
+// state carry the same severity — under the retired substring match this held
+// only by luck of the phrase surviving in every wording.
+TEST_F(ModulesVMTest, BannerSeverityTracksStateNotWording) {
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+
+    pal_.info.secureBoot = true;
+    pal_.info.lockdownMode = "integrity";
+    const auto a = v.bannerLine();
+    pal_.info.secureBoot = false;
+    pal_.info.lockdownMode = "confidentiality";
+    const auto b = v.bannerLine();
+    EXPECT_NE(a.text, b.text);          // different words…
+    EXPECT_EQ(a.severity, b.severity);  // …same state, so the same valence
+    EXPECT_EQ(a.severity, devmgr::app::StatusSeverity::Warning);
+}
+
 TEST_F(ModulesVMTest, DetailLinesIncludeModprobeInfo) {
     seed("dummy", 0);
     devmgr::core::Driver info;

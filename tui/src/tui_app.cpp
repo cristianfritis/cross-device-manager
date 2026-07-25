@@ -291,6 +291,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // Backend availability for the Updates banner, recomputed with bannerText at
     // the same points (never in Render()). The role and glyph come FROM the VM;
     // the render path never inspects the banner string to decide how loud it is.
+    std::optional<Role> modulesBannerRole;  // supplied by ModulesVM, never parsed back out
     std::optional<Role> updatesBannerRole;
     std::optional<render::Glyph> updatesBannerGlyph;
     std::vector<std::string> updatesDiagnostics;
@@ -538,7 +539,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .detail = moduleDetail->Render(),
                                              .statusText = status.text,
                                              .leftPaneWidth = widePaneWidth(),
-                                             .bannerRole = modulesBannerRole(bannerText),
+                                             .bannerRole = modulesBannerRole,
                                              .statusRole = status.role},
                                             theme);
         }
@@ -604,7 +605,11 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     auto switchToTab = [&](int tab) {
         activeTab = tab;
         if (tab == 1) {
-            bannerText = modulesVm.banner();
+            // Text and valence together (design D6) — nothing downstream reads
+            // the string to decide the colour.
+            const auto line = modulesVm.bannerLine();
+            bannerText = line.text;
+            modulesBannerRole = roleForSeverity(line.severity);
             modulesVm.rebuild();
             modDetailDirty = true;       // A-1: fresh snapshot under the cache
             modulesVm.fillSignatures();  // cached names are skipped

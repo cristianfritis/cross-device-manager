@@ -103,15 +103,12 @@ TEST(StateRoles, StatusSeverityMapsToTheDocumentedRole) {
     EXPECT_EQ(roleForSeverity(app::StatusSeverity::Info), Role::Info);
 }
 
-// The banner escalates to warning only when it explains a refusal the user is
-// about to hit; a steady Secure Boot posture is information, not a warning.
-TEST(StateRoles, ModulesBannerIsCalmUntilItExplainsARefusal) {
-    EXPECT_EQ(modulesBannerRole("Secure Boot: ON · Lockdown: none"), Role::Info);
-    EXPECT_EQ(modulesBannerRole("Secure Boot: OFF"), Role::Info);
-    EXPECT_EQ(modulesBannerRole("Secure Boot: ON · Lockdown: integrity — unsigned modules will be "
-                                "rejected"),
-              Role::Warning);
-}
+// The Modules banner's valence used to be recovered here by searching the
+// rendered string for "will be rejected". It now arrives from the ViewModel
+// with the text (app::ModulesVM::bannerLine), so there is no string-matching
+// role function left to test: the mapping is roleForSeverity above, and the
+// state→severity decision is pinned in tests/unit/test_modules_vm.cpp
+// (BannerCarriesItsOwnSeverity / BannerSeverityTracksStateNotWording).
 
 // --------------------------------------------------------------------------
 // K2 (task 9.2): composite status rows take the maximum severity, so a refusal
