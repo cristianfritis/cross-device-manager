@@ -18,10 +18,10 @@ the original finding; the fixed rows say so.
 
 ## Verdict
 
-**11.1, 11.2 and 11.3 pass. 11.4 passes on its main claim; one row is still
-owed.** The D-Bus name is gone, the sentence is shared and byte-exact across
-surfaces, the raw detail is demoted behind a disclosure rather than deleted,
-nothing is painted danger, and no empty-state string lies.
+**11.1, 11.2, 11.3 and 11.4 all pass.** The D-Bus name is gone, the sentence is
+shared and byte-exact across surfaces, the raw detail is demoted behind a
+disclosure rather than deleted, nothing is painted danger, and no empty-state
+string lies.
 
 Five defects surfaced — none a regression of the two reported bugs. They were
 gaps between what §13 claims and what the GUI actually renders, plus two
@@ -94,17 +94,32 @@ STDOUT, which is the canvas FTXUI is drawing on, so the lines are swallowed.)
 | # | Check | Result |
 | --- | --- | --- |
 | 16 | The raw diagnostic appears **once per transition**, not once per poll | **PASS** — ten Snapshots-tab entries, each a real `snapshotList()` call against an unreachable daemon, produced exactly ONE line |
-| 17 | down → up → down logs the line twice | **STILL OWED** — needs one `devmgrd` restart while a single app instance stays running; `systemctl` is outside the agent's shell |
+| 17 | down → up → down logs the line twice | **PASS** — owner ran it live 2026-07-28 12:08–12:09 with `rc-service devmgrd start/stop` against one GUI instance; two `devmgrd` warn lines, 72s apart |
 
 The whole captured log after ~40 tab switches:
 
     [2026-07-28 00:07:52.320] [warning] devmgrd unavailable (unreachable): helper devmgrd is not available
     [2026-07-28 00:08:09.295] [warning] dkms unavailable (absent): DKMS root not found: /var/lib/dkms
 
-Two backends, one line each. The `logged_` reset on a successful observe — the
-mechanism row 17 exercises — is unit-covered by task 2.4, and the note WAS seen
-to clear live when the daemon came up mid-session (§11.1); what is unverified is
-only that a second outage in the SAME process logs again.
+Two backends, one line each — that is row 16.
+
+Row 17 was run separately, on a host without systemd: `devmgrd` was installed as
+an OpenRC service (binary to `/usr/local/bin`, `packaging/devmgrd.initd` to
+`/etc/init.d/devmgrd`) so its lifetime could be driven by hand. The D-Bus
+activation file was deliberately NOT installed — with it in place the bus
+re-launches the daemon on the first client call and the down state cannot be
+held. The captured log from the single GUI instance:
+
+    [2026-07-28 12:08:29.968] [warning] devmgrd unavailable (unreachable): helper devmgrd is not available
+    [2026-07-28 12:08:43.682] [warning] dkms unavailable (absent): DKMS root not found: /var/lib/dkms
+    [2026-07-28 12:09:41.963] [warning] devmgrd unavailable (unreachable): helper devmgrd is not available
+
+The two `devmgrd` lines prove the transition themselves, independently of the
+click sequence. `BackendStatusVM::observe` clears `logged_` only on an
+error-free observe, and re-logs otherwise only when the *kind* changes; both
+lines are `(unreachable)`, so the second cannot be a kind change. It can exist
+only because a successful `devmgrd` call landed between them — that is the
+recovery. Down → up → down in one process, logged twice.
 
 ## Defects as originally found (all five now fixed)
 
