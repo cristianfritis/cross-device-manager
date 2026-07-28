@@ -12,6 +12,14 @@
 //   GUI rendered banner         contains that constant  (gui/tests/test_main_window.cpp)
 //   TUI rendered banner         contains that constant  (tui/tests/test_updates_view_render.cpp)
 //
+// Per backend, the surface end of that chain is:
+//   fwupd/dkms  → the Updates page/tab            (the two files named above)
+//   devmgrd     → the Snapshots page, and the Devices/Modules/Snapshots tabs
+//                 (gui/tests/test_main_window.cpp, and
+//                  tui/tests/test_backend_availability_render.cpp for all three)
+// so every backend in cases() is asserted through a real rendered surface, not
+// only through the table.
+//
 // The two surface binaries cannot link core and app respectively, which is why
 // the shared constant exists at all; with this file in place, editing a sentence
 // in the table without editing the fixture fails here first.

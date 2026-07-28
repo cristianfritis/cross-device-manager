@@ -46,6 +46,16 @@ class DeviceListVM {
     // whenever no prober is wired or the probe failed; nullopt on non-device
     // rows. The marker glyph and colour live in the frontend, not here.
     std::optional<core::Criticality> criticalityForRow(int row) const;
+    // devmgrd's note, or empty while it is serving (backend-availability spec).
+    // The device ROWS come from sysfs and are unaffected by the daemon, but the
+    // disabled-state overlay and every mutation verb on this view are the
+    // daemon's — so this view owes the user the note, and it reads it from the
+    // facade's single instance rather than observing anything itself.
+    std::vector<BackendNote> availabilityNotes() const;
+    // The banner sentence for this view: the shared text while degraded, "" when
+    // healthy. The Devices view has no banner of its own otherwise, so an empty
+    // string means both surfaces render no banner row at all.
+    std::string banner() const;
     // Frontend hooks invoked at entry/exit of every rebuild() — the single
     // funnel for all row mutation (delta-triggered posts and setFilter alike).
     // Qt uses them for beginResetModel()/endResetModel(); the TUI leaves them

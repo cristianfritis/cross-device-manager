@@ -1,9 +1,11 @@
 #pragma once
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <ftxui/dom/elements.hpp>  // Element
 
+#include "tui/src/semantics.hpp"  // render::Glyph
 #include "tui/src/theme.hpp"
 
 namespace devmgr::tui::views {
@@ -33,6 +35,18 @@ struct ModulesView {
     // when it explains a likely refusal (§5.5). nullopt leaves it uncoloured.
     std::optional<Role> bannerRole{};
     std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
+    // ---- Backend availability (backend-availability spec, §13) ----
+    // The module LIST is read locally, but load/unload are devmgrd's. The
+    // sentence itself is already folded into `banner` by ModulesVM::bannerLine()
+    // (one banner row, one severity); what the view adds is the glyph and the
+    // same `i` diagnostics region every other tab has.
+    std::optional<render::Glyph> bannerGlyph{};
+    std::vector<std::string> diagnosticLines;
+    bool showDiagnostics = false;
+    // Terminal width in columns, so the legend can be composed to FIT rather
+    // than be silently clipped by the screen (§14 F3). 0 means "unknown", which
+    // yields the roomiest legend — the behaviour before this field existed.
+    int terminalWidth = 0;
 };
 ftxui::Element renderModulesView(ModulesView view, const Theme& theme);
 

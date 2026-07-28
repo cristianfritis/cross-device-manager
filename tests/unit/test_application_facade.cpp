@@ -337,9 +337,66 @@ TEST(ApplicationFacadeTest, RefreshSnapshotsErrorKeepsLastListAndEmitsError) {
     channel.snapshotMetas = core::makeError(core::Error::Code::Io, "daemon gone");
     facade.refreshSnapshots().wait();
 
-    EXPECT_EQ(refreshed, 1);  // failed refresh publishes no refreshed event
+    // A failed refresh publishes the event too (calm-backend-unavailability §13):
+    // the list is unchanged, but the daemon's availability just changed, and the
+    // views re-read BOTH through this one signal. Without it the degraded note
+    // would not appear until some unrelated event happened to rebuild the view.
+    EXPECT_EQ(refreshed, 2);
     EXPECT_EQ(errors, 1);
     EXPECT_EQ(facade.snapshots().size(), 1U);  // last good list intact
+}
+
+TEST(ApplicationFacadeTest, RefreshSnapshotsErrorRecordsDaemonUnavailability) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.snapshotMetas =
+        core::makeError(core::Error::Code::Io, "helper devmgrd is not available");
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.refreshSnapshots().wait();
+
+    const auto err = facade.daemonAvailability();
+    ASSERT_TRUE(err.has_value());
+    EXPECT_EQ(err->code, core::Error::Code::Io);
+    // Verbatim: this is the diagnostic, and the presented sentence is derived
+    // from the CODE, never from this string.
+    EXPECT_EQ(err->message, "helper devmgrd is not available");
+}
+
+TEST(ApplicationFacadeTest, RefreshSnapshotsSuccessClearsDaemonUnavailability) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.snapshotMetas = core::makeError(core::Error::Code::Io, "daemon gone");
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.refreshSnapshots().wait();
+    ASSERT_TRUE(facade.daemonAvailability().has_value());
+
+    channel.snapshotMetas = std::vector<core::SnapshotMeta>{meta('a')};
+    facade.refreshSnapshots().wait();
+
+    EXPECT_FALSE(facade.daemonAvailability().has_value());
+}
+
+TEST(ApplicationFacadeTest, RefreshSnapshotsWithoutChannelReportsNoDaemonError) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+
+    // No channel at all is a BUILD without the privileged seam, not a daemon
+    // that went away — the existing read degradation stands, and inventing an
+    // outage note for it would be a confident falsehood (docs/DESIGN.md §2.1).
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refreshSnapshots().wait();
+
+    EXPECT_FALSE(facade.daemonAvailability().has_value());
 }
 
 TEST(ApplicationFacadeTest, RefreshSnapshotsWithoutChannelPublishesEmptyList) {
@@ -459,4 +516,40 @@ TEST(ApplicationFacadeTest, SnapshotMutationWithoutChannelIsUnsupported) {
     EXPECT_FALSE(done->ok);
     EXPECT_EQ(done->message, "built without privileged-helper support");
     EXPECT_EQ(changed, 0);
+}
+
+// Partial failure, named (docs/DESIGN.md §6 "Keep valid prior data and identify
+// what could not be refreshed"; the exact status string is §6's own). The device
+// rows come from sysfs and are unaffected, so this is not a failed refresh — it
+// is a refresh whose disabled-state overlay could not be read.
+TEST(ApplicationFacadeTest, DisabledOverlayFailureNamesWhatCouldNotBeRefreshed) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    app::DeviceService svc(bus);
+    test::FakePrivilegedChannel channel;
+    channel.disabledEntries =
+        core::makeError(core::Error::Code::Io, "helper devmgrd is not available");
+    core::Device d;
+    d.id = core::DeviceId{"u1"};
+    d.name = "Mouse";
+    d.bus = core::BusType::Usb;
+    d.status = core::DeviceStatus::Active;
+    pal.seedDevice(d);
+    std::vector<std::string> errors;
+    auto sub = bus.subscribe<core::ErrorEvent>(
+        [&](const core::ErrorEvent& e) { errors.push_back(e.message); });
+
+    app::ApplicationFacade facade(pal, scheduler, bus, svc, &channel);
+    facade.refresh().wait();
+
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_EQ(errors[0], "Could not refresh devices; showing the previous result.");
+    // Not a generic failure, and not a raw D-Bus string.
+    EXPECT_EQ(errors[0].find("devmgrd"), std::string::npos);
+    EXPECT_EQ(errors[0].find("Operation failed"), std::string::npos);
+    // The rows themselves are intact — the enumeration never depended on the daemon.
+    EXPECT_EQ(facade.devices().size(), 1U);
+    // ...and the same failed read is what the availability note is made of.
+    ASSERT_TRUE(facade.daemonAvailability().has_value());
 }

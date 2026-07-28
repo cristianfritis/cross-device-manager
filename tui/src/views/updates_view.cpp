@@ -2,12 +2,23 @@
 
 #include <string>
 #include <utility>  // std::move
+#include <vector>
 
 #include "tui/src/render_util.hpp"  // render::hsep, render::regionFrame
+#include "tui/src/views/legend.hpp"
 #include "tui/src/views/status_bar.hpp"
 #include "tui/src/views/tab_bar.hpp"
 
 namespace devmgr::tui::views {
+
+namespace {
+std::vector<LegendEntry> updatesLegend(bool diagnosable) {
+    std::vector<LegendEntry> keys{"u=install", "r=refresh", "d=dismiss"};
+    if (diagnosable) keys.emplace_back("i=diagnostics", "i=diag");
+    keys.emplace_back("q=quit");
+    return keys;
+}
+}  // namespace
 
 ftxui::Element renderUpdatesView(UpdatesView v, const Theme& theme) {
     using namespace ftxui;
@@ -27,9 +38,7 @@ ftxui::Element renderUpdatesView(UpdatesView v, const Theme& theme) {
     if (v.bannerRole) banner = banner | theme.decorate(*v.bannerRole);
     Elements top = {
         renderTabBar(v.activeTab, theme),
-        text(diagnosable ? " Updates (u=install  r=refresh  d=dismiss  i=diagnostics  q=quit) "
-                         : " Updates (u=install  r=refresh  d=dismiss  q=quit) ") |
-            bold,
+        text(fitLegend("Updates", updatesLegend(diagnosable), v.terminalWidth)) | bold,
         std::move(banner),
     };
     if (!v.requestBanner.empty()) top.push_back(text(" " + v.requestBanner + " ") | bold);

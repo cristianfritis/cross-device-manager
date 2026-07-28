@@ -11,6 +11,7 @@ add_library(devmgr_tui_render STATIC
     src/render_util.cpp
     src/views/tab_bar.cpp
     src/views/status_bar.cpp
+    src/views/legend.cpp
     src/views/detail_pane.cpp
     src/views/min_size.cpp
     src/views/pane_layout.cpp
@@ -59,6 +60,7 @@ add_executable(devmgr_tui_tests
     tests/test_modules_view_render.cpp
     tests/test_updates_view_render.cpp
     tests/test_snapshots_view_render.cpp
+    tests/test_backend_availability_render.cpp
     tests/test_states_matrix.cpp
     tests/test_selection_render.cpp
     tests/test_detail_pane_render.cpp

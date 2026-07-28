@@ -9,7 +9,9 @@
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/app/modules_vm.hpp"
 #include "devmgr/app/ui_dispatcher.hpp"
+#include "devmgr/core/backend_wording.hpp"
 #include "fakes/fake_pal.hpp"
+#include "fakes/fake_privileged_channel.hpp"
 #include "fakes/inline_ui_dispatcher.hpp"
 
 using devmgr::app::ApplicationFacade;
@@ -422,4 +424,69 @@ TEST_F(ModulesVMTest, ColumnHeaderAlignsWithTheRows) {
     // Right-aligned numeric columns end where their values end.
     EXPECT_EQ(header.find("Ref") + 3, row.find('0') + 1);
     EXPECT_EQ(header.find("Size") + 4, row.find("4K") + 2);
+}
+
+// ---- devmgrd availability on the Modules view (§13) -------------------------
+//
+// The module list is read locally through libkmod, so it survives a dead daemon
+// — but load/unload are the daemon's, so this view carries the note, and its
+// empty-system string answers to the withhold rule (docs/DESIGN.md §6.1).
+class ModulesVMAvailabilityTest : public ::testing::Test {
+   protected:
+    devmgr::runtime::EventBus bus_;
+    devmgr::runtime::TaskScheduler scheduler_;
+    devmgr::test::FakePal pal_;
+    devmgr::app::DeviceService service_{bus_};
+    devmgr::test::InlineUiDispatcher dispatcher_;
+    devmgr::test::FakePrivilegedChannel channel_;
+    ApplicationFacade facade_{pal_, scheduler_, bus_, service_, &channel_, nullptr, &pal_, &pal_};
+
+    void daemonDown() {
+        channel_.disabledEntries = devmgr::core::makeError(devmgr::core::Error::Code::Io,
+                                                           "helper devmgrd is not available");
+        facade_.refresh().wait();
+    }
+};
+
+TEST_F(ModulesVMAvailabilityTest, UnreachableDaemonWithholdsEmptySystemString) {
+    daemonDown();
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+    v.rebuild();
+
+    for (const auto& row : v.rowsRef()) EXPECT_EQ(row.find("(no modules)"), std::string::npos);
+    ASSERT_EQ(v.availabilityNotes().size(), 1U);
+    EXPECT_EQ(v.availabilityNotes()[0].role, devmgr::app::StatusSeverity::Warning);
+}
+
+// The filter message is about what the user typed, not about the daemon, so it
+// keeps rendering while the daemon is down — the three states stay distinct.
+TEST_F(ModulesVMAvailabilityTest, FilterMessageStillRendersWhileDegraded) {
+    daemonDown();
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+    v.setFilter("nothingmatchesthis");
+
+    ASSERT_EQ(v.rowsRef().size(), 1U);
+    EXPECT_EQ(v.rowsRef()[0], "(no matches)");
+}
+
+TEST_F(ModulesVMAvailabilityTest, BannerLeadsWithTheSentenceAndRaisesSeverity) {
+    daemonDown();
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+
+    const auto line = v.bannerLine();
+    const auto sentence = devmgr::core::unavailabilityText(
+        devmgr::core::BackendId::Devmgrd, devmgr::core::UnavailabilityKind::Unreachable);
+    EXPECT_TRUE(line.text.starts_with(sentence)) << line.text;
+    EXPECT_NE(line.text.find("Secure Boot"), std::string::npos);  // both facts, one row
+    EXPECT_EQ(line.severity, devmgr::app::StatusSeverity::Warning);
+    EXPECT_EQ(line.text.find("helper devmgrd"), std::string::npos);  // no raw detail
+}
+
+TEST_F(ModulesVMAvailabilityTest, HealthyDaemonLeavesTheBannerAlone) {
+    facade_.refresh().wait();
+    ModulesVM v(facade_, bus_, scheduler_, dispatcher_);
+
+    const auto line = v.bannerLine();
+    EXPECT_TRUE(line.text.starts_with("Secure Boot"));
+    EXPECT_TRUE(v.availabilityNotes().empty());
 }

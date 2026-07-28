@@ -41,6 +41,10 @@ struct UpdatesView {
     // backend is serving, so the key is inert and stays out of the legend.
     std::vector<std::string> diagnosticLines;
     bool showDiagnostics = false;
+    // Terminal width in columns, so the legend can be composed to FIT rather
+    // than be silently clipped by the screen (§14 F3). 0 means "unknown", which
+    // yields the roomiest legend — the behaviour before this field existed.
+    int terminalWidth = 0;
 };
 ftxui::Element renderUpdatesView(UpdatesView view, const Theme& theme);
 

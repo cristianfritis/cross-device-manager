@@ -144,9 +144,25 @@ void DeviceListVM::rebuild() {
 
     clearRows();
     for (std::size_t g = 0; g < kOrder.size(); ++g) appendRows(kOrder.at(g), groups[g]);
-    if (rows_.empty()) pushNonDeviceRow("(no devices)");
+    // "(no devices)" asserts that the query ran (docs/DESIGN.md §6.1: an
+    // empty-result string is withheld while a source feeding the view is
+    // unreachable). The rows themselves come from sysfs, so this is rare — but
+    // when the disabled-state overlay could not be read, the view has NOT fully
+    // reported, and the banner's sentence explains the empty region instead.
+    if (rows_.empty() && !facade_.daemonAvailability()) pushNonDeviceRow("(no devices)");
     restoreSelection(keep);
     if (afterRebuild_) afterRebuild_();
+}
+
+std::vector<BackendNote> DeviceListVM::availabilityNotes() const {
+    const auto note = facade_.backendStatus().noteFor(core::BackendId::Devmgrd);
+    if (!note) return {};
+    return {*note};
+}
+
+std::string DeviceListVM::banner() const {
+    const auto notes = availabilityNotes();
+    return notes.empty() ? std::string{} : notes.front().text;
 }
 
 void DeviceListVM::restoreSelection(const std::optional<core::DeviceId>& keep) {

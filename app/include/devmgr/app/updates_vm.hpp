@@ -98,7 +98,10 @@ class UpdatesVM {
     // Owns the translated sentence, the raw diagnostic, and the role for every
     // degraded provider (design D2). mutable because banner() is const and is
     // the per-frame read path; the type is internally mutex-guarded.
-    mutable BackendStatusVM backendStatus_;
+    // The facade's shared instance, not one of this VM's own: devmgrd's note is
+    // written there by the facade and this view must not report a second,
+    // independently-logged copy of it. This VM writes only its own providers.
+    BackendStatusVM& backendStatus_;
     int selected_ = 0;
     std::atomic<bool> rebuildQueued_{false};
     std::atomic<bool> refreshQueued_{false};

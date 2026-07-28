@@ -296,6 +296,26 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     std::optional<render::Glyph> updatesBannerGlyph;
     std::vector<std::string> updatesDiagnostics;
     bool showDiagnostics = false;  // `i` toggle; inert while updatesDiagnostics is empty
+    // devmgrd's note, recomputed alongside each tab's banner. Every view that
+    // the daemon feeds reads THIS — one shared BackendStatusVM behind it, so a
+    // single transition is logged once no matter how many tabs are watching.
+    std::optional<Role> daemonBannerRole;
+    std::optional<render::Glyph> daemonBannerGlyph;
+    std::vector<std::string> daemonDiagnostics;
+    std::string daemonSentence;  // "" while devmgrd is serving
+    auto refreshDaemonNote = [&] {
+        const auto notes = snapshotsVm.availabilityNotes();  // devmgrd only
+        daemonDiagnostics = app::diagnosticLines(notes);
+        if (notes.empty()) {
+            daemonBannerRole.reset();
+            daemonBannerGlyph.reset();
+            daemonSentence.clear();
+            return;
+        }
+        daemonSentence = notes.front().text;
+        daemonBannerRole = roleForSeverity(notes.front().role);
+        daemonBannerGlyph = render::Glyph::Unavailable;
+    };
     auto refreshUpdatesBanner = [&] {
         bannerText = updatesVm.banner();
         const auto notes = updatesVm.availabilityNotes();
@@ -540,7 +560,11 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .statusText = status.text,
                                              .leftPaneWidth = widePaneWidth(),
                                              .bannerRole = modulesBannerRole,
-                                             .statusRole = status.role},
+                                             .statusRole = status.role,
+                                             .bannerGlyph = daemonBannerGlyph,
+                                             .diagnosticLines = daemonDiagnostics,
+                                             .showDiagnostics = showDiagnostics,
+                                             .terminalWidth = term.dimx},
                                             theme);
         }
         if (activeTab == 2) {
@@ -557,7 +581,8 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                              .bannerRole = updatesBannerRole,
                                              .bannerGlyph = updatesBannerGlyph,
                                              .diagnosticLines = updatesDiagnostics,
-                                             .showDiagnostics = showDiagnostics},
+                                             .showDiagnostics = showDiagnostics,
+                                             .terminalWidth = term.dimx},
                                             theme);
         }
         if (activeTab == 3) {
@@ -570,7 +595,12 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                    .banner = bannerText,
                                    .statusText = status.text,
                                    .leftPaneWidth = widePaneWidth(),
-                                   .statusRole = status.role};
+                                   .statusRole = status.role,
+                                   .bannerRole = daemonBannerRole,
+                                   .bannerGlyph = daemonBannerGlyph,
+                                   .diagnosticLines = daemonDiagnostics,
+                                   .showDiagnostics = showDiagnostics,
+                                   .terminalWidth = term.dimx};
             if (preview) {
                 v.showPreview = true;
                 v.previewLines = snapshotsVm.previewLines();
@@ -593,7 +623,13 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                          .detail = detailRenderer->Render(),
                                          .statusText = status.text,
                                          .leftPaneWidth = kLeftPaneWidth,
-                                         .statusRole = status.role},
+                                         .statusRole = status.role,
+                                         .banner = daemonSentence,
+                                         .bannerRole = daemonBannerRole,
+                                         .bannerGlyph = daemonBannerGlyph,
+                                         .diagnosticLines = daemonDiagnostics,
+                                         .showDiagnostics = showDiagnostics,
+                                         .terminalWidth = term.dimx},
                                         theme);
     });
 
@@ -604,6 +640,10 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     // guard below routes keys to a filter Input only while it owns focus).
     auto switchToTab = [&](int tab) {
         activeTab = tab;
+        // Every tab the daemon feeds shows the same note, so it is recomputed on
+        // every entry rather than per-tab — a user who never opens Snapshots
+        // still learns the daemon is down.
+        refreshDaemonNote();
         if (tab == 1) {
             // Text and valence together (design D6) — nothing downstream reads
             // the string to decide the colour.
@@ -623,6 +663,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             updatesMenu->TakeFocus();
         } else if (tab == 3) {
             snapshotsVm.rebuild();
+            refreshDaemonNote();  // after rebuild: the refresh it triggered may have changed it
             bannerText = snapshotsVm.banner();  // after rebuild: banner reads the rebuilt metas
             snapDetailDirty = true;             // A-1 idiom: fresh snapshot under the cache
             prunePending();
@@ -743,7 +784,8 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         // the natural mnemonic but is already bound per-view. It acts only while
         // a backend is actually degraded — otherwise the key is inert and the
         // legend never advertises it, so it can never open an empty region.
-        if (event == Event::Character('i') && !updatesDiagnostics.empty()) {
+        if (event == Event::Character('i') &&
+            !(updatesDiagnostics.empty() && daemonDiagnostics.empty())) {
             showDiagnostics = !showDiagnostics;
             return true;
         }

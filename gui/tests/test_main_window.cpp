@@ -57,6 +57,9 @@ namespace {
 constexpr const char* kRawServiceUnknown =
     "org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.fwupd was not provided "
     "by any .service files";
+// What the privileged channel hands back when the bus cannot reach devmgrd
+// (platform/linux/.../dbus_contract.hpp) — diagnostic, never presentation.
+constexpr const char* kRawDaemonUnavailable = "helper devmgrd is not available";
 
 core::Device dev(std::string id, core::BusType bus, std::string name) {
     core::Device d;
@@ -722,6 +725,214 @@ TEST(MainWindowTest, HealthyProvidersShowNoDisclosure) {
     EXPECT_FALSE(window.updatesDetailsButton()->isVisible());
     EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
     EXPECT_FALSE(window.updatesBannerLabel()->font().bold());
+}
+
+// ----- Backend unavailability: the daemon, on the view it feeds (§13) --------
+
+// The Snapshots list comes from devmgrd, so an unreachable daemon is explained
+// here — with the same sentence, glyph, weight and disclosure the Updates page
+// uses for fwupd. One accessor, two pages, no page-specific wording.
+TEST(MainWindowTest, UnreachableDaemonShowsSentenceOnSnapshotsPage) {
+    Fixture f;
+    f.channel.snapshotMetas = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refreshSnapshots().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(3);
+
+    const QString banner = window.snapshotsBannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kDevmgrdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));
+    EXPECT_TRUE(window.snapshotsBannerLabel()->font().bold());
+    // The raw diagnostic is not on the primary surface either.
+    EXPECT_FALSE(banner.contains(QString::fromStdString(kRawDaemonUnavailable)));
+
+    // No row claims a completed, empty query.
+    for (int row = 0; row < window.snapshotsView()->model()->rowCount(); ++row)
+        EXPECT_FALSE(window.snapshotsView()->model()->index(row, 0).data().toString().contains(
+            QStringLiteral("(no snapshots)")));
+
+    ASSERT_TRUE(window.snapshotsDetailsButton()->isVisible());
+    EXPECT_FALSE(window.snapshotsDiagnosticLabel()->isVisible());
+}
+
+TEST(MainWindowTest, SnapshotsDisclosureRevealsTheRawDaemonDiagnostic) {
+    Fixture f;
+    f.channel.snapshotMetas = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refreshSnapshots().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(3);
+
+    // Keyboard alone, like the Updates disclosure: named, focusable, togglable.
+    EXPECT_FALSE(window.snapshotsDetailsButton()->accessibleName().isEmpty());
+    ASSERT_NE(window.snapshotsDetailsButton()->focusPolicy() & Qt::TabFocus, Qt::NoFocus);
+    window.snapshotsDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.snapshotsDetailsButton(), Qt::Key_Space);
+
+    EXPECT_TRUE(window.snapshotsDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.snapshotsDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawDaemonUnavailable)));
+
+    QTest::keyClick(window.snapshotsDetailsButton(), Qt::Key_Space);
+    EXPECT_FALSE(window.snapshotsDiagnosticLabel()->isVisible());
+}
+
+// §14 F1/F2. The live matrix found the GUI carrying the note on Snapshots and
+// Updates but NOT on Devices (no banner existed at all) and only half-carrying
+// it on Modules (the plain string, so no glyph, no weight, no disclosure) —
+// while the TUI carried it fully on all three. The daemon owns every mutation
+// verb on Devices and Modules, so a user looking at dimmed controls is owed the
+// reason on the tab they are standing on.
+TEST(MainWindowTest, UnreachableDaemonShowsSentenceOnDevicesPage) {
+    Fixture f;
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(0);
+
+    const QString banner = window.devicesBannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kDevmgrdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));
+    EXPECT_TRUE(window.devicesBannerLabel()->font().bold());
+    EXPECT_FALSE(banner.contains(QString::fromStdString(kRawDaemonUnavailable)));
+
+    // Reachable by keyboard alone, and the raw text is demoted, not deleted.
+    ASSERT_TRUE(window.devicesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.devicesDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.devicesDetailsButton()->accessibleName().isEmpty());
+    ASSERT_NE(window.devicesDetailsButton()->focusPolicy() & Qt::TabFocus, Qt::NoFocus);
+    window.devicesDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.devicesDetailsButton(), Qt::Key_Space);
+    EXPECT_TRUE(window.devicesDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.devicesDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawDaemonUnavailable)));
+}
+
+TEST(MainWindowTest, UnreachableDaemonShowsSentenceOnModulesPage) {
+    Fixture f;
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(1);
+
+    const QString banner = window.bannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kDevmgrdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));
+    // The role now arrives with the text through bannerLine(), so the weight is
+    // the VM's decision rather than a string the GUI re-read.
+    EXPECT_TRUE(window.bannerLabel()->font().bold());
+
+    ASSERT_TRUE(window.modulesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.modulesDiagnosticLabel()->isVisible());
+    window.modulesDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.modulesDetailsButton(), Qt::Key_Space);
+    EXPECT_TRUE(window.modulesDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.modulesDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawDaemonUnavailable)));
+}
+
+// The affordance collapses to nothing while the daemon serves — no empty row
+// reserved, no inert button in the tab order.
+TEST(MainWindowTest, HealthyDaemonShowsNoDevicesOrModulesDisclosure) {
+    Fixture f;
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    window.show();
+
+    window.tabs()->setCurrentIndex(0);
+    EXPECT_FALSE(window.devicesBannerLabel()->isVisible());
+    EXPECT_FALSE(window.devicesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.devicesDiagnosticLabel()->isVisible());
+
+    window.tabs()->setCurrentIndex(1);
+    EXPECT_FALSE(window.modulesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.modulesDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.bannerLabel()->text().contains(QStringLiteral("?")));
+}
+
+TEST(MainWindowTest, HealthyDaemonShowsNoSnapshotsDisclosure) {
+    Fixture f;
+    f.facade.refreshSnapshots().wait();  // answered, and the store is empty
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(3);
+
+    EXPECT_FALSE(window.snapshotsDetailsButton()->isVisible());
+    EXPECT_FALSE(window.snapshotsDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.snapshotsBannerLabel()->font().bold());
+    // A completed query that found nothing still says so.
+    ASSERT_EQ(window.snapshotsView()->model()->rowCount(), 1);
+    EXPECT_EQ(window.snapshotsView()->model()->index(0, 0).data().toString(),
+              QStringLiteral("(no snapshots)"));
+}
+
+// ----- Blocked verbs reuse the shared sentence (§5.3, §11) -------------------
+
+// The catalog's #7/#8: a verb the daemon cannot serve stays VISIBLE and greyed,
+// and says WHY in the shared words. Hidden-while-down and a blank reason are
+// both defects — the first removes the affordance, the second removes the
+// explanation, and either one sends the user to the logs.
+TEST(MainWindowTest, DaemonDownDisablesVerbsVisiblyWithTheSharedReason) {
+    Fixture f;
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    window.show();
+    f.refreshAndPump();
+    f.selectFirstDevice(window);
+
+    const QString sentence = QString::fromUtf8(tests::kDevmgrdUnreachableSentence);
+    for (QAction* action : {window.toggleAction(), window.bindAction(), window.unbindAction()}) {
+        EXPECT_FALSE(action->isEnabled()) << action->text().toStdString();
+        EXPECT_TRUE(action->isVisible()) << "a blocked verb must stay visible (§5.3)";
+        EXPECT_EQ(action->toolTip(), sentence) << action->text().toStdString();
+        // The reason is never the raw diagnostic and never a generic failure.
+        EXPECT_FALSE(action->toolTip().contains(QString::fromStdString(kRawDaemonUnavailable)));
+        EXPECT_FALSE(action->toolTip().contains(QStringLiteral("Operation failed")));
+    }
+
+    window.tabs()->setCurrentIndex(1);
+    EXPECT_FALSE(window.loadModuleAction()->isEnabled());
+    EXPECT_EQ(window.loadModuleAction()->toolTip(), sentence);
+
+    window.tabs()->setCurrentIndex(3);
+    for (QAction* action : {window.createSnapshotAction(), window.restoreSnapshotAction(),
+                            window.deleteSnapshotAction()}) {
+        EXPECT_FALSE(action->isEnabled()) << action->text().toStdString();
+        EXPECT_EQ(action->toolTip(), sentence);
+    }
+    // History is a local view toggle over rows already on screen — no daemon
+    // needed, so a degraded daemon must NOT disable it.
+    EXPECT_TRUE(window.historySnapshotAction()->isEnabled());
+}
+
+TEST(MainWindowTest, HealthyDaemonLeavesVerbsEnabledAndUnexplained) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    window.show();
+    f.refreshAndPump();
+    f.selectFirstDevice(window);
+
+    EXPECT_TRUE(window.toggleAction()->isEnabled());
+    // QAction::toolTip() falls back to text() when unset, so "no reason attached"
+    // is "the tooltip is not the availability sentence", not "the tooltip is empty".
+    EXPECT_NE(window.toggleAction()->toolTip(),
+              QString::fromUtf8(tests::kDevmgrdUnreachableSentence));
+    window.tabs()->setCurrentIndex(3);
+    EXPECT_TRUE(window.createSnapshotAction()->isEnabled());
 }
 
 TEST(MainWindowTest, QuitGuardBlocksCloseDuringInstall) {

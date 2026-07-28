@@ -103,6 +103,10 @@ class MainWindow final : public QMainWindow {
     QListView* snapshotsView() const { return snapshotsView_; }
     QTreeWidget* snapshotsDetailTree() const { return snapshotsDetailTree_; }
     QLabel* snapshotsBannerLabel() const { return snapshotsBannerLabel_; }
+    // The Snapshots page's own disclosure for the devmgrd diagnostic (§13),
+    // shaped exactly like the Updates one above.
+    QToolButton* snapshotsDetailsButton() const { return snapshotsDetailsButton_; }
+    QLabel* snapshotsDiagnosticLabel() const { return snapshotsDiagnosticLabel_; }
     QAction* createSnapshotAction() const { return createSnapshotAction_; }
     QAction* restoreSnapshotAction() const { return restoreSnapshotAction_; }
     QAction* deleteSnapshotAction() const { return deleteSnapshotAction_; }
@@ -111,6 +115,13 @@ class MainWindow final : public QMainWindow {
     QLineEdit* snapshotFilterEdit() const { return snapshotFilterEdit_; }
     QTextEdit* snapshotDiffView() const { return snapshotDiffView_; }
     QLabel* snapshotGuidanceLabel() const { return snapshotGuidanceLabel_; }
+    // Devices and Modules read devmgrd too, so they owe the same note and the
+    // same keyboard-reachable diagnostic the other two pages carry (§14 F1/F2).
+    QLabel* devicesBannerLabel() const { return devicesBannerLabel_; }
+    QToolButton* devicesDetailsButton() const { return devicesDetailsButton_; }
+    QLabel* devicesDiagnosticLabel() const { return devicesDiagnosticLabel_; }
+    QToolButton* modulesDetailsButton() const { return modulesDetailsButton_; }
+    QLabel* modulesDiagnosticLabel() const { return modulesDiagnosticLabel_; }
 
    protected:
     void closeEvent(QCloseEvent* event) override;  // spec §5.5 quit guard: installActive()
@@ -123,11 +134,33 @@ class MainWindow final : public QMainWindow {
     void updateUpdatesDetailPane();
     void updateSnapshotsDetailPane();
     void updateStatusBar();
-    void updateActionEnablement();        // tab-aware; folds the old updateToggleAction()
+    void updateActionEnablement();  // tab-aware; folds the old updateToggleAction()
+    void updateDeviceVerbEnablement(bool daemonUp, const QString& blockedReason);
+    static void gateOnDaemon(QAction* action, bool enabled, bool daemonUp,
+                             const QString& blockedReason);
     void updateUpdatesBannerLabel();      // banner() text + role weight/glyph + disclosure
     void updateAvailabilityDisclosure();  // diagnostic region text + visibility
     void updateRequestBannerLabel();      // requestBanner() text + visibility
     void updateSnapshotsBannerLabel();    // counts banner text + visibility (B4)
+    void updateSnapshotsDisclosure();     // devmgrd diagnostic region text + visibility
+    void updateDevicesBannerLabel();      // devmgrd note on Devices (§14 F1)
+    void updateDevicesDisclosure();
+    void updateModulesBannerLabel();  // bannerLine() text + role weight/glyph (§14 F2)
+    void updateModulesDisclosure();
+
+    // One availability banner row: the sentence, a keyboard-reachable `Details`
+    // disclosure at the trailing edge, and the region it reveals underneath.
+    // Four pages need exactly these three widgets wired exactly this way, and
+    // hand-rolling them per page is what let the Modules banner ship with no
+    // glyph, no weight and no disclosure at all (§14 F2) — so they are built in
+    // one place instead.
+    struct AvailabilityBanner {
+        QWidget* row = nullptr;
+        QLabel* label = nullptr;
+        QToolButton* details = nullptr;
+        QLabel* diagnostic = nullptr;
+    };
+    AvailabilityBanner makeAvailabilityBanner();
     void pruneAndPushPending(std::future<void> f);  // this window's own future custody
 
     app::ApplicationFacade& facade_;
@@ -169,6 +202,13 @@ class MainWindow final : public QMainWindow {
     QListView* snapshotsView_ = nullptr;
     QTreeWidget* snapshotsDetailTree_ = nullptr;
     QLabel* snapshotsBannerLabel_ = nullptr;
+    QToolButton* snapshotsDetailsButton_ = nullptr;
+    QLabel* snapshotsDiagnosticLabel_ = nullptr;
+    QLabel* devicesBannerLabel_ = nullptr;
+    QToolButton* devicesDetailsButton_ = nullptr;
+    QLabel* devicesDiagnosticLabel_ = nullptr;
+    QToolButton* modulesDetailsButton_ = nullptr;
+    QLabel* modulesDiagnosticLabel_ = nullptr;
     QAction* createSnapshotAction_ = nullptr;
     QAction* restoreSnapshotAction_ = nullptr;
     QAction* deleteSnapshotAction_ = nullptr;

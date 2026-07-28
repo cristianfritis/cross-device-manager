@@ -73,6 +73,10 @@ class ModulesVM {
     // `.severity`; it never searches the string to decide how loud to be, so
     // rewording the banner cannot silently recolour it.
     BannerLine bannerLine() const;
+    // devmgrd's note, or empty while it is serving. The module LIST is read
+    // locally, but every verb on this view (load/unload) is the daemon's, so
+    // the view carries the note — read from the facade's single instance.
+    std::vector<BackendNote> availabilityNotes() const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     void rebuild();  // UI thread: snapshot + rows
     // Async: fills the signature cache for names not yet cached, then posts a

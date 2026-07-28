@@ -133,7 +133,7 @@ int restoreSelection(const std::vector<std::optional<std::pair<std::size_t, std:
 }  // namespace
 
 UpdatesVM::UpdatesVM(ApplicationFacade& facade, runtime::EventBus& bus, IUiDispatcher& dispatcher)
-    : facade_(facade), bus_(bus), dispatcher_(dispatcher) {
+    : facade_(facade), bus_(bus), dispatcher_(dispatcher), backendStatus_(facade.backendStatus()) {
     subRefreshed_ = bus_.subscribe<core::UpdatesRefreshedEvent>(
         [this](const core::UpdatesRefreshedEvent&) { queueRebuild(); });
     subChanged_ = bus_.subscribe<core::UpdatesChangedEvent>(

@@ -410,6 +410,13 @@ from the error text, so a D-Bus name, errno value, or filesystem path cannot
 reach the sentence. The raw text stays a diagnostic: logged once per state
 transition, and revealed on request (GUI `Details`, TUI `i`).
 
+The sentence appears on every view its backend feeds, from one shared accessor:
+`devmgrd` on Devices, Modules and Snapshots, the update providers on Updates. A
+verb the unavailable backend serves stays visible and disabled, and its reason is
+that same sentence rather than a separately authored one (§5.3). When only part
+of a refresh could not be read, the view keeps the data it has and names what it
+could not refresh — `Could not refresh devices; showing the previous result.`
+
 Other shared state text: an unselected device detail reads `(no device
 selected)`; a snapshot whose payload cannot be diffed reports `Differences are
 unavailable for this snapshot.`; daemon-unavailable and guard refusals surface

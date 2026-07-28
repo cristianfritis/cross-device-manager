@@ -198,9 +198,13 @@ fwupd) and DKMS out-of-tree kernel module status.
 - **Updates tab, both UIs.** TUI: third tab in the cycle (`Devices` →
   `Modules` → `Updates`); `u` installs the selected release (confirm modal:
   version delta, needs-reboot warning, estimated duration), `r` refreshes.
-  When an update source cannot be reached, `i` reveals the raw diagnostic
-  behind the plain-language note (`Escape` closes it); the key is listed in
-  the legend only while there is something to show.
+  When a backend cannot be reached, `i` reveals the raw diagnostic behind the
+  plain-language note (`Escape` closes it); the key is listed in the legend
+  only while there is something to show. `i` is global: the note and its
+  diagnostic appear on every tab the unreachable backend feeds — an update
+  source on Updates, and the `devmgrd` helper on Devices, Modules and
+  Snapshots, where reads keep working from sysfs while the verbs it serves
+  are disabled and explained with the same sentence.
   GUI: a dedicated **Updates** tab with the same install/refresh actions on
   the toolbar and row context menu, progress shown in the status bar.
 - **fwupd, frontend-direct.** `FwupdUpdateProvider` talks to

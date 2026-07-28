@@ -230,11 +230,19 @@ void ModulesVM::rebuild() {
                                 .holders = joinHolders(m.holders)}));
         rowNames_.emplace_back(m.name);
     }
-    if (rows_.empty()) {
+    // "(no modules)" asserts a completed query and is withheld while a source
+    // feeding this view is unreachable (docs/DESIGN.md §6.1); "(no matches)" is
+    // about the filter the user typed and stays true either way.
+    if (rows_.empty() && (!filter_.empty() || !facade_.daemonAvailability())) {
         rows_.emplace_back(filter_.empty() ? "(no modules)" : "(no matches)");
         rowNames_.emplace_back(std::nullopt);
     }
-    selected_ = restoreSelection(rowNames_, keep, selected_, static_cast<int>(rows_.size()));
+    // A withheld empty-state row can leave the list genuinely empty, and
+    // restoreSelection clamps into [0, rowCount-1] — an empty range. Guard it
+    // here, as UpdatesVM and SnapshotsVM already do for the same reason.
+    selected_ = rows_.empty()
+                    ? 0
+                    : restoreSelection(rowNames_, keep, selected_, static_cast<int>(rows_.size()));
     if (afterRebuild_) afterRebuild_();
 }
 
@@ -319,9 +327,25 @@ std::string ModulesVM::columnHeader() const {
     return {row.data()};
 }
 
+std::vector<BackendNote> ModulesVM::availabilityNotes() const {
+    const auto note = facade_.backendStatus().noteFor(core::BackendId::Devmgrd);
+    if (!note) return {};
+    return {*note};
+}
+
 BannerLine ModulesVM::bannerLine() const {
+    // The degraded sentence leads and raises the row's valence to at least
+    // warning; the Secure Boot posture follows it. One banner row, one severity,
+    // both facts — the Snapshots composition, applied to this view's banner.
+    const auto notes = availabilityNotes();
+    const auto withNote = [&notes](BannerLine line) {
+        if (notes.empty()) return line;
+        line.text = notes.front().text + " | " + line.text;
+        line.severity = StatusSeverity::Warning;
+        return line;
+    };
     const auto info = facade_.systemInfo();
-    if (!info) return {.text = "Secure Boot: unknown", .severity = StatusSeverity::Info};
+    if (!info) return withNote({.text = "Secure Boot: unknown", .severity = StatusSeverity::Info});
     // ONE predicate decides both the sentence and its valence: the posture that
     // makes an unsigned load fail is the same posture that is worth a warning.
     // Reading it once here is what retires the render-path substring match — the
@@ -330,8 +354,8 @@ BannerLine ModulesVM::bannerLine() const {
     std::string text = std::string("Secure Boot: ") + (info->secureBoot ? "ON" : "off") +
                        " · Lockdown: " + info->lockdownMode;
     if (rejectsUnsigned) text += " — unsigned modules will be rejected";
-    return {.text = std::move(text),
-            .severity = rejectsUnsigned ? StatusSeverity::Warning : StatusSeverity::Info};
+    return withNote({.text = std::move(text),
+                     .severity = rejectsUnsigned ? StatusSeverity::Warning : StatusSeverity::Info});
 }
 
 std::string ModulesVM::banner() const {

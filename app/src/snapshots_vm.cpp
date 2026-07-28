@@ -261,16 +261,39 @@ void SnapshotsVM::rebuild() {
         rows_.push_back(std::move(row));
         rowRefs_.emplace_back(i);
     }
-    if (rows_.empty()) {
-        // Name the filter that hid everything and keep the clear-filter path
-        // discoverable (docs/DESIGN.md §5.1); an unfiltered empty store is a
-        // different state and says so.
-        rows_.push_back(needle.empty() ? kPlaceholderRow
-                                       : "No snapshots match \"" + filter_ + "\"");
-        rowRefs_.emplace_back(std::nullopt);
-    }
-    selected_ = restoreSelection(rowRefs_, metas_, keep, selected_, static_cast<int>(rows_.size()));
+    if (rows_.empty()) pushEmptyStateRow(needle);
+    selected_ = rows_.empty() ? 0
+                              : restoreSelection(rowRefs_, metas_, keep, selected_,
+                                                 static_cast<int>(rows_.size()));
     if (afterRebuild_) afterRebuild_();
+}
+
+// Which "nothing here" the empty list actually is — three distinct truths, never
+// conflated (design D5, the same rule that gates "(no updates available)"):
+//
+//   a filter hid everything    -> name the filter; the clear-filter path stays
+//                                 discoverable (docs/DESIGN.md §5.1)
+//   the daemon answered, empty -> "(no snapshots)", a completed query
+//   the daemon never answered  -> NO row: that query did not complete, so no row
+//                                 may claim it did. The banner's shared sentence
+//                                 explains the empty region instead.
+void SnapshotsVM::pushEmptyStateRow(const std::string& needle) {
+    if (!needle.empty()) {
+        rows_.push_back("No snapshots match \"" + filter_ + "\"");
+    } else if (!facade_.daemonAvailability()) {
+        rows_.emplace_back(kPlaceholderRow);
+    } else {
+        return;
+    }
+    rowRefs_.emplace_back(std::nullopt);
+}
+
+std::vector<BackendNote> SnapshotsVM::availabilityNotes() const {
+    // This view reads devmgrd and nothing else, so it presents devmgrd's note
+    // and nothing else — a stopped fwupd is not this screen's business.
+    const auto note = facade_.backendStatus().noteFor(core::BackendId::Devmgrd);
+    if (!note) return {};
+    return {*note};
 }
 
 void SnapshotsVM::setFilter(std::string filter) {
@@ -317,11 +340,21 @@ bool SnapshotsVM::isLastGoodRow(int row) const {
 }
 
 std::string SnapshotsVM::banner() const {
+    // The shared sentence leads while devmgrd is unreachable, and the counts of
+    // whatever list was retained follow it. Both facts are true at once and the
+    // user needs both: what is on screen, and that it may no longer be current.
+    // The sentence comes from the table — the raw channel message is never a
+    // substring of it (backend-availability spec).
+    std::string degraded;
+    for (const auto& note : availabilityNotes()) {
+        if (!degraded.empty()) degraded += " | ";
+        degraded += note.text;
+    }
     // Empty store: no counts to summarise, and no banner. The list's
     // "(no snapshots)" placeholder is the ONE empty indicator (pass-2 bug B4) —
     // it sits in the region that is actually empty, and saying it twice made the
     // screen read as two separate facts. Both frontends hide an empty banner.
-    if (metas_.empty()) return "";
+    if (metas_.empty()) return degraded;
     std::size_t autoCount = 0;
     std::size_t manualCount = 0;
     std::size_t unhealthy = 0;
@@ -335,7 +368,7 @@ std::string SnapshotsVM::banner() const {
     std::string b = std::to_string(metas_.size()) + " snapshots · " + std::to_string(autoCount) +
                     " auto · " + std::to_string(manualCount) + " manual";
     if (unhealthy > 0) b += " · " + std::to_string(unhealthy) + " unhealthy";
-    return b;
+    return degraded.empty() ? b : degraded + " | " + b;
 }
 
 std::vector<std::string> SnapshotsVM::detailLines() const {

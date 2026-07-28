@@ -307,9 +307,22 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     detailTree_->setRootIsDecorated(false);
     detailTree_->setSelectionMode(QAbstractItemView::NoSelection);
 
+    // devmgrd owns every mutation verb on this page and the disabled-state
+    // overlay behind its rows, so an unreachable daemon is explained here too
+    // (§14 F1). The row collapses to nothing while the daemon is serving.
+    const AvailabilityBanner devicesBanner = makeAvailabilityBanner();
+    devicesBannerLabel_ = devicesBanner.label;
+    devicesDetailsButton_ = devicesBanner.details;
+    devicesDiagnosticLabel_ = devicesBanner.diagnostic;
+    devicesBannerLabel_->setVisible(false);
+    connect(devicesDetailsButton_, &QToolButton::toggled, this,
+            [this](bool) { updateDevicesDisclosure(); });
+
     auto* left = new QWidget;
     auto* leftLayout = new QVBoxLayout(left);
     leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->addWidget(devicesBanner.row);
+    leftLayout->addWidget(devicesDiagnosticLabel_);
     leftLayout->addWidget(filterEdit_);
     leftLayout->addWidget(listView_);
 
@@ -320,7 +333,12 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
 
     // Modules page: banner + filter + fixed-column list left, detail right —
     // the T11 TUI screen, in widgets.
-    bannerLabel_ = new QLabel;
+    const AvailabilityBanner modulesBanner = makeAvailabilityBanner();
+    bannerLabel_ = modulesBanner.label;
+    modulesDetailsButton_ = modulesBanner.details;
+    modulesDiagnosticLabel_ = modulesBanner.diagnostic;
+    connect(modulesDetailsButton_, &QToolButton::toggled, this,
+            [this](bool) { updateModulesDisclosure(); });
     moduleFilterEdit_ = new QLineEdit;
     moduleFilterEdit_->setPlaceholderText(QStringLiteral("filter modules…"));
     connect(moduleFilterEdit_, &QLineEdit::textChanged, this,
@@ -339,7 +357,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     auto* modulesLeft = new QWidget;
     auto* modulesLeftLayout = new QVBoxLayout(modulesLeft);
     modulesLeftLayout->setContentsMargins(0, 0, 0, 0);
-    modulesLeftLayout->addWidget(bannerLabel_);
+    modulesLeftLayout->addWidget(modulesBanner.row);
+    modulesLeftLayout->addWidget(modulesDiagnosticLabel_);
     modulesLeftLayout->addWidget(moduleFilterEdit_);
     modulesLeftLayout->addWidget(modulesView_);
     auto* modulesSplitter = new QSplitter;
@@ -420,6 +439,25 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // recovery-guidance surface, keeping parity with the TUI tab.
     snapshotsBannerLabel_ = new QLabel;
     snapshotsBannerLabel_->setVisible(false);  // no counts to show until the tab is entered (B4)
+    // The Updates disclosure, verbatim, for the backend this page reads: the
+    // snapshot list comes from devmgrd, so an unreachable daemon is explained
+    // here and its raw detail is reachable by keyboard here (§13).
+    snapshotsDetailsButton_ = new QToolButton;
+    snapshotsDetailsButton_->setCheckable(true);
+    snapshotsDetailsButton_->setText(QStringLiteral("Details ▾"));
+    snapshotsDetailsButton_->setAccessibleName(QStringLiteral("Backend diagnostics"));
+    snapshotsDetailsButton_->setAccessibleDescription(
+        QStringLiteral("Show the raw diagnostic text for an unavailable backend"));
+    snapshotsDetailsButton_->setFocusPolicy(Qt::StrongFocus);  // in the tab order
+    snapshotsDetailsButton_->setVisible(false);
+    snapshotsDiagnosticLabel_ = new QLabel;
+    snapshotsDiagnosticLabel_->setWordWrap(true);
+    snapshotsDiagnosticLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                                       Qt::TextSelectableByKeyboard);
+    snapshotsDiagnosticLabel_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    snapshotsDiagnosticLabel_->setVisible(false);
+    connect(snapshotsDetailsButton_, &QToolButton::toggled, this,
+            [this](bool) { updateSnapshotsDisclosure(); });
     snapshotModel_ = new SnapshotListModel(snapshotsVm_, this);
     snapshotsView_ = new QListView;
     snapshotsView_->setModel(snapshotModel_);
@@ -458,7 +496,15 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     auto* snapshotsLeft = new QWidget;
     auto* snapshotsLeftLayout = new QVBoxLayout(snapshotsLeft);
     snapshotsLeftLayout->setContentsMargins(0, 0, 0, 0);
-    snapshotsLeftLayout->addWidget(snapshotsBannerLabel_);
+    // Banner row shaped exactly like the Updates page's: sentence, then the
+    // disclosure at the trailing edge, then the revealed region under it.
+    auto* snapshotsBannerRow = new QWidget;
+    auto* snapshotsBannerRowLayout = new QHBoxLayout(snapshotsBannerRow);
+    snapshotsBannerRowLayout->setContentsMargins(0, 0, 0, 0);
+    snapshotsBannerRowLayout->addWidget(snapshotsBannerLabel_, 1);
+    snapshotsBannerRowLayout->addWidget(snapshotsDetailsButton_, 0);
+    snapshotsLeftLayout->addWidget(snapshotsBannerRow);
+    snapshotsLeftLayout->addWidget(snapshotsDiagnosticLabel_);
     snapshotsLeftLayout->addWidget(snapshotFilterEdit_);
     snapshotsLeftLayout->addWidget(snapshotsView_);
 
@@ -562,8 +608,10 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         // installProgressText() in; leaving it must fall back to the shared
         // status line — same as the taskExecuted wake path below.
         updateStatusBar();
-        if (index == 1) {
-            bannerLabel_->setText(QString::fromStdString(modulesVm_.banner()));
+        if (index == 0) {
+            updateDevicesBannerLabel();
+        } else if (index == 1) {
+            updateModulesBannerLabel();
             modulesVm_.rebuild();
             modulesVm_.fillSignatures();
         } else if (index == 2) {
@@ -592,6 +640,9 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         syncSelectionFromVm();
         updateDetailPane();
         updateActionEnablement();
+        // A device-side reset is also how a daemon outage (or its recovery)
+        // reaches this page, so the note follows the list it explains.
+        if (tabs_->currentIndex() == 0) updateDevicesBannerLabel();
     });
 
     connect(modulesView_->selectionModel(), &QItemSelectionModel::currentChanged, this,
@@ -604,7 +655,10 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         updateModuleDetailPane();
         // Module-side resets must not re-run the Devices-tab criticality probe
         // (reads /proc/self/mounts + sysfs) — Phase 5 review F-1.
-        if (tabs_->currentIndex() == 1) updateActionEnablement();
+        if (tabs_->currentIndex() == 1) {
+            updateActionEnablement();
+            updateModulesBannerLabel();
+        }
     });
 
     connect(updatesView_->selectionModel(), &QItemSelectionModel::currentChanged, this,
@@ -662,7 +716,11 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // Updates tab like the reset guard above.
     connect(&dispatcher, &QtUiDispatcher::taskExecuted, this, [this] {
         updateStatusBar();
-        if (tabs_->currentIndex() == 2) {
+        if (tabs_->currentIndex() == 0) {
+            updateDevicesBannerLabel();
+        } else if (tabs_->currentIndex() == 1) {
+            updateModulesBannerLabel();
+        } else if (tabs_->currentIndex() == 2) {
             updateUpdatesBannerLabel();
             updateRequestBannerLabel();
             updateActionEnablement();
@@ -680,6 +738,10 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     updateUpdatesDetailPane();
     updateSnapshotsDetailPane();
     updateActionEnablement();
+    // Devices is the tab the window opens on, so `currentChanged` never fires
+    // for it and its note would stay unpainted until the user left and came
+    // back — the daemon can already be unreachable at construction.
+    updateDevicesBannerLabel();
 }
 // NOLINTEND(readability-function-cognitive-complexity)
 // NOLINTEND(readability-function-size)
@@ -799,14 +861,147 @@ void MainWindow::updateSnapshotsDetailPane() {
     snapshotsDetailTree_->resizeColumnToContents(0);
 }
 
+// The three widgets every availability banner row needs, wired identically:
+// a sentence label, a checkable disclosure at the trailing edge, and the
+// read-only region it reveals. A checkable button rather than a tooltip because
+// a tooltip is pointer-only, so the diagnostic would be unreachable by keyboard
+// and assistive technology.
+// Same Qt parent-child ownership the constructor documents: every widget here
+// is owned by the layout or the window that adopts it, which gsl::owner cannot
+// model — see the NOLINT rationale on the constructor above.
+// NOLINTBEGIN(cppcoreguidelines-owning-memory)
+MainWindow::AvailabilityBanner MainWindow::makeAvailabilityBanner() {
+    AvailabilityBanner b;
+    b.label = new QLabel;
+    b.details = new QToolButton;
+    b.details->setCheckable(true);
+    b.details->setText(QStringLiteral("Details ▾"));
+    b.details->setAccessibleName(QStringLiteral("Backend diagnostics"));
+    b.details->setAccessibleDescription(
+        QStringLiteral("Show the raw diagnostic text for an unavailable backend"));
+    b.details->setFocusPolicy(Qt::StrongFocus);  // in the tab order
+    b.details->setVisible(false);
+    b.diagnostic = new QLabel;
+    b.diagnostic->setWordWrap(true);
+    // Read-only, but selectable by keyboard as well as mouse so the text can be
+    // read and copied without a pointer.
+    b.diagnostic->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    b.diagnostic->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    b.diagnostic->setVisible(false);
+    b.row = new QWidget;
+    auto* rowLayout = new QHBoxLayout(b.row);
+    rowLayout->setContentsMargins(0, 0, 0, 0);
+    rowLayout->addWidget(b.label, 1);
+    rowLayout->addWidget(b.details, 0);
+    return b;
+}
+// NOLINTEND(cppcoreguidelines-owning-memory)
+
+// Devices and Modules carry the same devmgrd note the Snapshots page does: the
+// daemon owns every mutation verb on both, so a user looking at dimmed controls
+// is owed the reason on the tab they are standing on (§14 F1/F2). The words are
+// the VM's, the role rides on weight and the glyph, never colour.
+void MainWindow::updateDevicesBannerLabel() {
+    const auto notes = listVm_.availabilityNotes();
+    const bool degraded = !notes.empty();
+    const bool warn = std::ranges::any_of(
+        notes, [](const app::BackendNote& n) { return n.role == app::StatusSeverity::Warning; });
+    std::string banner;
+    for (const auto& n : notes) {
+        if (!banner.empty()) banner += " | ";
+        banner += n.text;
+    }
+    devicesBannerLabel_->setText(
+        QString::fromStdString(degraded ? std::string("? ") + banner : banner));
+    QFont font = devicesBannerLabel_->font();
+    font.setBold(warn);
+    devicesBannerLabel_->setFont(font);
+    devicesBannerLabel_->setVisible(degraded);  // healthy ⇒ no row at all, as in the TUI
+    devicesDetailsButton_->setVisible(degraded);
+    if (!degraded) devicesDetailsButton_->setChecked(false);
+    updateDevicesDisclosure();
+}
+
+void MainWindow::updateDevicesDisclosure() {
+    const auto lines = app::diagnosticLines(listVm_.availabilityNotes());
+    QString text;
+    for (const auto& line : lines) {
+        if (!text.isEmpty()) text += QLatin1Char('\n');
+        text += QString::fromStdString(line);
+    }
+    devicesDiagnosticLabel_->setText(text);
+    const bool open = devicesDetailsButton_->isChecked() && !lines.empty();
+    devicesDiagnosticLabel_->setVisible(open);
+    devicesDetailsButton_->setText(open ? QStringLiteral("Details ▴")
+                                        : QStringLiteral("Details ▾"));
+}
+
+// ModulesVM::bannerLine() carries text AND severity from one read — the seam
+// task 7.1 built. The GUI used to take the plain banner() string, so the role
+// never arrived and the glyph, the weight and the disclosure were all missing.
+void MainWindow::updateModulesBannerLabel() {
+    const app::BannerLine line = modulesVm_.bannerLine();
+    const bool degraded = !modulesVm_.availabilityNotes().empty();
+    bannerLabel_->setText(
+        QString::fromStdString(degraded ? std::string("? ") + line.text : line.text));
+    QFont font = bannerLabel_->font();
+    font.setBold(line.severity == app::StatusSeverity::Warning);
+    bannerLabel_->setFont(font);
+    bannerLabel_->setVisible(!line.text.empty());
+    modulesDetailsButton_->setVisible(degraded);
+    if (!degraded) modulesDetailsButton_->setChecked(false);
+    updateModulesDisclosure();
+}
+
+void MainWindow::updateModulesDisclosure() {
+    const auto lines = app::diagnosticLines(modulesVm_.availabilityNotes());
+    QString text;
+    for (const auto& line : lines) {
+        if (!text.isEmpty()) text += QLatin1Char('\n');
+        text += QString::fromStdString(line);
+    }
+    modulesDiagnosticLabel_->setText(text);
+    const bool open = modulesDetailsButton_->isChecked() && !lines.empty();
+    modulesDiagnosticLabel_->setVisible(open);
+    modulesDetailsButton_->setText(open ? QStringLiteral("Details ▴")
+                                        : QStringLiteral("Details ▾"));
+}
+
 // The counts banner is empty exactly when the store is empty, and the list's
 // "(no snapshots)" placeholder is then the single empty indicator (pass-2 bug
 // B4) — hide the label rather than reserve a blank row for it, matching how the
 // TUI drops the banner row and how the durable request banner above behaves.
 void MainWindow::updateSnapshotsBannerLabel() {
+    const auto notes = snapshotsVm_.availabilityNotes();
+    const bool degraded = !notes.empty();
+    const bool warn = std::ranges::any_of(
+        notes, [](const app::BackendNote& n) { return n.role == app::StatusSeverity::Warning; });
     const std::string banner = snapshotsVm_.banner();
-    snapshotsBannerLabel_->setText(QString::fromStdString(banner));
+    // Same treatment as the Updates banner: weight and the "unavailable" glyph
+    // carry the role, never colour (docs/DESIGN.md §9 GUI colour exception).
+    snapshotsBannerLabel_->setText(
+        QString::fromStdString(degraded ? std::string("? ") + banner : banner));
+    QFont font = snapshotsBannerLabel_->font();
+    font.setBold(warn);
+    snapshotsBannerLabel_->setFont(font);
     snapshotsBannerLabel_->setVisible(!banner.empty());
+    snapshotsDetailsButton_->setVisible(degraded);
+    if (!degraded) snapshotsDetailsButton_->setChecked(false);  // no stale region left open
+    updateSnapshotsDisclosure();
+}
+
+void MainWindow::updateSnapshotsDisclosure() {
+    const auto lines = app::diagnosticLines(snapshotsVm_.availabilityNotes());
+    QString text;
+    for (const auto& line : lines) {
+        if (!text.isEmpty()) text += QLatin1Char('\n');
+        text += QString::fromStdString(line);
+    }
+    snapshotsDiagnosticLabel_->setText(text);
+    const bool open = snapshotsDetailsButton_->isChecked() && !lines.empty();
+    snapshotsDiagnosticLabel_->setVisible(open);
+    snapshotsDetailsButton_->setText(open ? QStringLiteral("Details ▴")
+                                          : QStringLiteral("Details ▾"));
 }
 
 // The Updates banner and its disclosure.
@@ -882,9 +1077,21 @@ void MainWindow::updateStatusBar() {
 
 void MainWindow::updateActionEnablement() {
     const int tab = tabs_->currentIndex();
+    // Every verb below reaches the system through devmgrd. While it cannot be
+    // reached they stay VISIBLE and become disabled with the reason attached
+    // (docs/DESIGN.md §5.3: hide only what cannot apply to the object at all;
+    // explain everything else). The reason is the SHARED sentence, escalated by
+    // noteFor(..., blocksAttemptedVerb) — a control never authors its own
+    // wording for a state the banner already names.
+    const auto blocked =
+        facade_.backendStatus().noteFor(core::BackendId::Devmgrd, /*blocksAttemptedVerb=*/true);
+    const QString blockedReason = blocked ? QString::fromStdString(blocked->text) : QString{};
+    const bool daemonUp = !blocked.has_value();
+
     const bool onModules = tab == 1;
-    loadModuleAction_->setEnabled(onModules);
-    unloadModuleAction_->setEnabled(onModules && modulesVm_.selectedModule().has_value());
+    gateOnDaemon(loadModuleAction_, onModules, daemonUp, blockedReason);
+    gateOnDaemon(unloadModuleAction_, onModules && modulesVm_.selectedModule().has_value(),
+                 daemonUp, blockedReason);
 
     installUpdateAction_->setEnabled(tab == 2 && updatesVm_.selectedInstall().has_value());
     refreshUpdatesAction_->setEnabled(tab == 2);
@@ -895,16 +1102,25 @@ void MainWindow::updateActionEnablement() {
     // the status line — the TUI parity model, so safety refusals stay visible
     // (DESIGN.md §5.3) rather than being silently greyed out.
     const bool onSnapshots = tab == 3;
-    createSnapshotAction_->setEnabled(onSnapshots);
-    restoreSnapshotAction_->setEnabled(onSnapshots);
-    deleteSnapshotAction_->setEnabled(onSnapshots);
-    diffSnapshotAction_->setEnabled(onSnapshots);
+    gateOnDaemon(createSnapshotAction_, onSnapshots, daemonUp, blockedReason);
+    gateOnDaemon(restoreSnapshotAction_, onSnapshots, daemonUp, blockedReason);
+    gateOnDaemon(deleteSnapshotAction_, onSnapshots, daemonUp, blockedReason);
+    // The diff is an IPC read, also the daemon's.
+    gateOnDaemon(diffSnapshotAction_, onSnapshots, daemonUp, blockedReason);
+    // History is a local view toggle over rows already on screen — it needs no
+    // daemon, so a degraded daemon must not disable it.
     historySnapshotAction_->setEnabled(onSnapshots);
 
-    // Devices probe only when tab == 0 (T1 F-1 gating, extended to the
-    // Updates tab): findById()/canDisable() below are Devices-tab-only work.
+    updateDeviceVerbEnablement(daemonUp, blockedReason);
+}
+
+// The Devices-tab half: toggle/unbind/bind depend on the SELECTED device, so
+// they need the findById()/canDisable() probes the other tabs must not pay for
+// (T1 F-1 gating). Split out of updateActionEnablement so each half stays
+// readable — and under the analyzer's complexity threshold — on its own.
+void MainWindow::updateDeviceVerbEnablement(bool daemonUp, const QString& blockedReason) {
     const auto id = listVm_.selectedDeviceId();
-    const auto device = (tab == 0 && id) ? facade_.findById(*id) : std::nullopt;
+    const auto device = (tabs_->currentIndex() == 0 && id) ? facade_.findById(*id) : std::nullopt;
     if (!device) {  // not on the Devices tab, or no device selected
         toggleAction_->setEnabled(false);
         toggleAction_->setText(QStringLiteral("Disable"));
@@ -913,21 +1129,37 @@ void MainWindow::updateActionEnablement() {
         bindAction_->setEnabled(false);
         return;
     }
-    unbindAction_->setEnabled(true);
-    bindAction_->setEnabled(true);
+    gateOnDaemon(unbindAction_, true, daemonUp, blockedReason);
+    gateOnDaemon(bindAction_, true, daemonUp, blockedReason);
     const bool enable = device->status == core::DeviceStatus::Disabled;
     toggleAction_->setText(enable ? QStringLiteral("Enable") : QStringLiteral("Disable"));
     if (!enable) {
         // Advisory only — devmgrd re-checks authoritatively on every request.
+        // A guard refusal outranks the availability note: it is the more
+        // specific reason, and it is the one that survives the daemon coming
+        // back.
         const auto verdict = facade_.canDisable(*id);
-        toggleAction_->setEnabled(verdict.allowed);
-        toggleAction_->setToolTip(
-            verdict.allowed ? QString{}
-                            : QString::fromStdString("cannot disable: " + verdict.reason));
+        if (!verdict.allowed) {
+            toggleAction_->setEnabled(false);
+            toggleAction_->setToolTip(QString::fromStdString("cannot disable: " + verdict.reason));
+            return;
+        }
+        gateOnDaemon(toggleAction_, true, daemonUp, blockedReason);
+        if (daemonUp) toggleAction_->setToolTip({});
         return;
     }
-    toggleAction_->setEnabled(true);
-    toggleAction_->setToolTip({});
+    gateOnDaemon(toggleAction_, true, daemonUp, blockedReason);
+    if (daemonUp) toggleAction_->setToolTip({});
+}
+
+// A daemon-backed verb stays VISIBLE and becomes disabled with the SHARED
+// sentence attached (docs/DESIGN.md §5.3: hide only what cannot apply to the
+// object at all; explain everything else). A control never authors its own
+// wording for a state the banner already names.
+void MainWindow::gateOnDaemon(QAction* action, bool enabled, bool daemonUp,
+                              const QString& blockedReason) {
+    action->setEnabled(enabled && daemonUp);
+    if (!daemonUp) action->setToolTip(blockedReason);
 }
 
 // Quit guard (spec §5.5): a firmware flash left running in the fwupd daemon
