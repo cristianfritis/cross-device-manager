@@ -29,6 +29,7 @@ class QListView;
 class QStackedWidget;
 class QTabWidget;
 class QTextEdit;
+class QToolBar;
 class QToolButton;
 class QTreeWidget;
 
@@ -81,6 +82,9 @@ class MainWindow final : public QMainWindow {
     QAction* refreshAction() const { return refreshAction_; }
     QAction* toggleAction() const { return toggleAction_; }
     QTabWidget* tabs() const { return tabs_; }
+    // The one toolbar. Tests read its ordered action list to assert which verbs
+    // the active tab shows, in what order, and that no separator is orphaned.
+    QToolBar* toolbar() const { return toolbar_; }
     QListView* modulesView() const { return modulesView_; }
     QTreeWidget* moduleDetailTree() const { return moduleDetailTree_; }
     QLineEdit* moduleFilterEdit() const { return moduleFilterEdit_; }
@@ -134,7 +138,17 @@ class MainWindow final : public QMainWindow {
     void updateUpdatesDetailPane();
     void updateSnapshotsDetailPane();
     void updateStatusBar();
-    void updateActionEnablement();  // tab-aware; folds the old updateToggleAction()
+    // The single owner of every toolbar action's presentation: visibility,
+    // enablement, dynamic text and tooltip. Runs on tab change, selection
+    // change, model reset, backend-availability change, and operation
+    // start/completion — nothing else may set those four properties.
+    void updateActionPresentation();
+    // A verb owned by another tab is absent, not greyed (DESIGN.md §5.3), so
+    // `disabled` keeps its one meaning: applies here, cannot run right now.
+    void applyTabVisibility(int tab);
+    // A separator is visible only between two visible actions, which hides the
+    // leading, trailing, and doubled cases without knowing the active tab.
+    void updateToolbarSeparators();
     void updateDeviceVerbEnablement(bool daemonUp, const QString& blockedReason);
     static void gateOnDaemon(QAction* action, bool enabled, bool daemonUp,
                              const QString& blockedReason);
@@ -172,6 +186,7 @@ class MainWindow final : public QMainWindow {
     app::SnapshotsVM& snapshotsVm_;
     runtime::EventBus& bus_;
     Actions actions_;
+    QToolBar* toolbar_ = nullptr;       // one stable toolbar; contents follow the tab
     DeviceListModel* model_ = nullptr;  // Qt-parented to this window
     QListView* listView_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;

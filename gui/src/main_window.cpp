@@ -13,6 +13,7 @@
 #include <QFont>
 #include <QFontDatabase>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeySequence>
@@ -26,6 +27,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QToolBar>
@@ -38,6 +40,23 @@
 
 namespace devmgr::gui {
 namespace {
+// Tab indices, named where the toolbar tags each verb with its owner. The
+// QTabWidget order is Devices | Modules | Updates | Snapshots.
+constexpr int kDevicesTab = 0;
+constexpr int kModulesTab = 1;
+constexpr int kUpdatesTab = 2;
+constexpr int kSnapshotsTab = 3;
+
+// A desktop theme icon with a QStyle standard-icon fallback (DESIGN.md §4.4).
+// If neither resolves, the action stays text-only: this product draws no one-off
+// artwork, and the label is the real affordance either way.
+void applyThemeIcon(QAction* action, const char* themeName, QStyle::StandardPixmap fallback,
+                    const QWidget& owner) {
+    QIcon icon = QIcon::fromTheme(QString::fromLatin1(themeName));
+    if (icon.isNull()) icon = owner.style()->standardIcon(fallback);
+    if (!icon.isNull()) action->setIcon(icon);
+}
+
 // Warning role (DESIGN.md §4.1) for the durable request banner: bold weight
 // pairs with the color so the signal never rides on color alone (§10), and
 // the color itself is picked from the palette's own light/dark reference
@@ -86,12 +105,32 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
       actions_(std::move(actions)) {
     setWindowTitle(QStringLiteral("Device Manager"));
 
-    auto* toolbar = addToolBar(QStringLiteral("main"));
-    toolbar->setMovable(false);
-    refreshAction_ = toolbar->addAction(QStringLiteral("Refresh"));
+    toolbar_ = addToolBar(QStringLiteral("main"));
+    toolbar_->setMovable(false);
+    // Text stays beside every icon (§4.4): destructive and advanced commands are
+    // never reduced to a glyph, and an action's visible text is the accessible
+    // name assistive technology reads (§10.1).
+    toolbar_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    // Each verb is tagged with the tab that owns it, so updateActionPresentation()
+    // can decide visibility by walking toolbar_->actions() rather than consulting
+    // a second table that could drift from this construction site. The toolbar's
+    // single linear order is grouped by owning tab and, within a tab, by §5.3
+    // frequency and consequence — only one tab's run is ever visible, so one
+    // order serves all four. Separators mark the group boundaries; a separator
+    // whose neighbours are hidden is suppressed by updateToolbarSeparators().
+    const auto verb = [this](int tab, const QString& text) {
+        QAction* action = toolbar_->addAction(text);
+        action->setData(tab);
+        return action;
+    };
+
+    // ----- Devices: refresh, persistent enable/disable, bind, unbind ----------
+    refreshAction_ = verb(kDevicesTab, QStringLiteral("Refresh"));
+    applyThemeIcon(refreshAction_, "view-refresh", QStyle::SP_BrowserReload, *this);
     connect(refreshAction_, &QAction::triggered, this, [this] { actions_.onRefresh(); });
 
-    toggleAction_ = toolbar->addAction(QStringLiteral("Disable"));
+    toolbar_->addSeparator();
+    toggleAction_ = verb(kDevicesTab, QStringLiteral("Disable"));
     toggleAction_->setEnabled(false);
     connect(toggleAction_, &QAction::triggered, this, [this] {
         const auto id = listVm_.selectedDeviceId();
@@ -104,51 +143,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (askConfirm(prompt)) actions_.onSetEnabled(*id, enable);
     });
 
-    loadModuleAction_ = toolbar->addAction(QStringLiteral("Load Module…"));
-    connect(loadModuleAction_, &QAction::triggered, this, [this] {
-        const QString name = actions_.textInput
-                                 ? actions_.textInput(QStringLiteral("Load module"), QString{})
-                                 : QInputDialog::getText(this, QStringLiteral("Load module"),
-                                                         QStringLiteral("Module name:"));
-        static const QRegularExpression valid(QStringLiteral("^[A-Za-z0-9_-]+$"));
-        if (!name.isEmpty() && valid.match(name).hasMatch())
-            actions_.onLoadModule(name.toStdString());
-    });
-
-    unloadModuleAction_ = toolbar->addAction(QStringLiteral("Unload"));
-    connect(unloadModuleAction_, &QAction::triggered, this, [this] {
-        const auto name = modulesVm_.selectedModule();
-        if (!name) return;
-        const auto verdict = facade_.canUnloadModule(*name);
-        if (!verdict.allowed) {
-            // StatusLineVM owns the status line (TTL + no wipe-by-wake) — see
-            // the identical TUI pattern (tui/src/tui_app.cpp) (Phase 5 review F-1).
-            bus_.publish(core::TaskCompletedEvent{
-                .taskId = "guard", .ok = false, .message = "cannot unload: " + verdict.reason});
-            return;
-        }
-        const QString prompt =
-            QStringLiteral("Unload module %1?").arg(QString::fromStdString(*name));
-        if (askConfirm(prompt)) actions_.onUnloadModule(*name);
-    });
-
-    unbindAction_ = toolbar->addAction(QStringLiteral("Unbind driver (advanced)"));
-    connect(unbindAction_, &QAction::triggered, this, [this] {
-        const auto id = listVm_.selectedDeviceId();
-        const auto device = id ? facade_.findById(*id) : std::nullopt;
-        if (!device) return;
-        const auto verdict = facade_.canDisable(*id);
-        if (!verdict.allowed) {
-            bus_.publish(core::TaskCompletedEvent{
-                .taskId = "guard", .ok = false, .message = "cannot unbind: " + verdict.reason});
-            return;
-        }
-        if (askConfirm(QStringLiteral("Unbind driver from %1? (not persistent)")
-                           .arg(QString::fromStdString(device->name))))
-            actions_.onUnbindDriver(*id);
-    });
-
-    bindAction_ = toolbar->addAction(QStringLiteral("Bind driver…"));
+    toolbar_->addSeparator();
+    bindAction_ = verb(kDevicesTab, QStringLiteral("Bind driver…"));
     connect(bindAction_, &QAction::triggered, this, [this] {
         const auto id = listVm_.selectedDeviceId();
         const auto device = id ? facade_.findById(*id) : std::nullopt;
@@ -168,7 +164,62 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             actions_.onBindDriver(*id, driver.toStdString());
     });
 
-    installUpdateAction_ = toolbar->addAction(QStringLiteral("Install Update"));
+    toolbar_->addSeparator();
+    unbindAction_ = verb(kDevicesTab, QStringLiteral("Unbind driver (advanced)"));
+    connect(unbindAction_, &QAction::triggered, this, [this] {
+        const auto id = listVm_.selectedDeviceId();
+        const auto device = id ? facade_.findById(*id) : std::nullopt;
+        if (!device) return;
+        const auto verdict = facade_.canDisable(*id);
+        if (!verdict.allowed) {
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard", .ok = false, .message = "cannot unbind: " + verdict.reason});
+            return;
+        }
+        if (askConfirm(QStringLiteral("Unbind driver from %1? (not persistent)")
+                           .arg(QString::fromStdString(device->name))))
+            actions_.onUnbindDriver(*id);
+    });
+
+    // ----- Modules: additive load, then destructive unload --------------------
+    loadModuleAction_ = verb(kModulesTab, QStringLiteral("Load Module…"));
+    connect(loadModuleAction_, &QAction::triggered, this, [this] {
+        const QString name = actions_.textInput
+                                 ? actions_.textInput(QStringLiteral("Load module"), QString{})
+                                 : QInputDialog::getText(this, QStringLiteral("Load module"),
+                                                         QStringLiteral("Module name:"));
+        static const QRegularExpression valid(QStringLiteral("^[A-Za-z0-9_-]+$"));
+        if (!name.isEmpty() && valid.match(name).hasMatch())
+            actions_.onLoadModule(name.toStdString());
+    });
+
+    toolbar_->addSeparator();
+    unloadModuleAction_ = verb(kModulesTab, QStringLiteral("Unload"));
+    connect(unloadModuleAction_, &QAction::triggered, this, [this] {
+        const auto name = modulesVm_.selectedModule();
+        if (!name) return;
+        const auto verdict = facade_.canUnloadModule(*name);
+        if (!verdict.allowed) {
+            // StatusLineVM owns the status line (TTL + no wipe-by-wake) — see
+            // the identical TUI pattern (tui/src/tui_app.cpp) (Phase 5 review F-1).
+            bus_.publish(core::TaskCompletedEvent{
+                .taskId = "guard", .ok = false, .message = "cannot unload: " + verdict.reason});
+            return;
+        }
+        const QString prompt =
+            QStringLiteral("Unload module %1?").arg(QString::fromStdString(*name));
+        if (askConfirm(prompt)) actions_.onUnloadModule(*name);
+    });
+
+    // ----- Updates: refresh, install, dismiss ---------------------------------
+    refreshUpdatesAction_ = verb(kUpdatesTab, QStringLiteral("Refresh Updates"));
+    applyThemeIcon(refreshUpdatesAction_, "view-refresh", QStyle::SP_BrowserReload, *this);
+    connect(refreshUpdatesAction_, &QAction::triggered, this,
+            [this] { pruneAndPushPending(facade_.refreshUpdates()); });
+
+    toolbar_->addSeparator();
+    installUpdateAction_ = verb(kUpdatesTab, QStringLiteral("Install Update"));
+    applyThemeIcon(installUpdateAction_, "system-software-update", QStyle::SP_ArrowDown, *this);
     connect(installUpdateAction_, &QAction::triggered, this, [this] {
         const auto args = updatesVm_.selectedInstall();
         if (!args) {
@@ -187,22 +238,21 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
                 facade_.installUpdate(args->providerId, args->candidateId, args->release));
     });
 
-    refreshUpdatesAction_ = toolbar->addAction(QStringLiteral("Refresh Updates"));
-    connect(refreshUpdatesAction_, &QAction::triggered, this,
-            [this] { pruneAndPushPending(facade_.refreshUpdates()); });
-
-    dismissRequestAction_ = toolbar->addAction(QStringLiteral("Dismiss Request"));
+    toolbar_->addSeparator();
+    dismissRequestAction_ = verb(kUpdatesTab, QStringLiteral("Dismiss Request"));
+    applyThemeIcon(dismissRequestAction_, "window-close", QStyle::SP_DialogCloseButton, *this);
     connect(dismissRequestAction_, &QAction::triggered, this, [this] {
         updatesVm_.dismissRequest();
         updateRequestBannerLabel();
-        updateActionEnablement();
+        updateActionPresentation();  // the dismissed request was this verb's object
     });
 
     // Snapshots verbs (Phase 7) — the TUI s/r/x keys as toolbar actions. Like
     // the Updates commands, they call the facade directly and keep custody in
     // pending_ (this window's own set, drained in the destructor). The ellipsis
     // on Create marks the label prompt (DESIGN.md §5.3).
-    createSnapshotAction_ = toolbar->addAction(QStringLiteral("Create Snapshot…"));
+    // ----- Snapshots: create, restore, inspect, delete -------------------------
+    createSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Create Snapshot…"));
     connect(createSnapshotAction_, &QAction::triggered, this, [this] {
         // Label is optional (an unlabeled manual snapshot is valid, matching the
         // TUI). The real QInputDialog reports Cancel through `ok` so an empty
@@ -219,7 +269,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
 
     // The ellipsis marks the preview step (DESIGN.md §5.3): restore now opens a
     // preview and only runs on explicit confirmation from it.
-    restoreSnapshotAction_ = toolbar->addAction(QStringLiteral("Restore Snapshot…"));
+    toolbar_->addSeparator();
+    restoreSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Restore Snapshot…"));
     connect(restoreSnapshotAction_, &QAction::triggered, this, [this] {
         const auto args = snapshotsVm_.selectedRestore();
         if (!args) {
@@ -247,7 +298,10 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         restoreSnapshotAction_->setEnabled(false);
     });
 
-    diffSnapshotAction_ = toolbar->addAction(QStringLiteral("Diff Snapshot"));
+    // Diff and History inspect rows already on screen — the advanced group, kept
+    // apart from the mutations above and the deletion below (§5.3, §10).
+    toolbar_->addSeparator();
+    diffSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Diff Snapshot"));
     connect(diffSnapshotAction_, &QAction::triggered, this, [this] {
         if (snapshotDiffPaneRequested_) {  // toggle back to the detail pane
             snapshotDiffPaneRequested_ = false;
@@ -268,12 +322,14 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         updateSnapshotsDetailPane();
     });
 
-    historySnapshotAction_ = toolbar->addAction(QStringLiteral("History"));
+    historySnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("History"));
     historySnapshotAction_->setCheckable(true);
     connect(historySnapshotAction_, &QAction::triggered, this,
             [this](bool on) { snapshotsVm_.setHistoryView(on); });
 
-    deleteSnapshotAction_ = toolbar->addAction(QStringLiteral("Delete Snapshot"));
+    toolbar_->addSeparator();
+    deleteSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Delete Snapshot"));
+    applyThemeIcon(deleteSnapshotAction_, "edit-delete", QStyle::SP_TrashIcon, *this);
     connect(deleteSnapshotAction_, &QAction::triggered, this, [this] {
         const auto args = snapshotsVm_.selectedDelete();
         if (!args) {
@@ -573,7 +629,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
 
     // Keyboard shortcuts (DESIGN.md §10 keyboard-complete operation): tab
     // switching plus the per-view primary verb. The verb actions are gated to
-    // their tab in updateActionEnablement(), so a shortcut fired off-tab is
+    // their tab in updateActionPresentation(), so a shortcut fired off-tab is
     // inert rather than acting on the wrong view.
     refreshAction_->setShortcut(QKeySequence::Refresh);              // F5
     toggleAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));  // enable/disable
@@ -603,7 +659,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // (signature fill / update refresh) fired so entering the tab never shows
     // stale data.
     connect(tabs_, &QTabWidget::currentChanged, this, [this](int index) {
-        updateActionEnablement();
+        updateActionPresentation();
         // Tab-aware composition (review I-1): entering Updates must fold
         // installProgressText() in; leaving it must fall back to the shared
         // status line — same as the taskExecuted wake path below.
@@ -631,7 +687,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             [this](const QModelIndex& current, const QModelIndex&) {
                 if (current.isValid()) listVm_.selectedRef() = current.row();
                 updateDetailPane();
-                updateActionEnablement();
+                updateActionPresentation();
             });
     // After a rebuild the VM has re-resolved the selection by DeviceId; the
     // reset cleared the view's currentIndex, so re-apply the VM's row and
@@ -639,7 +695,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     connect(model_, &QAbstractItemModel::modelReset, this, [this] {
         syncSelectionFromVm();
         updateDetailPane();
-        updateActionEnablement();
+        updateActionPresentation();
         // A device-side reset is also how a daemon outage (or its recovery)
         // reaches this page, so the note follows the list it explains.
         if (tabs_->currentIndex() == 0) updateDevicesBannerLabel();
@@ -649,14 +705,14 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             [this](const QModelIndex& current, const QModelIndex&) {
                 if (current.isValid()) modulesVm_.selectedRef() = current.row();
                 updateModuleDetailPane();
-                updateActionEnablement();
+                updateActionPresentation();
             });
     connect(moduleModel_, &QAbstractItemModel::modelReset, this, [this] {
         updateModuleDetailPane();
         // Module-side resets must not re-run the Devices-tab criticality probe
         // (reads /proc/self/mounts + sysfs) — Phase 5 review F-1.
         if (tabs_->currentIndex() == 1) {
-            updateActionEnablement();
+            updateActionPresentation();
             updateModulesBannerLabel();
         }
     });
@@ -665,20 +721,20 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
             [this](const QModelIndex& current, const QModelIndex&) {
                 if (current.isValid()) updatesVm_.selectedRef() = current.row();
                 updateUpdatesDetailPane();
-                updateActionEnablement();
+                updateActionPresentation();
             });
     connect(updateModel_, &QAbstractItemModel::modelReset, this, [this] {
         updateUpdatesDetailPane();
         // Update-side resets must not re-run the Devices/Modules-tab logic —
         // Phase 5 review F-1, extended to the Updates tab.
-        if (tabs_->currentIndex() == 2) updateActionEnablement();
+        if (tabs_->currentIndex() == 2) updateActionPresentation();
     });
 
     connect(snapshotsView_->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this](const QModelIndex& current, const QModelIndex&) {
                 if (current.isValid()) snapshotsVm_.selectedRef() = current.row();
                 updateSnapshotsDetailPane();
-                updateActionEnablement();
+                updateActionPresentation();
             });
     // A requested diff landed. Two consumers: the diff pane repaints, and a
     // pending restore preview finally has content to show — which is when its
@@ -689,7 +745,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (!pendingPreviewRestoreId_) return;
         const std::string id = *pendingPreviewRestoreId_;
         pendingPreviewRestoreId_.reset();
-        updateActionEnablement();  // release the duplicate-submission block
+        updateActionPresentation();  // release the duplicate-submission block
         QString prompt;
         for (const std::string& line : snapshotsVm_.previewLines())
             prompt += QString::fromStdString(line) + QLatin1Char('\n');
@@ -704,7 +760,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         // while the Snapshots tab is current (F-1 gating, extended here).
         if (tabs_->currentIndex() == 3) {
             updateSnapshotsBannerLabel();
-            updateActionEnablement();
+            updateActionPresentation();
         }
     });
 
@@ -723,13 +779,13 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         } else if (tabs_->currentIndex() == 2) {
             updateUpdatesBannerLabel();
             updateRequestBannerLabel();
-            updateActionEnablement();
+            updateActionPresentation();
         } else if (tabs_->currentIndex() == 3) {
             // A create/restore/delete completion wakes here (TaskCompletedEvent →
             // StatusLineVM); the banner reads the rebuilt metas, so refresh it
             // and re-gate the verbs while the Snapshots tab stays current.
             updateSnapshotsBannerLabel();
-            updateActionEnablement();
+            updateActionPresentation();
         }
     });
 
@@ -737,7 +793,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     updateModuleDetailPane();
     updateUpdatesDetailPane();
     updateSnapshotsDetailPane();
-    updateActionEnablement();
+    updateActionPresentation();
     // Devices is the tab the window opens on, so `currentChanged` never fires
     // for it and its note would stay unpainted until the user left and came
     // back — the daemon can already be unreachable at construction.
@@ -1075,8 +1131,15 @@ void MainWindow::updateStatusBar() {
     statusBar()->showMessage(QString::fromStdString(statusVm_.text()));
 }
 
-void MainWindow::updateActionEnablement() {
+// The single owner of every toolbar action's presentation. It reads only state
+// the ViewModels and BackendStatusVM have already resolved for this frame — no
+// sysfs, libkmod, D-Bus or filesystem work happens here, and no wording is
+// authored that a VM or the availability banner already owns.
+void MainWindow::updateActionPresentation() {
     const int tab = tabs_->currentIndex();
+    // First: which verbs are even on offer. A verb from another tab is absent,
+    // which is what lets `disabled` below keep its single meaning.
+    applyTabVisibility(tab);
     // Every verb below reaches the system through devmgrd. While it cannot be
     // reached they stay VISIBLE and become disabled with the reason attached
     // (docs/DESIGN.md §5.3: hide only what cannot apply to the object at all;
@@ -1088,20 +1151,27 @@ void MainWindow::updateActionEnablement() {
     const QString blockedReason = blocked ? QString::fromStdString(blocked->text) : QString{};
     const bool daemonUp = !blocked.has_value();
 
-    const bool onModules = tab == 1;
+    // Refresh re-reads the device list, so it belongs to Devices and to no other
+    // tab — it used to fire from all four and refresh a view the user was not
+    // looking at. A read stays usable while the daemon is degraded (§6), so it is
+    // deliberately not gated on daemonUp.
+    refreshAction_->setEnabled(tab == kDevicesTab);
+
+    const bool onModules = tab == kModulesTab;
     gateOnDaemon(loadModuleAction_, onModules, daemonUp, blockedReason);
     gateOnDaemon(unloadModuleAction_, onModules && modulesVm_.selectedModule().has_value(),
                  daemonUp, blockedReason);
 
-    installUpdateAction_->setEnabled(tab == 2 && updatesVm_.selectedInstall().has_value());
-    refreshUpdatesAction_->setEnabled(tab == 2);
-    dismissRequestAction_->setEnabled(tab == 2 && !updatesVm_.requestBanner().empty());
+    const bool onUpdates = tab == kUpdatesTab;
+    installUpdateAction_->setEnabled(onUpdates && updatesVm_.selectedInstall().has_value());
+    refreshUpdatesAction_->setEnabled(onUpdates);
+    dismissRequestAction_->setEnabled(onUpdates && !updatesVm_.requestBanner().empty());
 
     // Snapshot verbs are gated to the Snapshots tab; the per-selection refusal
     // (placeholder/corrupt/unsupported) is enforced on click and explained on
     // the status line — the TUI parity model, so safety refusals stay visible
     // (DESIGN.md §5.3) rather than being silently greyed out.
-    const bool onSnapshots = tab == 3;
+    const bool onSnapshots = tab == kSnapshotsTab;
     gateOnDaemon(createSnapshotAction_, onSnapshots, daemonUp, blockedReason);
     gateOnDaemon(restoreSnapshotAction_, onSnapshots, daemonUp, blockedReason);
     gateOnDaemon(deleteSnapshotAction_, onSnapshots, daemonUp, blockedReason);
@@ -1112,15 +1182,59 @@ void MainWindow::updateActionEnablement() {
     historySnapshotAction_->setEnabled(onSnapshots);
 
     updateDeviceVerbEnablement(daemonUp, blockedReason);
+    // Last: the group rules only make sense once every visibility above is
+    // settled, or a separator would be revealed next to a verb about to vanish.
+    updateToolbarSeparators();
+}
+
+// A verb owned by another tab is HIDDEN, not greyed (docs/DESIGN.md §5.3): with
+// fourteen verbs standing on every tab, `disabled` meant both "wrong tab" and
+// "applies here, cannot run right now", and the second — the one carrying the
+// shared unavailability sentence and the guard reasons — was the one that lost.
+// The owning tab was recorded on each action at construction, so this pass needs
+// no table of its own and cannot miss a verb that was added later.
+void MainWindow::applyTabVisibility(int tab) {
+    for (QAction* action : toolbar_->actions()) {
+        if (action->isSeparator()) continue;
+        action->setVisible(action->data().toInt() == tab);
+    }
+    // The one verb whose object can be missing while its own tab is active: with
+    // no dismissible request there is nothing to dismiss, which is exactly the
+    // §5.3 case where hiding is right rather than explaining. The condition is
+    // the VM's own — the GUI derives no rule here.
+    if (tab == kUpdatesTab) dismissRequestAction_->setVisible(!updatesVm_.requestBanner().empty());
+}
+
+// A separator earns its pixels only between two visible actions. Revealing one
+// when the NEXT visible action arrives handles the leading, trailing and doubled
+// cases in a single pass, without this function knowing which tab is active or
+// which groups it shows.
+void MainWindow::updateToolbarSeparators() {
+    QAction* pending = nullptr;  // last separator seen after a visible action
+    bool sawVisible = false;
+    for (QAction* action : toolbar_->actions()) {
+        if (action->isSeparator()) {
+            action->setVisible(false);
+            if (sawVisible) pending = action;
+            continue;
+        }
+        if (!action->isVisible()) continue;
+        if (pending != nullptr) {
+            pending->setVisible(true);
+            pending = nullptr;
+        }
+        sawVisible = true;
+    }
 }
 
 // The Devices-tab half: toggle/unbind/bind depend on the SELECTED device, so
 // they need the findById()/canDisable() probes the other tabs must not pay for
-// (T1 F-1 gating). Split out of updateActionEnablement so each half stays
+// (T1 F-1 gating). Split out of updateActionPresentation so each half stays
 // readable — and under the analyzer's complexity threshold — on its own.
 void MainWindow::updateDeviceVerbEnablement(bool daemonUp, const QString& blockedReason) {
     const auto id = listVm_.selectedDeviceId();
-    const auto device = (tabs_->currentIndex() == 0 && id) ? facade_.findById(*id) : std::nullopt;
+    const auto device =
+        (tabs_->currentIndex() == kDevicesTab && id) ? facade_.findById(*id) : std::nullopt;
     if (!device) {  // not on the Devices tab, or no device selected
         toggleAction_->setEnabled(false);
         toggleAction_->setText(QStringLiteral("Disable"));

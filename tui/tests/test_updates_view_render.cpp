@@ -16,6 +16,7 @@
 
 #include "tests/fixtures/backend_sentences.hpp"
 #include "tui/src/theme.hpp"
+#include "tui/src/views/pane_layout.hpp"  // wideLeftPaneWidth
 
 namespace devmgr::tui {
 namespace {
@@ -264,6 +265,60 @@ TEST(UpdatesViewRender, SentenceIsByteIdenticalAcrossColourModes) {
     for (int y = 0; y < monoScreen.dimy(); ++y)
         for (int x = 0; x < monoScreen.dimx(); ++x)
             EXPECT_EQ(monoScreen.PixelAt(x, y).foreground_color, ftxui::Color());
+}
+
+// ---------------------------------------------------------------------------
+// tab-contextual-toolbar: the legend advertises only keys with a target.
+// `d=dismiss` has nothing to act on until a request exists — a dead shortcut,
+// unlike `u=install`, which a guard may refuse and therefore stays listed and
+// explains itself on the status line.
+// ---------------------------------------------------------------------------
+
+// The same sample, told the real terminal width so the legend is actually fitted
+// to it (the tests above leave terminalWidth 0 = unbounded).
+views::UpdatesView sizedView(const std::string& requestBanner, Size s) {
+    views::UpdatesView v = sampleView(requestBanner);
+    v.terminalWidth = s.w;
+    v.leftPaneWidth = views::wideLeftPaneWidth(s.w);
+    return v;
+}
+
+TEST(UpdatesViewRender, DismissKeyUnlistedWithoutARequestAtEverySize) {
+    const Theme theme(ColorMode::Full, false);
+    for (Size s : kSizes) {
+        ftxui::Screen screen = renderTo(views::renderUpdatesView(sizedView("", s), theme), s);
+        EXPECT_FALSE(screenContains(screen, "d=dismiss")) << "size " << s.w << "x" << s.h;
+        // The keys that still have a target remain, and the way out survives the
+        // legend's abridgement at the minimum size.
+        EXPECT_TRUE(screenContains(screen, "u=install")) << "size " << s.w;
+        EXPECT_TRUE(screenContains(screen, "q=quit")) << "size " << s.w;
+        for (int y = 0; y < screen.dimy(); ++y)
+            EXPECT_LE(ftxui::string_width(rowText(screen, y)), s.w);
+    }
+}
+
+TEST(UpdatesViewRender, DismissKeyListedWithARequestAtEverySize) {
+    const Theme theme(ColorMode::Full, false);
+    for (Size s : kSizes) {
+        ftxui::Screen screen = renderTo(
+            views::renderUpdatesView(sizedView("unplug and replug the device", s), theme), s);
+        EXPECT_TRUE(screenContains(screen, "d=dismiss")) << "size " << s.w << "x" << s.h;
+        EXPECT_TRUE(screenContains(screen, "q=quit")) << "size " << s.w;
+        for (int y = 0; y < screen.dimy(); ++y)
+            EXPECT_LE(ftxui::string_width(rowText(screen, y)), s.w);
+    }
+}
+
+// A refusable key is NOT the same case: `u=install` stays discoverable even when
+// nothing installable is selected, because the refusal is what the user needs to
+// read (DESIGN.md §5.3).
+TEST(UpdatesViewRender, RefusableKeysStayListed) {
+    const Theme theme(ColorMode::Full, false);
+    views::UpdatesView v = sizedView("", {80, 24});
+    v.list = ftxui::text("(no updates available)");  // nothing selectable at all
+    ftxui::Screen screen = renderTo(views::renderUpdatesView(std::move(v), theme), {80, 24});
+    EXPECT_TRUE(screenContains(screen, "u=install"));
+    EXPECT_TRUE(screenContains(screen, "r=refresh"));
 }
 
 }  // namespace

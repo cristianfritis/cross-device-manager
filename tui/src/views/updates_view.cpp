@@ -12,8 +12,12 @@
 namespace devmgr::tui::views {
 
 namespace {
-std::vector<LegendEntry> updatesLegend(bool diagnosable) {
-    std::vector<LegendEntry> keys{"u=install", "r=refresh", "d=dismiss"};
+std::vector<LegendEntry> updatesLegend(bool dismissible, bool diagnosable) {
+    std::vector<LegendEntry> keys{"u=install", "r=refresh"};
+    // `d` has no object at all until a request exists, so it is not advertised —
+    // unlike `u`, which a guard may refuse and therefore stays listed and
+    // explains its refusal on the status line.
+    if (dismissible) keys.emplace_back("d=dismiss");
     if (diagnosable) keys.emplace_back("i=diagnostics", "i=diag");
     keys.emplace_back("q=quit");
     return keys;
@@ -25,8 +29,10 @@ ftxui::Element renderUpdatesView(UpdatesView v, const Theme& theme) {
     // Structure and decorators are the prior in-closure composition unchanged;
     // the request banner is still an optional bold row above the separator.
     // The diagnostics key is listed only while there is something to reveal
-    // (single legend, no dead shortcuts advertised).
+    // (single legend, no dead shortcuts advertised); `d=dismiss` follows the same
+    // rule against the request it would dismiss.
     const bool diagnosable = !v.diagnosticLines.empty();
+    const bool dismissible = !v.requestBanner.empty();
     // The glyph precedes the sentence so a degraded backend is recognizable with
     // no colour at all (§10); the role is additive on top of it.
     std::string bannerLine = " ";
@@ -38,7 +44,7 @@ ftxui::Element renderUpdatesView(UpdatesView v, const Theme& theme) {
     if (v.bannerRole) banner = banner | theme.decorate(*v.bannerRole);
     Elements top = {
         renderTabBar(v.activeTab, theme),
-        text(fitLegend("Updates", updatesLegend(diagnosable), v.terminalWidth)) | bold,
+        text(fitLegend("Updates", updatesLegend(dismissible, diagnosable), v.terminalWidth)) | bold,
         std::move(banner),
     };
     if (!v.requestBanner.empty()) top.push_back(text(" " + v.requestBanner + " ") | bold);

@@ -30,7 +30,10 @@ implementation.
   fixed button set.
 - The TUI is already contextual — its per-view legend lists only that view's
   keys — so this change is about bringing the GUI to the parity the TUI
-  already holds, not about inventing a new rule.
+  already holds, not about inventing a new rule. One TUI gap closes with it:
+  `d=dismiss` is advertised on Updates even when no dismissible request exists,
+  which is a key with no object rather than a key being refused. Keys a guard
+  would refuse stay listed and keep explaining themselves on the status line.
 
 Deliberately **not** in scope: changing any verb's own enablement predicate,
 its wording, or its keyboard shortcut. This change decides *which verbs are
@@ -40,20 +43,28 @@ present*, never *whether a present verb is enabled*.
 
 ### New Capabilities
 
-- None. This implements gating that `docs/DESIGN.md` §5.3/§10.1 already
-  specifies.
+- `gui-presentation` — no product capability is new; this implements gating
+  `docs/DESIGN.md` §5.3/§10.1 already specifies. The spec module is new only
+  because the GUI's own presentation rules had no home: they were split between
+  `ui-accessibility` and `docs/DESIGN.md`, with no requirement anywhere stating
+  which verbs a tab shows.
 
 ### Modified Capabilities
 
-- `gui-presentation` — toolbar composition becomes a function of the active
-  tab.
+- `tui-presentation` — a legend key with no object is unlisted; a key a guard
+  would refuse stays listed.
 
 ## Impact
 
-- `gui/src/main_window.cpp` — toolbar construction and the `currentChanged`
-  handler.
+- `gui/src/main_window.cpp` / `.hpp` — toolbar construction order, per-tab
+  action tagging, and one presentation function owning visibility, enablement,
+  text and tooltip.
 - `gui/tests/test_main_window.cpp` — per-tab assertions on which actions are
-  present, and that a verb absent from a tab is absent rather than disabled.
+  present, that a verb absent from a tab is absent rather than disabled, order,
+  separator hygiene, off-tab shortcut inertness, and visible-with-tooltip while
+  the daemon is down. Existing `isEnabled()`-only assertions gain `isVisible()`.
+- `tui/src/views/updates_view.cpp` and `tui/tests/test_updates_view_render.cpp`
+  — the `d=dismiss` gate and its render tests at 120x32, 100x28 and 80x24.
 - No VM, core, or daemon change: this is presentation only.
-- Risk is low and contained to the GUI. The main hazard is a verb silently
+- Risk is low and contained to the frontends. The main hazard is a verb silently
   disappearing from every tab, which the per-tab presence tests exist to catch.
