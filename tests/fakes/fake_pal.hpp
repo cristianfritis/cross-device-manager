@@ -14,41 +14,40 @@ class FakePal final : public pal::IDeviceEnumerator,
                       public pal::ISystemInfo {
    public:
     void seedDevice(core::Device device) {
-        enabled_[device.sysfsPath] = true;
+        enabled_[device.nativeId] = true;
         devices_.push_back(std::move(device));
     }
-    void seedDriver(const std::string& sysfsPath, core::Driver driver) {
-        drivers_[sysfsPath].push_back(std::move(driver));
+    void seedDriver(const std::string& nativeId, core::Driver driver) {
+        drivers_[nativeId].push_back(std::move(driver));
     }
     void seedLoadedModule(core::LoadedModule m) { loaded_.push_back(std::move(m)); }
-    bool enabled(const std::string& sysfsPath) const {
-        const auto it = enabled_.find(sysfsPath);
+    bool enabled(const std::string& nativeId) const {
+        const auto it = enabled_.find(nativeId);
         return it != enabled_.end() && it->second;
     }
 
     core::Result<std::vector<core::Device>> enumerate() override { return devices_; }
 
-    core::Result<std::optional<std::string>> setEnabled(const std::string& sysfsPath, bool enabled,
+    core::Result<std::optional<std::string>> setEnabled(const std::string& nativeId, bool enabled,
                                                         const std::string& hint) override {
-        setEnabledCalls.push_back({sysfsPath, enabled, hint});
-        const auto it = enabled_.find(sysfsPath);
+        setEnabledCalls.push_back({nativeId, enabled, hint});
+        const auto it = enabled_.find(nativeId);
         if (it == enabled_.end())
-            return core::makeError(core::Error::Code::NotFound, "no such device: " + sysfsPath);
+            return core::makeError(core::Error::Code::NotFound, "no such device: " + nativeId);
         it->second = enabled;
         return unboundDriverResult;
     }
-    core::Result<void> bindDriver(const std::string& sysfsPath,
-                                  const std::string& driver) override {
-        bindCalls.push_back({sysfsPath, driver});
+    core::Result<void> bindDriver(const std::string& nativeId, const std::string& driver) override {
+        bindCalls.push_back({nativeId, driver});
         return nextVoid;
     }
-    core::Result<void> unbindDriver(const std::string& sysfsPath) override {
-        unbindCalls.push_back(sysfsPath);
+    core::Result<void> unbindDriver(const std::string& nativeId) override {
+        unbindCalls.push_back(nativeId);
         return nextVoid;
     }
 
     core::Result<std::vector<core::Driver>> driversFor(const core::Device& device) override {
-        const auto it = drivers_.find(device.sysfsPath);
+        const auto it = drivers_.find(device.nativeId);
         if (it == drivers_.end()) return std::vector<core::Driver>{};
         return it->second;
     }
@@ -82,12 +81,12 @@ class FakePal final : public pal::IDeviceEnumerator,
     core::Result<Info> query() override { return info; }
 
     struct SetEnabledCall {
-        std::string sysfsPath;
+        std::string nativeId;
         bool enabled;
         std::string hint;
     };
     struct BindCall {
-        std::string sysfsPath;
+        std::string nativeId;
         std::string driver;
     };
     std::vector<SetEnabledCall> setEnabledCalls;

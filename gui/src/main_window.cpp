@@ -151,7 +151,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         if (!device) return;
         QString prefill = QString::fromStdString(device->boundDriver.value_or(""));
         if (prefill.isEmpty()) {
-            const auto candidates = facade_.driverInfo(*id);  // modalias dropdown data
+            const auto candidates = facade_.driverInfo(*id);  // hardware-ID dropdown data
             if (!candidates.empty()) prefill = QString::fromStdString(candidates.front().name);
         }
         const QString driver =

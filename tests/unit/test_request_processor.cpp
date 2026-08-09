@@ -71,7 +71,7 @@ class RequestProcessorTest : public ::testing::Test {
 
         // Seed FakePal with the device so enumerate() and setEnabled() find it
         core::Device d;
-        d.sysfsPath = devicePath_;
+        d.nativeId = devicePath_;
         d.bus = core::BusType::Usb;
         d.vendorId = "1d6b";
         d.productId = "0002";
@@ -122,7 +122,7 @@ TEST_F(RequestProcessorTest, HappyPathDisablesViaControllerWithCanonicalPath) {
     auto r = p.setDeviceEnabled(":1.42", devicePath_, false);
     ASSERT_TRUE(r.has_value()) << r.error().message;
     ASSERT_EQ(pal_.setEnabledCalls.size(), 1u);
-    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, devicePath_);
+    EXPECT_EQ(pal_.setEnabledCalls[0].nativeId, devicePath_);
     EXPECT_FALSE(pal_.setEnabledCalls[0].enabled);
     ASSERT_EQ(authority_.actions.size(), 1U);
     EXPECT_EQ(authority_.actions[0], daemon::kActionSetDeviceEnabled);
@@ -319,7 +319,7 @@ TEST_F(RequestProcessorTest, EnableMatchesReplugAtNewSysfsPathByDeviceKey) {
     const std::string pathB = makeDeviceDir(
         "usb1/1-9", {{"idVendor", "1d6b"}, {"idProduct", "0002"}, {"serial", "abc123"}});
     core::Device moved;
-    moved.sysfsPath = pathB;
+    moved.nativeId = pathB;
     moved.bus = core::BusType::Usb;
     moved.vendorId = "1d6b";
     moved.productId = "0002";
@@ -338,7 +338,7 @@ TEST_F(RequestProcessorTest, DisableOfUnenumeratedDeviceFallsBackToSysfsKey) {
     const std::string ghost = makeDeviceDir(
         "usb9/9-1", {{"idVendor", "0x1234"}, {"idProduct", "0x5678"}, {"serial", "GH0ST"}});
     devmgr::core::Device seeded;
-    seeded.sysfsPath = ghost;
+    seeded.nativeId = ghost;
     pal_.seedDevice(seeded);  // controller side only
     EmptyEnumerator empty;
     devmgr::daemon::RequestProcessor processor(pal_, prober_, authority_, pal_, empty, *store_,

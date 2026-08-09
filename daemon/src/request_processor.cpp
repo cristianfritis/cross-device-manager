@@ -77,7 +77,7 @@ core::Result<void> RequestProcessor::applyDisable(const std::string& canonical) 
     auto allResult = enumerator_.enumerate();
     const std::vector<core::Device> all = allResult ? *allResult : std::vector<core::Device>{};
     const auto device =
-        std::ranges::find_if(all, [&](const core::Device& d) { return d.sysfsPath == canonical; });
+        std::ranges::find_if(all, [&](const core::Device& d) { return d.nativeId == canonical; });
     core::DisabledDeviceEntry entry;
     if (device != all.end()) {
         entry.key = services::makeDeviceKey(*device, all);

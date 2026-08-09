@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 
+#include "devmgr/core/identity.hpp"
+
 namespace devmgr::core {
 namespace {
 
@@ -35,11 +37,6 @@ std::string trimmed(std::string value) {
     while (!value.empty() && isBlank(static_cast<unsigned char>(value.back()))) value.pop_back();
     const auto start = value.find_first_not_of(" \t\n\v\f\r");
     return start == std::string::npos ? std::string{} : value.substr(start);
-}
-
-std::string lastSegment(const std::string& path) {
-    const auto pos = path.find_last_of('/');
-    return pos == std::string::npos ? path : path.substr(pos + 1);
 }
 
 bool equalsIgnoringCase(std::string_view a, std::string_view b) {
@@ -90,12 +87,13 @@ bool looksLikeUsbPosition(std::string_view value) {
 }
 
 // True when Device::name is the mapper's last-resort sysname fallback rather
-// than a name a human wrote. Compared against the sysfs path first because that
-// is how the rest of the codebase defines "positional" (services::positionFor);
-// the shape checks then cover devices whose path is unknown to us.
+// than a name a human wrote. Compared against the identifier tail first because
+// that is how the rest of the codebase defines "positional"
+// (services::positionFor); the shape checks then cover devices whose identifier
+// is unknown to us.
 bool nameIsPositional(const Device& device) {
     if (device.name.empty()) return true;
-    const std::string position = lastSegment(device.sysfsPath);
+    const std::string position = identityTail(device.nativeId);
     if (!position.empty() && device.name == position) return true;
     return looksLikePciAddress(device.name) || looksLikeUsbPosition(device.name);
 }
@@ -203,14 +201,14 @@ std::string displayDeviceName(const Device& device) {
 }
 
 std::string displayDeviceAddress(const Device& device) {
-    return lastSegment(device.sysfsPath);
+    return identityTail(device.nativeId);
 }
 
 std::string displayDeviceIdentity(const Device& device) {
     std::string ids;
     if (!device.vendorId.empty() || !device.productId.empty())
         ids = device.vendorId + ":" + device.productId;
-    std::string position = lastSegment(device.sysfsPath);
+    std::string position = identityTail(device.nativeId);
     if (ids.empty()) return position;
     if (position.empty()) return ids;
     return ids + " · " + position;

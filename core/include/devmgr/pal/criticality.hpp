@@ -6,9 +6,10 @@
 
 namespace devmgr::pal {
 
-// Inputs to services::evaluateDisable. All entries are canonical sysfs device
-// paths (symlinks resolved), so they are prefix-comparable with a target
-// device's sysfsPath. Gathered fresh per check — never cached.
+// Inputs to services::evaluateDisable. All entries are platform-native device
+// identifiers in the same canonical form the enumerator produces, so they are
+// prefix-comparable with a target device's nativeId. Gathered fresh per check —
+// never cached.
 struct CriticalityFacts {
     std::vector<std::string> rootBackingPaths;  // devices backing the / filesystem
     std::vector<std::string> bootBackingPaths;  // devices backing /boot (empty if none)

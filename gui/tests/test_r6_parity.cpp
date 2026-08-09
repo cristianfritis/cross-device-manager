@@ -35,12 +35,12 @@ namespace {
 
 constexpr const char* kRootDiskPath = "/sys/devices/pci0000:00/0000:c1:00.0";
 
-core::Device device(std::string id, core::BusType bus, std::string name, std::string sysfsPath) {
+core::Device device(std::string id, core::BusType bus, std::string name, std::string nativeId) {
     core::Device d;
     d.id = core::DeviceId{std::move(id)};
     d.bus = bus;
     d.name = std::move(name);
-    d.sysfsPath = std::move(sysfsPath);
+    d.nativeId = std::move(nativeId);
     d.vendorId = "1022";
     d.productId = "151b";
     d.status = core::DeviceStatus::Active;

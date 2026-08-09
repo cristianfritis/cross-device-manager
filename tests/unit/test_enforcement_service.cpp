@@ -44,7 +44,7 @@ class EnforcementServiceTest : public ::testing::Test {
     static Device usbDevice(const std::string& path, const std::string& serial) {
         Device d;
         d.bus = BusType::Usb;
-        d.sysfsPath = path;
+        d.nativeId = path;
         d.vendorId = "046d";
         d.productId = "c52b";
         d.serial = serial;
@@ -55,7 +55,7 @@ class EnforcementServiceTest : public ::testing::Test {
         return DisabledDeviceEntry{.key = devmgr::services::makeDeviceKey(d),
                                    .mechanism = "authorized",
                                    .lastDriver = "",
-                                   .lastSysfsPath = d.sysfsPath,
+                                   .lastSysfsPath = d.nativeId,
                                    .disabledAtUtc = 1,
                                    .guardSuspended = false};
     }
@@ -80,7 +80,7 @@ TEST_F(EnforcementServiceTest, SweepReappliesDisableToReenabledDevice) {
     ASSERT_TRUE(store_->upsert(entryFor(d)).has_value());
     service().sweep();
     ASSERT_EQ(pal_.setEnabledCalls.size(), 1U);
-    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, d.sysfsPath);
+    EXPECT_EQ(pal_.setEnabledCalls[0].nativeId, d.nativeId);
     EXPECT_FALSE(pal_.setEnabledCalls[0].enabled);
 }
 
@@ -101,8 +101,8 @@ TEST_F(EnforcementServiceTest, HotplugReappearanceAtNewPortReappliesAndUpdatesPa
     auto svc = service();
     svc.onHotplug({devmgr::pal::HotplugEvent::Action::Added, moved});
     ASSERT_EQ(pal_.setEnabledCalls.size(), 1U);
-    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, moved.sysfsPath);
-    EXPECT_EQ(store_->entries()[0].lastSysfsPath, moved.sysfsPath);
+    EXPECT_EQ(pal_.setEnabledCalls[0].nativeId, moved.nativeId);
+    EXPECT_EQ(store_->entries()[0].lastSysfsPath, moved.nativeId);
 }
 
 TEST_F(EnforcementServiceTest, GuardRefusalSuspendsInsteadOfEnforcing) {
@@ -110,7 +110,7 @@ TEST_F(EnforcementServiceTest, GuardRefusalSuspendsInsteadOfEnforcing) {
     pal_.seedDevice(d);
     ASSERT_TRUE(store_->upsert(entryFor(d)).has_value());
     // Topology changed: this device now hosts the root disk.
-    prober_.next = devmgr::pal::CriticalityFacts{.rootBackingPaths = {d.sysfsPath + "/disk"}};
+    prober_.next = devmgr::pal::CriticalityFacts{.rootBackingPaths = {d.nativeId + "/disk"}};
     service().sweep();
     EXPECT_TRUE(pal_.setEnabledCalls.empty());
     EXPECT_TRUE(store_->entries()[0].guardSuspended);
@@ -155,7 +155,7 @@ struct EmptyEnumerator final : devmgr::pal::IDeviceEnumerator {
 TEST_F(EnforcementServiceTest, SweepFallsBackToSysfsWhenEnumeratorMissesDevice) {
     const std::string path = makeSysfsDevice("usb2/2-1", "1");  // kernel re-enabled it
     Device seeded;
-    seeded.sysfsPath = path;
+    seeded.nativeId = path;
     pal_.seedDevice(seeded);  // controller side only — the enumerator below sees nothing
     auto e = entryFor(usbDevice(path, "AB12"));
     ASSERT_TRUE(store_->upsert(e).has_value());
@@ -163,7 +163,7 @@ TEST_F(EnforcementServiceTest, SweepFallsBackToSysfsWhenEnumeratorMissesDevice) 
     EnforcementService svc(empty, pal_, prober_, *store_, mutex_);
     svc.sweep();
     ASSERT_EQ(pal_.setEnabledCalls.size(), 1U);
-    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, path);
+    EXPECT_EQ(pal_.setEnabledCalls[0].nativeId, path);
     EXPECT_FALSE(pal_.setEnabledCalls[0].enabled);
 }
 
@@ -171,7 +171,7 @@ TEST_F(EnforcementServiceTest, SweepFallbackSkipsDeviceAlreadyDisabledOnDisk) {
     // authorized == "0" => deviceFromSysfs reports Disabled => nothing to re-apply.
     const std::string path = makeSysfsDevice("usb2/2-1", "0");
     Device seeded;
-    seeded.sysfsPath = path;
+    seeded.nativeId = path;
     pal_.seedDevice(seeded);
     ASSERT_TRUE(store_->upsert(entryFor(usbDevice(path, "AB12"))).has_value());
     EmptyEnumerator empty;
@@ -192,7 +192,7 @@ TEST_F(EnforcementServiceTest, SweepFallbackReappliesUnbindMechanism) {
     ASSERT_FALSE(ec) << ec.message();
 
     Device seeded;
-    seeded.sysfsPath = path;
+    seeded.nativeId = path;
     pal_.seedDevice(seeded);  // controller side only — enumerator below sees nothing
 
     auto e = entryFor(usbDevice(path, "SER-unbind"));
@@ -206,7 +206,7 @@ TEST_F(EnforcementServiceTest, SweepFallbackReappliesUnbindMechanism) {
 
     // FakePal's controller records setEnabled calls — assert the disable landed.
     ASSERT_FALSE(pal_.setEnabledCalls.empty());
-    EXPECT_EQ(pal_.setEnabledCalls.back().sysfsPath, path);
+    EXPECT_EQ(pal_.setEnabledCalls.back().nativeId, path);
     EXPECT_FALSE(pal_.setEnabledCalls.back().enabled);
 }
 

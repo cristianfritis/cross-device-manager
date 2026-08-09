@@ -14,7 +14,7 @@ add_library(devmgr_gui STATIC
     src/update_list_model.cpp)
 target_include_directories(devmgr_gui PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(devmgr_gui
-    PUBLIC devmgr_app devmgr_core devmgr_pal_linux Qt6::Widgets)
+    PUBLIC devmgr_app devmgr_core ${DEVMGR_PLATFORM_LIB} Qt6::Widgets)
 target_compile_features(devmgr_gui PUBLIC cxx_std_20)
 
 add_executable(devmgr_gui_tests

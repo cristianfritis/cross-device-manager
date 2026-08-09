@@ -76,9 +76,9 @@ const char* displayCriticality(Criticality level) {
     return "";
 }
 
-Criticality classifyDevice(const pal::CriticalityFacts& facts, const std::string& sysfsPath) {
-    return services::evaluateDisable(facts, sysfsPath).allowed ? Criticality::Ordinary
-                                                               : Criticality::Essential;
+Criticality classifyDevice(const pal::CriticalityFacts& facts, const std::string& nativeId) {
+    return services::evaluateDisable(facts, nativeId).allowed ? Criticality::Ordinary
+                                                              : Criticality::Essential;
 }
 
 Criticality classifyModule(const std::string& name, long refCount,

@@ -137,10 +137,10 @@ TEST_F(StateStoreTest, FindForMatchesBySerialTupleOrLastPath) {
     d.vendorId = "046d";
     d.productId = "c52b";
     d.serial = "AB12";
-    d.sysfsPath = "/sys/devices/pci0000:00/usb1/1-9";  // different port: serial tier wins
+    d.nativeId = "/sys/devices/pci0000:00/usb1/1-9";  // different port: serial tier wins
     ASSERT_TRUE(store.findFor(d).has_value());
     d.serial = "OTHER";
     EXPECT_FALSE(store.findFor(d).has_value());
-    d.sysfsPath = "/sys/devices/pci0000:00/usb2/2-1";  // lastSysfsPath fallback
+    d.nativeId = "/sys/devices/pci0000:00/usb2/2-1";  // lastSysfsPath fallback
     EXPECT_TRUE(store.findFor(d).has_value());
 }

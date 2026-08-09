@@ -46,7 +46,7 @@ core::Result<void> DbusPrivilegedChannel::setDeviceEnabled(const core::Device& d
                                         sdbus::ObjectPath{kObjectPath});
         proxy->callMethod("SetDeviceEnabled")
             .onInterface(sdbus::InterfaceName{kInterfaceName})
-            .withArguments(device.sysfsPath, enabled)
+            .withArguments(device.nativeId, enabled)
             .withTimeout(std::chrono::minutes(2));
         return {};
     } catch (const sdbus::Error& e) {
@@ -112,7 +112,7 @@ core::Result<void> DbusPrivilegedChannel::bindDriver(const core::Device& device,
         auto proxy = makeProxy(bus_);
         proxy->callMethod("BindDriver")
             .onInterface(sdbus::InterfaceName{kInterfaceName})
-            .withArguments(device.sysfsPath, driverName)
+            .withArguments(device.nativeId, driverName)
             .withTimeout(std::chrono::minutes(2));
         return {};
     } catch (const sdbus::Error& e) {
@@ -126,7 +126,7 @@ core::Result<void> DbusPrivilegedChannel::unbindDriver(const core::Device& devic
         auto proxy = makeProxy(bus_);
         proxy->callMethod("UnbindDriver")
             .onInterface(sdbus::InterfaceName{kInterfaceName})
-            .withArguments(device.sysfsPath)
+            .withArguments(device.nativeId)
             .withTimeout(std::chrono::minutes(2));
         return {};
     } catch (const sdbus::Error& e) {
@@ -153,7 +153,7 @@ core::Result<std::vector<core::DisabledDeviceEntry>> DbusPrivilegedChannel::list
             e.key.position = m.at("position").get<std::string>();
             e.mechanism = m.at("mechanism").get<std::string>();
             e.lastDriver = m.at("last_driver").get<std::string>();
-            e.lastSysfsPath = m.at("last_sysfs_path").get<std::string>();
+            e.lastSysfsPath = m.at("last_sysfs_path").get<std::string>();  // frozen contract key
             e.disabledAtUtc = m.at("disabled_at_utc").get<std::int64_t>();
             e.guardSuspended = m.at("guard_suspended").get<bool>();
             out.push_back(std::move(e));

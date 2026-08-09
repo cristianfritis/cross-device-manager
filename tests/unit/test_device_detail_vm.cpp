@@ -59,7 +59,7 @@ TEST(DeviceDetailVmTest, DriverSectionListsBoundFirstWithSignature) {
     d.id = core::DeviceId{"u1"};
     d.bus = core::BusType::Usb;
     d.name = "Keyboard";
-    d.sysfsPath = "/sys/devices/usb1/1-3";
+    d.nativeId = "/sys/devices/usb1/1-3";
     d.status = core::DeviceStatus::Active;
     d.boundDriver = "usbhid";
     pal.seedDevice(d);
@@ -70,8 +70,8 @@ TEST(DeviceDetailVmTest, DriverSectionListsBoundFirstWithSignature) {
     bound.signer = "Build key";
     core::Driver candidate;
     candidate.name = "dummy";
-    pal.seedDriver(d.sysfsPath, bound);  // bound first => "bound first" ordering
-    pal.seedDriver(d.sysfsPath, candidate);
+    pal.seedDriver(d.nativeId, bound);  // bound first => "bound first" ordering
+    pal.seedDriver(d.nativeId, candidate);
 
     app::DeviceService svc(bus);
     app::ApplicationFacade facade(pal, scheduler, bus, svc, nullptr, nullptr, &pal, nullptr);
@@ -101,7 +101,7 @@ TEST(DeviceDetailVmTest, BusCasingAndModaliasSpacingAreConsistent) {
     d.bus = core::BusType::Usb;
     d.name = "Mouse";
     d.status = core::DeviceStatus::Active;
-    d.modalias = "usb:v1D6Bp0002";
+    d.hardwareId = "usb:v1D6Bp0002";
     pal.seedDevice(d);
     app::DeviceService svc(bus);
     app::ApplicationFacade facade(pal, scheduler, bus, svc);
@@ -130,7 +130,7 @@ TEST(DeviceDetailVmTest, LeadsWithCanonicalNameThenAddressVidPidAndId) {
     d.id = core::DeviceId{"pci-0000:c5:00.4"};
     d.name = "0000:c5:00.4";  // positional: the mapper's last-resort fallback
     d.bus = core::BusType::Pci;
-    d.sysfsPath = "/sys/devices/pci0000:c0/0000:c0:08.3/0000:c5:00.4";
+    d.nativeId = "/sys/devices/pci0000:c0/0000:c0:08.3/0000:c5:00.4";
     d.vendorId = "1022";
     d.productId = "15b8";
     d.properties["ID_VENDOR_FROM_DATABASE"] = "Advanced Micro Devices, Inc. [AMD]";

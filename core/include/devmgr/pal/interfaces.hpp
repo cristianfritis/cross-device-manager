@@ -34,7 +34,7 @@ class IHotplugMonitor {
 class IDeviceController {
    public:
     virtual ~IDeviceController() = default;
-    // Identity is the device's canonical sysfs path. Phase 5 mechanisms:
+    // Identity is the device's Device::nativeId. Phase 5 mechanisms:
     //  - `authorized` attr present (USB): write 0/1. Returns nullopt.
     //  - otherwise: disable = unbind current driver (returns its name, ""
     //    if none was bound — the value signals mechanism "unbind");
@@ -42,19 +42,19 @@ class IDeviceController {
     //    and the attr exists), then bus drivers_probe; override cleared even
     //    on failure. Returns nullopt on enables and authorized-mechanism ops.
     virtual core::Result<std::optional<std::string>> setEnabled(
-        const std::string& sysfsPath, bool enabled, const std::string& rebindDriverHint) = 0;
+        const std::string& nativeId, bool enabled, const std::string& rebindDriverHint) = 0;
     // Surgical verbs (never persisted by callers).
-    virtual core::Result<void> bindDriver(const std::string& sysfsPath,
+    virtual core::Result<void> bindDriver(const std::string& nativeId,
                                           const std::string& driverName) = 0;
-    virtual core::Result<void> unbindDriver(const std::string& sysfsPath) = 0;
+    virtual core::Result<void> unbindDriver(const std::string& nativeId) = 0;
 };
 
 class IDriverManager {
    public:
     virtual ~IDriverManager() = default;
-    // Takes the full Device: modalias lookup + driver-symlink resolution need
-    // modalias and sysfsPath (spec §4.2 refinement; same rationale as
-    // IPrivilegedChannel taking Device). Returns the modalias candidate list
+    // Takes the full Device: hardware-ID lookup + driver resolution need
+    // hardwareId and nativeId (spec §4.2 refinement; same rationale as
+    // IPrivilegedChannel taking Device). Returns the hardware-ID candidate list
     // ordered per the pinned contract (kmod_driver_manager.hpp): the FIRST
     // element is the currently-bound (or builtin) driver when one exists —
     // both frontends' bind-prefill depends on that ordering.
@@ -64,7 +64,7 @@ class IDriverManager {
     virtual core::Result<std::vector<core::LoadedModule>> listLoadedModules() = 0;
     virtual core::Result<core::Driver> moduleInfo(const std::string& name) = 0;
     virtual core::Result<core::ModprobeInfo> modprobeInfo(const std::string& name) = 0;
-    // Canonical sysfs device paths bound via any of the module's drivers.
+    // Device::nativeId of every device bound via any of the module's drivers.
     virtual core::Result<std::vector<std::string>> devicesUsingModule(const std::string& name) = 0;
 };
 
@@ -115,7 +115,7 @@ class ISystemInfo {
 class IPrivilegedChannel {
    public:
     virtual ~IPrivilegedChannel() = default;
-    // Takes the full Device (the channel needs sysfsPath on the wire and name
+    // Takes the full Device (the channel needs nativeId on the wire and name
     // for messages). Blocking: interactive polkit auth may take ~minutes —
     // call from a TaskScheduler worker, never a UI thread.
     virtual core::Result<void> setDeviceEnabled(const core::Device& device, bool enabled) = 0;

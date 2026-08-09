@@ -30,7 +30,7 @@ add_executable(devmgr-tui
 target_include_directories(devmgr-tui PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(devmgr-tui
     PRIVATE devmgr_tui_render
-            devmgr_app devmgr_core devmgr_pal_linux
+            devmgr_app devmgr_core ${DEVMGR_PLATFORM_LIB}
             ftxui::component ftxui::dom ftxui::screen)
 target_compile_features(devmgr-tui PRIVATE cxx_std_20)
 

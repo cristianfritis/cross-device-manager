@@ -93,7 +93,7 @@ services::GuardVerdict ApplicationFacade::canDisable(const core::DeviceId& id) c
     if (!device) return {};
     auto facts = prober_->probe();
     if (!facts) return {};  // advisory unavailable → allowed; daemon is authoritative
-    return services::evaluateDisable(*facts, device->sysfsPath);
+    return services::evaluateDisable(*facts, device->nativeId);
 }
 
 std::optional<pal::CriticalityFacts> ApplicationFacade::criticalityFacts() const {

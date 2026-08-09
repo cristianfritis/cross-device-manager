@@ -11,7 +11,7 @@ namespace devmgr::test {
 class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
    public:
     core::Result<void> setDeviceEnabled(const core::Device& device, bool enabled) override {
-        calls.push_back({device.sysfsPath, enabled});
+        calls.push_back({device.nativeId, enabled});
         return next;
     }
     core::Result<void> loadModule(const std::string& name) override {
@@ -23,11 +23,11 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
         return next;
     }
     core::Result<void> bindDriver(const core::Device& device, const std::string& driver) override {
-        moduleCalls.push_back("bind:" + device.sysfsPath + ":" + driver);
+        moduleCalls.push_back("bind:" + device.nativeId + ":" + driver);
         return next;
     }
     core::Result<void> unbindDriver(const core::Device& device) override {
-        moduleCalls.push_back("unbind:" + device.sysfsPath);
+        moduleCalls.push_back("unbind:" + device.nativeId);
         return next;
     }
     core::Result<std::vector<core::DisabledDeviceEntry>> listDisabledDevices() override {
@@ -57,7 +57,7 @@ class FakePrivilegedChannel final : public pal::IPrivilegedChannel {
         return nextDiff;
     }
     struct Call {
-        std::string sysfsPath;
+        std::string nativeId;
         bool enabled;
     };
     std::vector<Call> calls;

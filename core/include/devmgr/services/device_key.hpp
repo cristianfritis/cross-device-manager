@@ -8,9 +8,10 @@ namespace devmgr::services {
 // Stable serialization bus string (independent of core::to_string casing).
 std::string keyBusString(core::BusType bus);
 
-// USB: last path segment when it looks like a port chain ("2-1.4").
-// Everything else: last path segment verbatim ("0000:03:00.0").
-std::string positionFor(core::BusType bus, const std::string& sysfsPath);
+// The identifier's trailing segment (core::identityTail): a USB port chain
+// ("2-1.4"), a PCI address ("0000:03:00.0"), or whatever the platform's last
+// segment is.
+std::string positionFor(core::BusType bus, const std::string& nativeId);
 
 // Plain key from one device.
 core::DeviceKey makeDeviceKey(const core::Device& device);

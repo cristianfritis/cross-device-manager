@@ -201,8 +201,8 @@ core::Result<std::vector<core::Driver>> KmodDriverManager::driversFor(const core
     if (auto r = impl_->ready(); !r) return tl::unexpected(r.error());
     std::vector<core::Driver> out;
     // Bound (or builtin) driver first, then modalias candidates.
-    if (auto bound = impl_->resolveBoundDriver(device.sysfsPath)) out.push_back(std::move(*bound));
-    impl_->appendModaliasCandidates(device.modalias, out);
+    if (auto bound = impl_->resolveBoundDriver(device.nativeId)) out.push_back(std::move(*bound));
+    impl_->appendModaliasCandidates(device.hardwareId, out);
     return out;
 }
 

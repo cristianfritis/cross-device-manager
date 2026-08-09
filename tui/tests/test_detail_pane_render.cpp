@@ -2,7 +2,7 @@
 //
 // The pane shows identity rows a device cannot be identified without — the
 // canonical Name, the kernel Address, VID:PID, the app's Id — plus values that
-// are routinely longer than the pane is wide (modalias, sysfs path, signer). A
+// are routinely longer than the pane is wide (hardware ID, native identifier, signer). A
 // plain ftxui::text runs such a value to the screen edge and stops mid-token
 // with nothing to say it was cut; these tests pin the bounded behaviour at
 // 120x32 / 100x28 / 80x24.

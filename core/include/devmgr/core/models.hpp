@@ -34,8 +34,15 @@ struct Device {
     DeviceId id;
     BusType bus = BusType::Other;
     std::string name;
-    std::string sysfsPath;
-    std::string modalias;
+    // Opaque, platform-native, stable device identifier. The platform layer
+    // decides its shape and nothing above the PAL parses it: a canonical sysfs
+    // path on Linux, a device instance ID on Windows. Use core::identityTail()
+    // when a positional fragment is needed — never a hard-coded separator.
+    std::string nativeId;
+    // The platform's primary hardware-matching string, the one a driver
+    // database is keyed by: the kernel's MODALIAS string on Linux, the first
+    // (most specific) hardware ID on Windows. Empty when none is reported.
+    std::string hardwareId;
     std::string vendorId;
     std::string productId;
     std::string serial;
@@ -88,9 +95,12 @@ struct DeviceKey {
 
 struct DisabledDeviceEntry {
     DeviceKey key;
-    std::string mechanism;      // "authorized" | "unbind"
-    std::string lastDriver;     // "" when unknown (plain drivers_probe rebind)
-    std::string lastSysfsPath;  // display/debug + fallback match
+    std::string mechanism;   // "authorized" | "unbind"
+    std::string lastDriver;  // "" when unknown (plain drivers_probe rebind)
+    // Deliberately NOT renamed with Device::nativeId: this field mirrors the
+    // persisted `last_sysfs_path` key and the D-Bus entry map, both frozen at
+    // ApiVersion 4, and both Linux-only surfaces. Display/debug + fallback match.
+    std::string lastSysfsPath;
     std::int64_t disabledAtUtc = 0;
     bool guardSuspended = false;
     friend bool operator==(const DisabledDeviceEntry&, const DisabledDeviceEntry&) = default;

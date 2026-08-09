@@ -36,6 +36,8 @@ ManagerAdaptor::ManagerAdaptor(sdbus::IConnection& connection, RequestProcessor&
     object_
         ->addVTable(
             sdbus::registerMethod("SetDeviceEnabled")
+                // Frozen contract name (ApiVersion 4): the wire argument stays
+                // `sysfs_path` though the in-memory field is Device::nativeId.
                 .withInputParamNames("sysfs_path", "enabled")
                 .implementedAs([this, sender](const std::string& path, const bool enabled) {
                     throwIfFailed(processor_.setDeviceEnabled(sender(), path, enabled));
@@ -51,11 +53,13 @@ ManagerAdaptor::ManagerAdaptor(sdbus::IConnection& connection, RequestProcessor&
                     throwIfFailed(processor_.unloadModule(sender(), name));
                 }),
             sdbus::registerMethod("BindDriver")
+                // Frozen contract name (ApiVersion 4); in-memory: Device::nativeId.
                 .withInputParamNames("sysfs_path", "driver")
                 .implementedAs([this, sender](const std::string& path, const std::string& driver) {
                     throwIfFailed(processor_.bindDriver(sender(), path, driver));
                 }),
             sdbus::registerMethod("UnbindDriver")
+                // Frozen contract name (ApiVersion 4); in-memory: Device::nativeId.
                 .withInputParamNames("sysfs_path")
                 .implementedAs([this, sender](const std::string& path) {
                     throwIfFailed(processor_.unbindDriver(sender(), path));
@@ -72,6 +76,7 @@ ManagerAdaptor::ManagerAdaptor(sdbus::IConnection& connection, RequestProcessor&
                                        {"position", sdbus::Variant(e.key.position)},
                                        {"mechanism", sdbus::Variant(e.mechanism)},
                                        {"last_driver", sdbus::Variant(e.lastDriver)},
+                                       // Frozen contract key (ApiVersion 4).
                                        {"last_sysfs_path", sdbus::Variant(e.lastSysfsPath)},
                                        {"disabled_at_utc", sdbus::Variant(e.disabledAtUtc)},
                                        {"guard_suspended", sdbus::Variant(e.guardSuspended)}});

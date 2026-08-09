@@ -569,7 +569,7 @@ TEST(MainWindowTest, UnbindConfirmedInvokesCallback) {
 TEST(MainWindowTest, UnbindGuardRefusalShowsReasonWithoutConfirm) {
     Fixture f;
     auto d = dev("u1", core::BusType::Usb, "RootDisk");
-    d.sysfsPath = "/sys/devices/root-disk";
+    d.nativeId = "/sys/devices/root-disk";
     f.pal.seedDevice(d);
     f.prober.next = pal::CriticalityFacts{.rootBackingPaths = {"/sys/devices/root-disk"}};
     auto window = f.makeWindow();
@@ -606,7 +606,7 @@ TEST(MainWindowTest, BindPrefillsBoundDriverAndInvokesCallback) {
 TEST(MainWindowTest, BindPrefillFallsBackToDriverCandidates) {
     Fixture f;
     auto d = dev("u1", core::BusType::Usb, "Mouse");
-    d.sysfsPath = "/sys/devices/u1";
+    d.nativeId = "/sys/devices/u1";
     f.pal.seedDevice(d);
     core::Driver candidate;
     candidate.name = "cdc_acm";

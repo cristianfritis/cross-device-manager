@@ -54,7 +54,7 @@ core::Result<std::vector<core::Device>> UdevDeviceEnumerator::enumerate() {
         if (!dev) {  // FAULT ISOLATION: one bad device never aborts the scan
             core::Device bad;
             bad.id = core::DeviceId{std::string("dev-err-") + syspath};
-            bad.sysfsPath = syspath;
+            bad.nativeId = syspath;
             bad.status = core::DeviceStatus::Error;
             bad.errorNote = "udev_device_new_from_syspath failed";
             out.push_back(std::move(bad));

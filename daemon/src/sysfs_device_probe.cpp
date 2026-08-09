@@ -28,7 +28,7 @@ core::Device deviceFromSysfs(const std::string& canonical) {
         return v;
     };
     core::Device d;
-    d.sysfsPath = canonical;
+    d.nativeId = canonical;
     std::error_code ec;
     d.bus = busTypeFromPath(dir, ec);
     const std::string vendor = attr("idVendor");

@@ -115,7 +115,7 @@ void DeviceListVM::appendRows(core::BusType bus, const std::vector<const core::D
         // Pure policy over the facts probed with the snapshot — no filesystem
         // work here. Without facts nothing is marked, matching how the advisory
         // guard degrades to "allowed".
-        rowCriticality_.emplace_back(facts_ ? core::classifyDevice(*facts_, d->sysfsPath)
+        rowCriticality_.emplace_back(facts_ ? core::classifyDevice(*facts_, d->nativeId)
                                             : core::Criticality::Ordinary);
     }
 }

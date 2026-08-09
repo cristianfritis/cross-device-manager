@@ -11,6 +11,8 @@ json entryToJson(const core::DisabledDeviceEntry& e) {
                 {"position", e.key.position},
                 {"mechanism", e.mechanism},
                 {"last_driver", e.lastDriver},
+                // Frozen persisted key: stores written before the neutral
+                // in-memory rename must keep loading without migration.
                 {"last_sysfs_path", e.lastSysfsPath},
                 {"disabled_at_utc", e.disabledAtUtc},
                 {"guard_suspended", e.guardSuspended}};
@@ -25,7 +27,7 @@ core::DisabledDeviceEntry entryFromJson(const json& j) {
                             .position = j.at("position")};
     e.mechanism = j.at("mechanism");
     e.lastDriver = j.at("last_driver");
-    e.lastSysfsPath = j.at("last_sysfs_path");
+    e.lastSysfsPath = j.at("last_sysfs_path");  // frozen persisted key
     e.disabledAtUtc = j.at("disabled_at_utc");
     e.guardSuspended = j.at("guard_suspended");
     return e;

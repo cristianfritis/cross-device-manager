@@ -27,7 +27,7 @@ namespace {
 devmgr::core::Device deviceAt(const std::string& path) {
     devmgr::core::Device d;
     d.id = devmgr::core::DeviceId{"ipc-test"};
-    d.sysfsPath = path;
+    d.nativeId = path;
     d.name = "ipc test device";
     return d;
 }

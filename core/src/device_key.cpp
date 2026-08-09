@@ -2,13 +2,9 @@
 
 #include <algorithm>
 
+#include "devmgr/core/identity.hpp"
+
 namespace devmgr::services {
-namespace {
-std::string lastSegment(const std::string& path) {
-    const auto pos = path.find_last_of('/');
-    return pos == std::string::npos ? path : path.substr(pos + 1);
-}
-}  // namespace
 
 std::string keyBusString(core::BusType bus) {
     switch (bus) {
@@ -26,10 +22,10 @@ std::string keyBusString(core::BusType bus) {
     return "other";
 }
 
-std::string positionFor(core::BusType /*bus*/, const std::string& sysfsPath) {
-    // The last segment is the kernel's positional name on every bus we key:
+std::string positionFor(core::BusType /*bus*/, const std::string& nativeId) {
+    // The last segment is the platform's positional name on every bus we key:
     // USB port chain ("2-1.4"), PCI address ("0000:03:00.0"), platform name.
-    return lastSegment(sysfsPath);
+    return core::identityTail(nativeId);
 }
 
 core::DeviceKey makeDeviceKey(const core::Device& device) {
@@ -37,7 +33,7 @@ core::DeviceKey makeDeviceKey(const core::Device& device) {
                            .vendorId = device.vendorId,
                            .productId = device.productId,
                            .serial = device.serial,
-                           .position = positionFor(device.bus, device.sysfsPath)};
+                           .position = positionFor(device.bus, device.nativeId)};
 }
 
 core::DeviceKey makeDeviceKey(const core::Device& device,
@@ -45,7 +41,7 @@ core::DeviceKey makeDeviceKey(const core::Device& device,
     auto key = makeDeviceKey(device);
     if (key.serial.empty()) return key;
     const bool cloned = std::ranges::any_of(present, [&](const core::Device& d) {
-        return d.sysfsPath != device.sysfsPath && keyBusString(d.bus) == key.bus &&
+        return d.nativeId != device.nativeId && keyBusString(d.bus) == key.bus &&
                d.vendorId == key.vendorId && d.productId == key.productId && d.serial == key.serial;
     });
     if (cloned) key.serial.clear();  // downgrade to positional (spec §5.1)
@@ -58,7 +54,7 @@ bool matchesDevice(const core::DeviceKey& key, const core::Device& device) {
         return device.vendorId == key.vendorId && device.productId == key.productId &&
                device.serial == key.serial;
     }
-    return positionFor(device.bus, device.sysfsPath) == key.position &&
+    return positionFor(device.bus, device.nativeId) == key.position &&
            device.vendorId == key.vendorId && device.productId == key.productId;
 }
 

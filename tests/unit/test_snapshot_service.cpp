@@ -55,7 +55,7 @@ class SnapshotServiceTest : public ::testing::Test {
     static Device usbDevice(const std::string& path, const std::string& serial) {
         Device d;
         d.bus = BusType::Usb;
-        d.sysfsPath = path;
+        d.nativeId = path;
         d.vendorId = "046d";
         d.productId = "c52b";
         d.serial = serial;
@@ -66,7 +66,7 @@ class SnapshotServiceTest : public ::testing::Test {
         return DisabledDeviceEntry{.key = devmgr::services::makeDeviceKey(d),
                                    .mechanism = "authorized",
                                    .lastDriver = "",
-                                   .lastSysfsPath = d.sysfsPath,
+                                   .lastSysfsPath = d.nativeId,
                                    .disabledAtUtc = 1,
                                    .guardSuspended = false};
     }
@@ -143,7 +143,7 @@ TEST_F(SnapshotServiceTest, RestoreReEnablesDeviceDisabledAfterSnapshot) {
     ASSERT_TRUE(outcome.has_value());
     EXPECT_TRUE(state_->entries().empty());
     ASSERT_EQ(pal_.setEnabledCalls.size(), 1u);
-    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, d.sysfsPath);
+    EXPECT_EQ(pal_.setEnabledCalls[0].nativeId, d.nativeId);
     EXPECT_TRUE(pal_.setEnabledCalls[0].enabled);
     EXPECT_EQ(pal_.setEnabledCalls[0].hint, "usbhid");
     ASSERT_EQ(outcome->items.size(), 1u);
@@ -168,7 +168,7 @@ TEST_F(SnapshotServiceTest, RestoreReAppliesDisableRemovedAfterSnapshot) {
     ASSERT_TRUE(outcome.has_value());
     ASSERT_EQ(state_->entries().size(), 1u);
     ASSERT_EQ(pal_.setEnabledCalls.size(), 1u);
-    EXPECT_EQ(pal_.setEnabledCalls[0].sysfsPath, d.sysfsPath);
+    EXPECT_EQ(pal_.setEnabledCalls[0].nativeId, d.nativeId);
     EXPECT_FALSE(pal_.setEnabledCalls[0].enabled);
     ASSERT_EQ(outcome->items.size(), 1u);
     EXPECT_EQ(outcome->items[0].action, "re-apply-disable");
@@ -186,7 +186,7 @@ TEST_F(SnapshotServiceTest, GuardRefusalIsReportedNotBypassed) {
     ASSERT_TRUE(snap.has_value());
     ASSERT_TRUE(state_->remove(entryFor(d).key).has_value());
 
-    prober_.next = devmgr::pal::CriticalityFacts{.rootBackingPaths = {d.sysfsPath + "/disk"}};
+    prober_.next = devmgr::pal::CriticalityFacts{.rootBackingPaths = {d.nativeId + "/disk"}};
     auto outcome = svc.restore(*snap);
     ASSERT_TRUE(outcome.has_value());  // partial convergence is SUCCESS
     EXPECT_TRUE(pal_.setEnabledCalls.empty());

@@ -16,6 +16,8 @@
 #include "devmgr/core/snapshot_diff.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/update_models.hpp"
+#include "devmgr/pal/backend_set.hpp"
+#include "devmgr/pal/capabilities.hpp"
 #include "devmgr/pal/criticality.hpp"
 #include "devmgr/pal/interfaces.hpp"
 #include "devmgr/runtime/event_bus.hpp"
@@ -49,7 +51,44 @@ class ApplicationFacade {
           prober_(prober),
           drivers_(drivers),
           systemInfo_(systemInfo),
-          updateProviders_(std::move(updateProviders)) {}
+          updateProviders_(std::move(updateProviders)),
+          // Derived, so capabilities() stays truthful for a directly-wired
+          // facade. Hotplug and device control are not this facade's seams —
+          // HotplugService owns the monitor and mutation goes through the
+          // privileged channel — so they read as unimplemented here.
+          capabilities_{.deviceEnumeration = true,
+                        .hotplug = false,
+                        .deviceControl = false,
+                        .driverManagement = drivers_ != nullptr,
+                        .privilegedChannel = channel_ != nullptr,
+                        .updateProviders = !updateProviders_.empty(),
+                        .criticalityProbing = prober_ != nullptr,
+                        .systemInfo = systemInfo_ != nullptr} {}
+
+    // The seam constructor: takes the whole platform backend set and the
+    // platform's capability descriptor, so a composition root names no platform
+    // type and holds no nullable backend. Every reference in the set is valid to
+    // call — an interface the platform does not implement carries the refusing
+    // implementation — so the degradation paths below are reached through
+    // Unsupported results rather than through a null check.
+    ApplicationFacade(const pal::BackendSet& backends, pal::PlatformCapabilities capabilities,
+                      runtime::TaskScheduler& scheduler, runtime::EventBus& bus,
+                      DeviceService& service)
+        : enumerator_(backends.enumerator),
+          scheduler_(scheduler),
+          bus_(bus),
+          service_(service),
+          channel_(&backends.privileged),
+          prober_(&backends.criticality),
+          drivers_(&backends.drivers),
+          systemInfo_(&backends.systemInfo),
+          updateProviders_(backends.updateProviders),
+          capabilities_(capabilities) {}
+
+    // What the running platform implements. Constant for the process: a
+    // platform cannot grow a capability while running, so presentation code
+    // applies this once rather than re-deriving it per frame.
+    pal::PlatformCapabilities capabilities() const { return capabilities_; }
 
     // Runs enumeration on the TaskScheduler. The caller MUST wait on (or get)
     // the returned future before destroying this facade — the worker task
@@ -207,6 +246,7 @@ class ApplicationFacade {
     pal::ISystemInfo* systemInfo_ = nullptr;
 
     std::vector<pal::IUpdateProvider*> updateProviders_;
+    pal::PlatformCapabilities capabilities_;
     mutable std::mutex updatesMutex_;  // guards updatesSnapshot_ and pending_
     std::vector<core::UpdateProviderState> updatesSnapshot_;
     // Durable pending/reboot record (M1, §8.2), keyed (providerId, deviceId).

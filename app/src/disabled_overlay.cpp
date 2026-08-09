@@ -9,7 +9,7 @@ void applyDisabledOverlay(std::vector<core::Device>& devices,
     for (auto& device : devices) {
         for (const auto& entry : entries) {
             if (services::matchesDevice(entry.key, device) ||
-                entry.lastSysfsPath == device.sysfsPath) {
+                entry.lastSysfsPath == device.nativeId) {
                 device.status = core::DeviceStatus::Disabled;
                 if (entry.guardSuspended)
                     device.errorNote = "disabled — enforcement suspended (guard refused re-apply)";

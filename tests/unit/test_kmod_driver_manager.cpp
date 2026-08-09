@@ -64,8 +64,8 @@ class KmodDriverManagerTest : public ::testing::Test {
 TEST_F(KmodDriverManagerTest, ModaliasLookupYieldsCandidateWithDependencies) {
     auto mgr = make();
     devmgr::core::Device d;
-    d.modalias = "usb:v046DpC52Bd1101";
-    d.sysfsPath = (root_ / "devices/usb1/1-2").string();
+    d.hardwareId = "usb:v046DpC52Bd1101";
+    d.nativeId = (root_ / "devices/usb1/1-2").string();
     auto r = mgr.driversFor(d);
     ASSERT_TRUE(r.has_value()) << r.error().message;
     ASSERT_FALSE(r->empty());
@@ -86,8 +86,8 @@ TEST_F(KmodDriverManagerTest, BoundDriverResolvedViaSysfsComesFirst) {
     fs::create_directory_symlink(mod, drv / "module");
     auto mgr = make();
     devmgr::core::Device d;
-    d.sysfsPath = dev.string();
-    d.modalias = "usb:v046DpC52Bd1101";
+    d.nativeId = dev.string();
+    d.hardwareId = "usb:v046DpC52Bd1101";
     d.boundDriver = "usbhid";
     auto r = mgr.driversFor(d);
     ASSERT_TRUE(r.has_value());
@@ -104,7 +104,7 @@ TEST_F(KmodDriverManagerTest, BuiltinDriverDetectedWhenNoModuleLink) {
     fs::create_directory_symlink(drv, dev / "driver");
     auto mgr = make();
     devmgr::core::Device d;
-    d.sysfsPath = dev.string();
+    d.nativeId = dev.string();
     auto r = mgr.driversFor(d);
     ASSERT_TRUE(r.has_value());
     ASSERT_FALSE(r->empty());

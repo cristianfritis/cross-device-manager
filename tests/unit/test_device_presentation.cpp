@@ -14,7 +14,7 @@ Device pciDevice(std::string_view name, std::string_view address) {
     Device d;
     d.bus = BusType::Pci;
     d.name = name;
-    d.sysfsPath = std::string("/sys/devices/pci0000:c5/") + std::string(address);
+    d.nativeId = std::string("/sys/devices/pci0000:c5/") + std::string(address);
     d.vendorId = "1022";
     d.productId = "151b";
     return d;
@@ -24,7 +24,7 @@ Device usbDevice(std::string_view name, std::string_view port) {
     Device d;
     d.bus = BusType::Usb;
     d.name = name;
-    d.sysfsPath = std::string("/sys/devices/pci0000:00/usb3/") + std::string(port);
+    d.nativeId = std::string("/sys/devices/pci0000:00/usb3/") + std::string(port);
     d.vendorId = "06cb";
     d.productId = "0174";
     return d;
@@ -206,7 +206,7 @@ TEST(DisplayDeviceIdentity, OmitsWhicheverHalfIsUnknown) {
     EXPECT_EQ(displayDeviceIdentity(withoutPath), "1022:151b");
 
     Device withoutIds;
-    withoutIds.sysfsPath = "/sys/devices/pci0000:c5/0000:c5:00.4";
+    withoutIds.nativeId = "/sys/devices/pci0000:c5/0000:c5:00.4";
     EXPECT_EQ(displayDeviceIdentity(withoutIds), "0000:c5:00.4");
 
     EXPECT_EQ(displayDeviceIdentity(Device{}), "");

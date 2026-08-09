@@ -78,10 +78,10 @@ std::vector<std::string> DeviceDetailVM::lines(const std::optional<core::DeviceI
     out.push_back(kv("Id:", d.id.value));
     out.push_back(kv("Bus:", core::displayBus(d.bus)));
     out.push_back(kv("Status:", core::to_string(d.status)));
-    out.push_back(kv("Sysfs:", d.sysfsPath));
+    out.push_back(kv("Sysfs:", d.nativeId));
     out.push_back(kv("Serial:", d.serial));
     out.push_back(kv("Driver:", d.boundDriver.value_or("(none)")));
-    out.push_back(kv("Modalias:", d.modalias));
+    out.push_back(kv("Modalias:", d.hardwareId));
     if (d.parent.has_value()) out.push_back(kv("Parent:", d.parent->value));
     if (d.errorNote.has_value()) out.push_back(kv("Error:", *d.errorNote));
     // R4/R6: the list marks a load-bearing device with a glyph (TUI) or the word
@@ -91,7 +91,7 @@ std::vector<std::string> DeviceDetailVM::lines(const std::optional<core::DeviceI
     // refuse to disable. Probing reads the filesystem — lines() is called on
     // selection change and cached by both frontends, never per frame (§8).
     if (const auto facts = facade_.criticalityFacts()) {
-        const auto level = core::classifyDevice(*facts, d.sysfsPath);
+        const auto level = core::classifyDevice(*facts, d.nativeId);
         if (level != core::Criticality::Ordinary) {
             out.push_back(kv("Risk:", std::string(core::displayCriticality(level)) +
                                           " — disabling this may make the system unusable"));

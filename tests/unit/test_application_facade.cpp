@@ -69,7 +69,7 @@ namespace {
 core::Device devAt(std::string id, std::string sysfsPath, std::string name) {
     core::Device d;
     d.id = core::DeviceId{std::move(id)};
-    d.sysfsPath = std::move(sysfsPath);
+    d.nativeId = std::move(sysfsPath);
     d.name = std::move(name);
     d.status = core::DeviceStatus::Active;
     return d;
@@ -96,7 +96,7 @@ TEST(ApplicationFacadeTest, SetDeviceEnabledCallsChannelAndPublishesOneCompletio
     facade.setDeviceEnabled(core::DeviceId{"u1"}, false).wait();
 
     ASSERT_EQ(channel.calls.size(), 1u);
-    EXPECT_EQ(channel.calls[0].sysfsPath, "/sys/devices/usb1/1-4");
+    EXPECT_EQ(channel.calls[0].nativeId, "/sys/devices/usb1/1-4");
     EXPECT_FALSE(channel.calls[0].enabled);
     std::scoped_lock lock(m);
     ASSERT_EQ(events.size(), 1u);

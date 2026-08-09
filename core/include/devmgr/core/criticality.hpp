@@ -24,7 +24,7 @@ const char* displayCriticality(Criticality level);
 //
 // `facts` is probed ONCE per rebuild and reused across every row: probing is
 // filesystem work and belongs nowhere near a per-row path (DESIGN.md §8).
-Criticality classifyDevice(const pal::CriticalityFacts& facts, const std::string& sysfsPath);
+Criticality classifyDevice(const pal::CriticalityFacts& facts, const std::string& nativeId);
 
 // Modules mix live facts with a curated list, because refcounts alone are
 // silent about the dangerous case: a display or storage driver at refcount 0

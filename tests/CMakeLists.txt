@@ -5,6 +5,9 @@ add_executable(devmgr_tests
     unit/test_version.cpp
     unit/test_result.cpp
     unit/test_models.cpp
+    unit/test_identity.cpp
+    unit/test_refusing_backends.cpp
+    unit/test_platform_backends.cpp
     unit/test_device_presentation.cpp
     unit/test_backend_wording.cpp
     unit/test_backend_parity.cpp
@@ -42,7 +45,7 @@ target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest G
 # ${CMAKE_SOURCE_DIR} reaches tui/src/state_roles.hpp — a toolkit-free header
 # (no FTXUI), so the documented TUI colour table is unit-testable here.
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
-if(UNIX AND NOT APPLE)
+if(DEVMGR_PLATFORM STREQUAL "linux")
     # Header-only udev mapping helpers (NO libudev link) — unit-test them directly.
     target_include_directories(devmgr_tests PRIVATE ${CMAKE_SOURCE_DIR}/platform/linux/include)
     # Linux-only concrete PAL units (controller/prober) — these DO link the PAL lib.

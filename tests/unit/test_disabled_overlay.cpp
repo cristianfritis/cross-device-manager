@@ -12,7 +12,7 @@ namespace {
 Device usb(std::string path, std::string serial) {
     Device d;
     d.bus = BusType::Usb;
-    d.sysfsPath = std::move(path);
+    d.nativeId = std::move(path);
     d.vendorId = "046d";
     d.productId = "c52b";
     d.serial = std::move(serial);

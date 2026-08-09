@@ -10,6 +10,8 @@ configure_file(include/devmgr/core/version.hpp.in
 
 add_library(devmgr_core
     src/models.cpp
+    src/identity.cpp
+    src/refusing_backends.cpp
     src/device_presentation.cpp
     src/backend_wording.cpp
     src/criticality.cpp

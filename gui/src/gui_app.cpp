@@ -20,17 +20,7 @@
 #include "devmgr/app/status_line_vm.hpp"
 #include "devmgr/app/updates_vm.hpp"
 #include "devmgr/core/events.hpp"
-#include "devmgr/pal/interfaces.hpp"
-#include "devmgr/platform/linux/udev_device_enumerator.hpp"
-#include "devmgr/platform/linux/udev_hotplug_monitor.hpp"
-#include "devmgr/platform/linux/linux_criticality_prober.hpp"
-#include "devmgr/platform/linux/kmod_driver_manager.hpp"
-#include "devmgr/platform/linux/linux_system_info.hpp"
-#include "devmgr/platform/linux/dkms_status_provider.hpp"
-#ifdef DEVMGR_HAS_SDBUS
-#include "devmgr/platform/linux/dbus_privileged_channel.hpp"
-#include "devmgr/platform/linux/fwupd_update_provider.hpp"
-#endif
+#include "devmgr/pal/platform_backends.hpp"
 #include "devmgr/runtime/delayed_scheduler.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
@@ -61,32 +51,26 @@ int runGuiApp(int argc, char** argv) {
     runtime::EventBus bus;
     runtime::TaskScheduler scheduler;
     runtime::DelayedScheduler delayed;
-    platform_linux::UdevDeviceEnumerator enumerator;
-    platform_linux::UdevHotplugMonitor monitor;
+
+    // The one place a platform enters this program. `backends` OWNS every
+    // implementation and is declared here, before everything that consumes
+    // them, so the teardown contract is unchanged: it is destroyed after the
+    // VMs, the facade and HotplugService, and before the schedulers and the
+    // bus the backends were handed.
+    pal::BackendOptions backendOptions;
+    backendOptions.eventBus = &bus;
+    auto backends = pal::PlatformBackends::create(backendOptions);
+    if (!backends) {
+        // Nothing is wired yet, so there is nothing to unwind — fail before a
+        // window exists rather than showing a half-working application.
+        std::cerr << "devmgr-gui: cannot start: " << backends.error().message << "\n";
+        return 1;
+    }
+    const pal::BackendSet& backendSet = (*backends)->backends();
+
     app::DeviceService service(bus);
-    platform_linux::LinuxCriticalityProber prober;  // advisory guard facts
-    platform_linux::KmodDriverManager kmod;         // system defaults: /sys, real modules
-    platform_linux::LinuxSystemInfo sysinfo;
-#ifdef DEVMGR_HAS_SDBUS
-    platform_linux::DbusPrivilegedChannel channel;  // system bus → devmgrd
-    platform_linux::FwupdUpdateProvider fwupdProvider(bus);
-#endif
-    platform_linux::DkmsStatusProvider dkmsProvider;
-    // Declaration order = teardown contract: providers outlive the facade (T9
-    // param), which outlives the VMs below — identical to runTuiApp().
-    std::vector<pal::IUpdateProvider*> updateProviders;
-#ifdef DEVMGR_HAS_SDBUS
-    updateProviders.push_back(&fwupdProvider);
-#endif
-    updateProviders.push_back(&dkmsProvider);
-#ifdef DEVMGR_HAS_SDBUS
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service, &channel, &prober, &kmod,
-                                  &sysinfo, updateProviders);
-#else
-    app::ApplicationFacade facade(enumerator, scheduler, bus, service, nullptr, &prober, &kmod,
-                                  &sysinfo, updateProviders);
-#endif
-    app::HotplugService hotplug(monitor, service, delayed);  // 250 ms default window
+    app::ApplicationFacade facade(backendSet, (*backends)->capabilities(), scheduler, bus, service);
+    app::HotplugService hotplug(backendSet.hotplug, service, delayed);  // 250 ms default window
 
     QtUiDispatcher dispatcher;
     app::DeviceListVM listVm(facade, bus, dispatcher);

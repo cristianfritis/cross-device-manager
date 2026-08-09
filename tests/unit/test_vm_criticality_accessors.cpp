@@ -25,7 +25,7 @@ core::Device device(std::string id, core::BusType bus, std::string name, std::st
     d.id = core::DeviceId{std::move(id)};
     d.bus = bus;
     d.name = std::move(name);
-    d.sysfsPath = std::move(sysfsPath);
+    d.nativeId = std::move(sysfsPath);
     d.vendorId = "1022";
     d.productId = "151b";
     d.status = core::DeviceStatus::Active;

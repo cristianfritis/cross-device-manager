@@ -107,7 +107,7 @@ std::vector<core::DisabledDeviceEntry> StateStore::entries() const {
 std::optional<core::DisabledDeviceEntry> StateStore::findFor(const core::Device& device) const {
     const std::scoped_lock<std::mutex> lock(mutex_);
     for (const auto& e : entries_) {
-        if (services::matchesDevice(e.key, device) || e.lastSysfsPath == device.sysfsPath) return e;
+        if (services::matchesDevice(e.key, device) || e.lastSysfsPath == device.nativeId) return e;
     }
     return std::nullopt;
 }

@@ -42,9 +42,9 @@ bool containsKey(const std::vector<core::DisabledDeviceEntry>& entries,
 std::string resolvePathFor(const core::DisabledDeviceEntry& e,
                            const std::vector<core::Device>& all) {
     const auto match = std::ranges::find_if(all, [&](const core::Device& d) {
-        return services::matchesDevice(e.key, d) || e.lastSysfsPath == d.sysfsPath;
+        return services::matchesDevice(e.key, d) || e.lastSysfsPath == d.nativeId;
     });
-    if (match != all.end()) return match->sysfsPath;
+    if (match != all.end()) return match->nativeId;
     std::error_code ec;
     if (!e.lastSysfsPath.empty() && fs::is_directory(e.lastSysfsPath, ec)) return e.lastSysfsPath;
     return {};
@@ -191,7 +191,7 @@ void SnapshotService::reApplyRestored(std::vector<core::RestoreItemOutcome>& ite
         // Same matching ladder as EnforcementService::sweep: live enumeration
         // by key or stored path, then the raw-sysfs fallback.
         const auto match = std::ranges::find_if(all, [&](const core::Device& d) {
-            return services::matchesDevice(e.key, d) || e.lastSysfsPath == d.sysfsPath;
+            return services::matchesDevice(e.key, d) || e.lastSysfsPath == d.nativeId;
         });
         core::Device device;
         if (match != all.end()) {
@@ -218,7 +218,7 @@ core::RestoreItemOutcome SnapshotService::reApplyOne(const core::DisabledDeviceE
                                 ? device.status != core::DeviceStatus::Disabled
                                 : device.boundDriver.has_value();
     if (!needsApply)
-        return {.subject = device.sysfsPath,
+        return {.subject = device.nativeId,
                 .action = "re-apply-disable",
                 .status = "ok",
                 .detail = "already in desired state"};
@@ -228,36 +228,35 @@ core::RestoreItemOutcome SnapshotService::reApplyOne(const core::DisabledDeviceE
     // bypassed — the entry stays, marked guard-suspended.
     auto facts = prober_.probe();
     if (!facts)
-        return {.subject = device.sysfsPath,
+        return {.subject = device.nativeId,
                 .action = "re-apply-disable",
                 .status = "failed",
                 .detail = "criticality probe failed: " + facts.error().message};
-    const auto verdict = services::evaluateDisable(*facts, device.sysfsPath);
+    const auto verdict = services::evaluateDisable(*facts, device.nativeId);
     if (!verdict.allowed) {
         if (auto r = state_.setGuardSuspended(entry.key, true); !r) {
             return {
-                .subject = device.sysfsPath,
+                .subject = device.nativeId,
                 .action = "re-apply-disable",
                 .status = "failed",
                 .detail = "guard refused (" + verdict.reason + ") and suspension not persisted"};
         }
-        return {.subject = device.sysfsPath,
+        return {.subject = device.nativeId,
                 .action = "re-apply-disable",
                 .status = "guard-refused",
                 .detail = verdict.reason};
     }
 
-    auto applied = controller_.setEnabled(device.sysfsPath, false, "");
+    auto applied = controller_.setEnabled(device.nativeId, false, "");
     if (!applied)
-        return {.subject = device.sysfsPath,
+        return {.subject = device.nativeId,
                 .action = "re-apply-disable",
                 .status = "failed",
                 .detail = applied.error().message};
-    if (entry.lastSysfsPath != device.sysfsPath)
-        (void)state_.setLastSysfsPath(entry.key, device.sysfsPath);
+    if (entry.lastSysfsPath != device.nativeId)
+        (void)state_.setLastSysfsPath(entry.key, device.nativeId);
     if (entry.guardSuspended) (void)state_.setGuardSuspended(entry.key, false);
-    return {
-        .subject = device.sysfsPath, .action = "re-apply-disable", .status = "ok", .detail = ""};
+    return {.subject = device.nativeId, .action = "re-apply-disable", .status = "ok", .detail = ""};
 }
 
 }  // namespace devmgr::daemon

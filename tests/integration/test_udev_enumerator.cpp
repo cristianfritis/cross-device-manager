@@ -38,8 +38,8 @@ TEST_F(UdevEnumeratorTest, MapsUsbDeviceFieldsAndIsDeterministic) {
     ASSERT_NE(it, devs.end());
     EXPECT_EQ(it->bus, devmgr::core::BusType::Usb);
     EXPECT_EQ(it->status, devmgr::core::DeviceStatus::Active);
-    EXPECT_NE(it->sysfsPath.find("/devices/"), std::string::npos);
-    EXPECT_EQ(it->modalias.rfind("usb:v1D6Bp0002", 0), 0u);
+    EXPECT_NE(it->nativeId.find("/devices/"), std::string::npos);
+    EXPECT_EQ(it->hardwareId.rfind("usb:v1D6Bp0002", 0), 0u);
 
     // Determinism: a second enumeration yields the identical DeviceId.
     auto res2 = enumr.enumerate();

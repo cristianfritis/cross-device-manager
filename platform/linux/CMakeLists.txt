@@ -11,7 +11,8 @@ add_library(devmgr_pal_linux STATIC
     src/kmod_driver_manager.cpp
     src/linux_system_info.cpp
     src/cab_resolver.cpp
-    src/dkms_status_provider.cpp)
+    src/dkms_status_provider.cpp
+    src/platform_backends_linux.cpp)
 target_include_directories(devmgr_pal_linux
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

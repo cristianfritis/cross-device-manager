@@ -33,7 +33,7 @@ void EnforcementService::sweep() {
     for (const auto& entry : store_.entries()) {
         const auto match = std::ranges::find_if(*enumerated, [&](const core::Device& device) {
             return services::matchesDevice(entry.key, device) ||
-                   entry.lastSysfsPath == device.sysfsPath;
+                   entry.lastSysfsPath == device.nativeId;
         });
         if (match != enumerated->end()) {
             maybeReapply(entry, *match);
@@ -68,28 +68,28 @@ void EnforcementService::maybeReapply(const core::DisabledDeviceEntry& entry,
     // Guard re-check on EVERY re-apply (spec §5.3): topology may have changed.
     auto facts = prober_.probe();
     if (!facts) {
-        spdlog::warn("enforcement: prober failed for {}: {}", device.sysfsPath,
+        spdlog::warn("enforcement: prober failed for {}: {}", device.nativeId,
                      facts.error().message);
         return;
     }
-    const auto verdict = services::evaluateDisable(*facts, device.sysfsPath);
+    const auto verdict = services::evaluateDisable(*facts, device.nativeId);
     if (!verdict.allowed) {
-        spdlog::warn("enforcement suspended for {}: {}", device.sysfsPath, verdict.reason);
+        spdlog::warn("enforcement suspended for {}: {}", device.nativeId, verdict.reason);
         if (auto r = store_.setGuardSuspended(entry.key, true); !r)
             spdlog::warn("enforcement: cannot persist suspension: {}", r.error().message);
         return;
     }
 
     const std::scoped_lock lock(applyMutex_);
-    auto applied = controller_.setEnabled(device.sysfsPath, false, "");
+    auto applied = controller_.setEnabled(device.nativeId, false, "");
     if (!applied) {  // log-and-continue: never crash the daemon over one device
-        spdlog::warn("enforcement: re-apply failed for {}: {}", device.sysfsPath,
+        spdlog::warn("enforcement: re-apply failed for {}: {}", device.nativeId,
                      applied.error().message);
         return;
     }
-    spdlog::info("enforcement: re-disabled {}", device.sysfsPath);
-    if (entry.lastSysfsPath != device.sysfsPath) {
-        if (auto r = store_.setLastSysfsPath(entry.key, device.sysfsPath); !r)
+    spdlog::info("enforcement: re-disabled {}", device.nativeId);
+    if (entry.lastSysfsPath != device.nativeId) {
+        if (auto r = store_.setLastSysfsPath(entry.key, device.nativeId); !r)
             spdlog::warn("enforcement: cannot update path: {}", r.error().message);
     }
     if (entry.guardSuspended) {

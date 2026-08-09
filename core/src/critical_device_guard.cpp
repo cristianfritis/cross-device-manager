@@ -28,14 +28,14 @@ bool wouldRemoveAll(const std::vector<std::string>& paths, const std::string& ta
 }  // namespace
 
 GuardVerdict evaluateDisable(const pal::CriticalityFacts& facts,
-                             const std::string& targetSysfsPath) {
-    if (anyUnder(facts.rootBackingPaths, targetSysfsPath))
+                             const std::string& targetNativeId) {
+    if (anyUnder(facts.rootBackingPaths, targetNativeId))
         return {.allowed = false, .reason = "backs the root filesystem"};
-    if (anyUnder(facts.bootBackingPaths, targetSysfsPath))
+    if (anyUnder(facts.bootBackingPaths, targetNativeId))
         return {.allowed = false, .reason = "backs the boot filesystem"};
-    if (wouldRemoveAll(facts.keyboardPaths, targetSysfsPath))
+    if (wouldRemoveAll(facts.keyboardPaths, targetNativeId))
         return {.allowed = false, .reason = "would disable the only keyboard"};
-    if (wouldRemoveAll(facts.pointerPaths, targetSysfsPath))
+    if (wouldRemoveAll(facts.pointerPaths, targetNativeId))
         return {.allowed = false, .reason = "would disable the only pointer"};
     return {};
 }

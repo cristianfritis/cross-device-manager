@@ -35,8 +35,8 @@ namespace devmgr::core {
 // than a product and would not identify anything on its own. Tiers 1-2 keep the
 // catalogue's own wording so labels stay stable and stay inside the row budget.
 //
-// Device::name is REJECTED when it is the kernel's positional name (a PCI
-// address, a USB port chain, or literally the last sysfs path segment): that is
+// Device::name is REJECTED when it is the platform's positional name (a PCI
+// address, a USB port chain, or literally the identifier's last segment): that is
 // the mapper's last-resort fallback, not a name, and showing it as the label is
 // the defect this formatter exists to fix.
 std::string displayDeviceName(const Device& device);
@@ -45,15 +45,15 @@ std::string displayDeviceName(const Device& device);
 // Two devices legitimately share a name (a machine has six identically named
 // bridges), so this is what tells them apart, and it is the only place a raw
 // address is a correct thing to print. Either half is omitted when unknown;
-// empty when the device carries neither ids nor a sysfs path.
+// empty when the device carries neither ids nor a native identifier.
 std::string displayDeviceIdentity(const Device& device);
 
-// The kernel's positional address alone — a PCI BDF ("0000:c5:00.4"), a USB port
-// chain ("3-3"), or whatever the last sysfs path segment is. This is what the
-// user needs to correlate a row with `lspci`/`lsusb` output or a dmesg line, and
-// the detail pane shows it on its own "Address:" row now that the label above it
-// is a canonical name rather than this string (R1). Empty when the device has no
-// sysfs path.
+// The platform's positional address alone — a PCI BDF ("0000:c5:00.4"), a USB
+// port chain ("3-3"), or whatever Device::nativeId's last segment is. This is
+// what the user needs to correlate a row with `lspci`/`lsusb` output or a dmesg
+// line, and the detail pane shows it on its own "Address:" row now that the
+// label above it is a canonical name rather than this string (R1). Empty when
+// the device has no native identifier.
 std::string displayDeviceAddress(const Device& device);
 
 }  // namespace devmgr::core

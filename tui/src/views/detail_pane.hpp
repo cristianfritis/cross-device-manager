@@ -10,7 +10,7 @@ namespace devmgr::tui::views {
 
 // The right-hand detail pane body, shared by all four tabs: one row per
 // ViewModel line, each BOUNDED to that row (R1). A detail value can be
-// arbitrarily long — a modalias, a sysfs path, a signer name — and `ftxui::text`
+// arbitrarily long — a hardware ID, a native identifier, a signer name — and `ftxui::text`
 // would let it run to the screen edge and stop mid-token with nothing to say it
 // had been cut. Every line goes through render::elidedText instead, so at 80
 // columns a long value ends in a visible ellipsis and the pane never grows a

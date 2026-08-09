@@ -75,11 +75,11 @@ core::Device mapDevice(udev_device* d) {
     core::Device dev;
     dev.id = core::DeviceId{stableId(sv(subsystem), sv(syspath), vendor, product, serial)};
     dev.bus = busFor(sv(subsystem));
-    dev.sysfsPath = s(syspath);
+    dev.nativeId = s(syspath);
     dev.name = firstNonEmptyLazy(
         [&] { return prop(d, "ID_MODEL_FROM_DATABASE"); }, [&] { return prop(d, "ID_MODEL"); },
         [&] { return attr(d, "product"); }, [&] { return udev_device_get_sysname(d); });
-    dev.modalias =
+    dev.hardwareId =
         firstNonEmptyLazy([&] { return prop(d, "MODALIAS"); }, [&] { return attr(d, "modalias"); });
     dev.vendorId = strip0x(vendor);
     dev.productId = strip0x(product);

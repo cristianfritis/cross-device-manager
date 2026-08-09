@@ -22,7 +22,7 @@ TEST(FakePal, EnumeratesSeededDevices) {
 TEST(FakePal, SetEnabledUpdatesState) {
     FakePal pal;
     Device d{DeviceId{"usb:1-2"}};
-    d.sysfsPath = "/sys/devices/usb1/1-2";
+    d.nativeId = "/sys/devices/usb1/1-2";
     pal.seedDevice(d);
     IDeviceController& controller = pal;
     ASSERT_TRUE(controller.setEnabled("/sys/devices/usb1/1-2", false, "").has_value());
