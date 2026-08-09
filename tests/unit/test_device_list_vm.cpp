@@ -7,6 +7,7 @@
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 #include "fakes/fake_pal.hpp"
+#include "fakes/fake_privileged_channel.hpp"
 #include "fakes/inline_ui_dispatcher.hpp"
 
 using namespace devmgr;
@@ -197,4 +198,150 @@ TEST(DeviceListVmTest, RebuildHooksBracketDeltaAndFilterRebuilds) {
     vm.setRebuildHooks({}, {});  // cleared hooks: rebuild must not crash and log stays frozen
     vm.setFilter("");
     EXPECT_EQ(log.size(), 4u);
+}
+
+TEST(DeviceListVmTest, StatusForRowMapsDeviceRowsAndNulloptOnHeaders) {
+    Fixture f;
+    auto mouse = dev("u1", core::BusType::Usb, "Mouse");
+    mouse.status = core::DeviceStatus::Disabled;
+    auto gpu = dev("p1", core::BusType::Pci, "GPU");
+    gpu.status = core::DeviceStatus::Error;
+    f.pal.seedDevice(mouse);
+    f.pal.seedDevice(gpu);
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+
+    // Header rows carry no status; device rows carry the Device's own status.
+    for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i) {
+        if (vm.isHeader(i)) {
+            EXPECT_FALSE(vm.statusForRow(i).has_value());
+        } else {
+            EXPECT_TRUE(vm.statusForRow(i).has_value());
+        }
+    }
+    auto statusOfNamed = [&](const char* needle) -> std::optional<core::DeviceStatus> {
+        for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i)
+            if (vm.rowsRef()[i].find(needle) != std::string::npos) return vm.statusForRow(i);
+        return std::nullopt;
+    };
+    EXPECT_EQ(statusOfNamed("Mouse"), core::DeviceStatus::Disabled);
+    EXPECT_EQ(statusOfNamed("GPU"), core::DeviceStatus::Error);
+
+    EXPECT_FALSE(vm.statusForRow(-1).has_value());  // out of range is never a status
+    EXPECT_FALSE(vm.statusForRow(9999).has_value());
+}
+
+TEST(DeviceListVmTest, StatusForRowNulloptOnEmptyPlaceholderAndStaysAlignedUnderFilter) {
+    Fixture f;
+    auto mouse = dev("u1", core::BusType::Usb, "Logitech Mouse");
+    mouse.status = core::DeviceStatus::Active;
+    auto gpu = dev("p1", core::BusType::Pci, "NVIDIA GPU");
+    gpu.status = core::DeviceStatus::Transitioning;
+    f.pal.seedDevice(mouse);
+    f.pal.seedDevice(gpu);
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+
+    // Filter to the mouse: rowStatus_ must stay aligned with the shrunk rows_.
+    vm.setFilter("mouse");
+    std::optional<core::DeviceStatus> mouseStatus;
+    for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i) {
+        if (vm.rowsRef()[i].find("Mouse") != std::string::npos) mouseStatus = vm.statusForRow(i);
+        EXPECT_EQ(vm.rowsRef()[i].find("GPU"), std::string::npos);
+    }
+    EXPECT_EQ(mouseStatus, core::DeviceStatus::Active);
+
+    // Filter matches nothing → single "(no devices)" placeholder, no status.
+    vm.setFilter("zzz-nonexistent");
+    ASSERT_EQ(vm.rowsRef().size(), 1u);
+    EXPECT_FALSE(vm.statusForRow(0).has_value());
+}
+
+// ---- devmgrd availability on the Devices view (§13) -------------------------
+//
+// The rows here come from sysfs and survive a dead daemon; the disabled-state
+// overlay and every verb do not. So this view carries the note, and its
+// empty-result string answers to the same withhold rule as every other view.
+
+namespace {
+// Fixture with a scriptable privileged channel — the base Fixture deliberately
+// has none, which is the "built without the seam" path, not an outage.
+struct ChannelFixture {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler{2};
+    test::FakePal pal;
+    app::DeviceService svc{bus};
+    test::InlineUiDispatcher dispatcher;
+    test::FakePrivilegedChannel channel;
+    app::ApplicationFacade facade{pal, scheduler, bus, svc, &channel};
+
+    void failOverlay() {
+        channel.disabledEntries =
+            core::makeError(core::Error::Code::Io, "helper devmgrd is not available");
+    }
+};
+}  // namespace
+
+TEST(DeviceListVmAvailability, UnreachableDaemonWithholdsEmptyResultString) {
+    ChannelFixture f;
+    f.failOverlay();  // no devices seeded either: the view has nothing to show
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+    vm.rebuild();
+
+    for (const auto& row : vm.rowsRef()) EXPECT_EQ(row, "");  // no rows at all
+    EXPECT_TRUE(vm.rowsRef().empty());
+    // ...and the sentence explains the empty region instead of an empty claim.
+    EXPECT_EQ(vm.banner(), core::unavailabilityText(core::BackendId::Devmgrd,
+                                                    core::UnavailabilityKind::Unreachable));
+    ASSERT_EQ(vm.availabilityNotes().size(), 1U);
+    EXPECT_EQ(vm.availabilityNotes()[0].role, app::StatusSeverity::Warning);
+}
+
+TEST(DeviceListVmAvailability, HealthyDaemonWithNoDevicesStillClaimsEmpty) {
+    ChannelFixture f;
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+    vm.rebuild();
+
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_EQ(vm.rowsRef()[0], "(no devices)");  // the query ran and found nothing
+    EXPECT_TRUE(vm.availabilityNotes().empty());
+    EXPECT_EQ(vm.banner(), "");
+}
+
+TEST(DeviceListVmAvailability, DaemonRowsSurviveAnOutage) {
+    ChannelFixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+    f.facade.refresh().wait();
+    f.failOverlay();
+    f.facade.refresh().wait();
+    vm.rebuild();
+
+    // Reads remain usable: the device is still listed, with the note beside it.
+    const auto& rows = vm.rowsRef();
+    EXPECT_TRUE(std::ranges::any_of(
+        rows, [](const std::string& r) { return r.find("Mouse") != std::string::npos; }));
+    EXPECT_EQ(vm.availabilityNotes().size(), 1U);
+}
+
+// The availability note must track reality, not the last time someone looked:
+// down, up, down again has to produce the note twice (misread-catalog #19 —
+// a note that clears and never returns reads exactly like a correct one).
+TEST(DeviceListVmAvailability, NoteReturnsAfterRecoveryAndASecondOutage) {
+    ChannelFixture f;
+    app::DeviceListVM vm(f.facade, f.bus, f.dispatcher);
+
+    f.failOverlay();
+    f.facade.refresh().wait();
+    EXPECT_EQ(vm.availabilityNotes().size(), 1U);
+
+    f.channel.disabledEntries = std::vector<core::DisabledDeviceEntry>{};
+    f.facade.refresh().wait();
+    EXPECT_TRUE(vm.availabilityNotes().empty());
+
+    f.failOverlay();
+    f.facade.refresh().wait();
+    EXPECT_EQ(vm.availabilityNotes().size(), 1U) << "poll is dead: the note never came back";
 }

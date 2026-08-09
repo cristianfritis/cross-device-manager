@@ -13,6 +13,14 @@
 
 namespace devmgr::app {
 
+// Outcome valence of the current status message for TUI semantic colouring
+// (design decision 1a; docs/DESIGN.md §4.1). Tracked at the moment the message
+// is set from the source event — never re-derived by parsing the text (§11).
+// Ok is the steady/empty state. Device notifications are Info; a completed task
+// is Success or Danger by its ok flag. Warning is reserved for a future
+// partial-outcome signal; no current event emits it.
+enum class StatusSeverity { Ok, Success, Warning, Danger, Info };
+
 // Toolkit-agnostic transient status line. Subscribes to device deltas and shows
 // the latest ("usb device added: <name>"), auto-clearing after `ttl` via a
 // DelayedScheduler. Starts DISARMED and ignores events until arm() so the
@@ -88,9 +96,13 @@ class StatusLineVM {
 
     void arm() { armed_.store(true); }
     std::string text() const;
+    // Outcome valence of the current message for TUI colouring (read-only; no
+    // wording change). Tracked when the message is set; Ok while the line is
+    // empty. Guarded by the same mutex as text(), so the two never disagree.
+    StatusSeverity severity() const;
 
    private:
-    void setMessage(std::string message);
+    void setMessage(std::string message, StatusSeverity severity);
     void onClearFired(std::uint64_t generation);  // may run on the timer thread
 
     runtime::DelayedScheduler& timer_;
@@ -100,6 +112,7 @@ class StatusLineVM {
     mutable std::mutex mutex_;
     std::condition_variable clearDone_;  // signaled when outstandingClears_ reaches 0
     std::string text_;
+    StatusSeverity severity_ = StatusSeverity::Ok;  // guarded by mutex_, set with text_
     runtime::DelayedScheduler::Handle clearHandle_ = 0;
     std::uint64_t generation_ = 0;  // bumped each time a new clear is scheduled; guarded by mutex_
     int outstandingClears_ =

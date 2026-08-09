@@ -20,12 +20,16 @@
 #include "fakes/fake_pal.hpp"
 #include "fakes/fake_privileged_channel.hpp"
 #include "fakes/inline_ui_dispatcher.hpp"
+#include "fixtures/backend_sentences.hpp"
 
 using namespace devmgr;
 
 namespace {
 
 constexpr int kStormPublishes = 5000;
+// What DbusPrivilegedChannel hands back when the bus cannot reach devmgrd
+// (platform/linux/.../dbus_contract.hpp) — the diagnostic, never the sentence.
+constexpr const char* kDaemonRaw = "helper devmgrd is not available";
 // 2020-09-13 12:26:40 UTC — a fixed instant for byte-frozen rows (TZ pinned
 // to UTC in the fixture so local rendering is deterministic).
 constexpr std::int64_t kFixedInstant = 1600000000;
@@ -117,7 +121,10 @@ TEST_F(SnapshotsVmTest, PlaceholderRowWhenEmptyNeverActionable) {
     EXPECT_EQ(vm.rowsRef()[0], "(no snapshots)");
     EXPECT_FALSE(vm.selectedRestore().has_value());
     EXPECT_FALSE(vm.selectedDelete().has_value());
-    EXPECT_EQ(vm.banner(), "no snapshots");
+    // B4: the placeholder row is the ONE empty indicator; the counts banner has
+    // nothing to summarise and stays empty so neither frontend renders a second
+    // "no snapshots" above the list.
+    EXPECT_EQ(vm.banner(), "");
     EXPECT_EQ(vm.detailLines(), std::vector<std::string>{"(no snapshot selected)"});
 }
 
@@ -475,4 +482,131 @@ TEST_F(SnapshotsVmTest, FailedRestoreLeavesNoStaleGuidanceFromAnEarlierOne) {
         core::Error{.code = core::Error::Code::NotFound, .message = "no such snapshot"});
     facade_.restoreSnapshot(std::string(64, 'b')).get();
     EXPECT_TRUE(vm.restoreGuidanceLines().empty());
+}
+
+TEST_F(SnapshotsVmTest, HealthForRowAndHeadLastGoodMarkersLandOnDifferentRows) {
+    using core::SnapshotHealth;
+    // Chain b(corrupt) -> a(healthy): b is the chain tip (HEAD); a is the most
+    // recent healthy snapshot (last good). The two markers land on different
+    // rows, which is exactly what group 4's accent colouring needs to tell apart.
+    seedAndRefresh({manualCorruptMeta(), autoMeta()});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.rowsRef().size(), 2U);
+
+    auto rowOf = [&](const char* idPrefix) {
+        for (int i = 0; std::cmp_less(i, vm.rowsRef().size()); ++i)
+            if (vm.rowsRef()[i].find(idPrefix) != std::string::npos) return i;
+        return -1;
+    };
+    const int rowB = rowOf("bbbbbbbbbbbb");
+    const int rowA = rowOf("aaaaaaaaaaaa");
+    ASSERT_GE(rowB, 0);
+    ASSERT_GE(rowA, 0);
+
+    EXPECT_EQ(vm.healthForRow(rowB), SnapshotHealth::Corrupt);
+    EXPECT_EQ(vm.healthForRow(rowA), SnapshotHealth::Ok);
+
+    EXPECT_TRUE(vm.isHeadRow(rowB));       // b is the chain tip
+    EXPECT_FALSE(vm.isLastGoodRow(rowB));  // ...but corrupt, so not last-good
+    EXPECT_FALSE(vm.isHeadRow(rowA));
+    EXPECT_TRUE(vm.isLastGoodRow(rowA));  // a is the most recent healthy snapshot
+
+    // Markers are computed with the history view OFF too — colouring needs them
+    // in the flat list, not only the chain view.
+    EXPECT_FALSE(vm.historyView());
+}
+
+TEST_F(SnapshotsVmTest, HealthAndMarkersAreEmptyOnPlaceholderAndOutOfRange) {
+    seedAndRefresh({});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.rowsRef().size(), 1U);  // "(no snapshots)" placeholder
+    EXPECT_FALSE(vm.healthForRow(0).has_value());
+    EXPECT_FALSE(vm.isHeadRow(0));
+    EXPECT_FALSE(vm.isLastGoodRow(0));
+    EXPECT_FALSE(vm.healthForRow(-1).has_value());
+    EXPECT_FALSE(vm.healthForRow(99).has_value());
+    EXPECT_FALSE(vm.isHeadRow(99));
+}
+
+// ---- devmgrd availability (calm-backend-unavailability §13) -----------------
+//
+// Snapshots is the view devmgrd actually feeds, so it is where the daemon's
+// unavailability is presented. Devices and Modules read sysfs directly and stay
+// readable by construction, which is what "Degraded daemon leaves reads intact"
+// asserts.
+
+TEST_F(SnapshotsVmTest, UnreachableDaemonYieldsOneCalmNote) {
+    channel_.snapshotMetas = core::makeError(core::Error::Code::Io, kDaemonRaw);
+    facade_.refreshSnapshots().get();
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+
+    const auto notes = vm.availabilityNotes();
+    ASSERT_EQ(notes.size(), 1U);
+    EXPECT_EQ(notes[0].backend, core::BackendId::Devmgrd);
+    EXPECT_EQ(notes[0].text, tests::kDevmgrdUnreachableSentence);
+    // The raw text survives — demoted to the diagnostic, not deleted.
+    EXPECT_EQ(notes[0].diagnostic, kDaemonRaw);
+    // Present but not serving: warning, and danger is not in the range at all.
+    EXPECT_EQ(notes[0].role, app::StatusSeverity::Warning);
+    EXPECT_NE(notes[0].role, app::StatusSeverity::Danger);
+    // The sentence carries none of the diagnostic (design D2).
+    EXPECT_EQ(notes[0].text.find("devmgrd"), std::string::npos);
+}
+
+TEST_F(SnapshotsVmTest, UnreachableDaemonSuppressesEmptyPlaceholder) {
+    channel_.snapshotMetas = core::makeError(core::Error::Code::Io, kDaemonRaw);
+    facade_.refreshSnapshots().get();
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+
+    // "(no snapshots)" asserts a query that completed and found nothing. The
+    // query never completed, so the row that claims it must not render.
+    for (const auto& row : vm.rowsRef()) EXPECT_EQ(row.find("(no snapshots)"), std::string::npos);
+    // ...and the explanation takes its place rather than leaving a blank region.
+    EXPECT_NE(vm.banner().find(tests::kDevmgrdUnreachableSentence), std::string::npos);
+}
+
+TEST_F(SnapshotsVmTest, HealthyEmptyStoreStillClaimsEmptyAndCarriesNoNote) {
+    seedAndRefresh({});
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+
+    ASSERT_EQ(vm.rowsRef().size(), 1U);
+    EXPECT_EQ(vm.rowsRef()[0], "(no snapshots)");  // checked, genuinely empty
+    EXPECT_TRUE(vm.availabilityNotes().empty());
+    EXPECT_EQ(vm.banner(), "");  // B4: no second empty indicator
+}
+
+TEST_F(SnapshotsVmTest, BannerKeepsCountsBesideTheDegradedSentence) {
+    seedAndRefresh({autoMeta()});  // one snapshot from a healthy read
+    channel_.snapshotMetas = core::makeError(core::Error::Code::Io, kDaemonRaw);
+    facade_.refreshSnapshots().get();  // ...then the daemon goes away
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+
+    // The retained list is still true and still shown, so the banner states both
+    // facts: what is on screen, and that it may no longer be current.
+    const auto banner = vm.banner();
+    EXPECT_NE(banner.find(tests::kDevmgrdUnreachableSentence), std::string::npos);
+    EXPECT_NE(banner.find("1 snapshots"), std::string::npos);
+    EXPECT_EQ(vm.rowsRef().size(), 1U);  // reads remain usable
+    // No raw detail on the primary surface.
+    EXPECT_EQ(banner.find(kDaemonRaw), std::string::npos);
+}
+
+TEST_F(SnapshotsVmTest, RecoveredDaemonClearsTheNote) {
+    channel_.snapshotMetas = core::makeError(core::Error::Code::Io, kDaemonRaw);
+    facade_.refreshSnapshots().get();
+    app::SnapshotsVM vm(facade_, bus_, dispatcher_);
+    vm.rebuild();
+    ASSERT_EQ(vm.availabilityNotes().size(), 1U);
+
+    channel_.snapshotMetas = std::vector<core::SnapshotMeta>{autoMeta()};
+    facade_.refreshSnapshots().get();
+    vm.rebuild();
+
+    EXPECT_TRUE(vm.availabilityNotes().empty());
 }

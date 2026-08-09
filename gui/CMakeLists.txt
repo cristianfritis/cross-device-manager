@@ -22,6 +22,7 @@ add_executable(devmgr_gui_tests
     tests/test_device_list_model.cpp
     tests/test_main_window.cpp
     tests/test_module_list_model.cpp
+    tests/test_r6_parity.cpp
     tests/test_qt_ui_dispatcher.cpp
     tests/test_snapshot_list_model.cpp
     tests/test_update_list_model.cpp)

@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 project(devmgr VERSION 0.6.0 LANGUAGES CXX)
 
 # Prerelease suffix appended to the semver ("" for a final release).
-set(DEVMGR_PRERELEASE "beta.1" CACHE STRING "Prerelease suffix (e.g. beta.1); empty for a final release")
+set(DEVMGR_PRERELEASE "beta.2" CACHE STRING "Prerelease suffix (e.g. beta.1); empty for a final release")
 if(DEVMGR_PRERELEASE)
     set(DEVMGR_FULL_VERSION "${PROJECT_VERSION}-${DEVMGR_PRERELEASE}")
 else()

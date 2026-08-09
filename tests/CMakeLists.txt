@@ -5,6 +5,12 @@ add_executable(devmgr_tests
     unit/test_version.cpp
     unit/test_result.cpp
     unit/test_models.cpp
+    unit/test_device_presentation.cpp
+    unit/test_backend_wording.cpp
+    unit/test_backend_parity.cpp
+    unit/test_backend_status_vm.cpp
+    unit/test_criticality.cpp
+    unit/test_vm_criticality_accessors.cpp
     unit/test_snapshot_models.cpp
     unit/test_snapshot_json.cpp
     unit/test_snapshot_diff.cpp
@@ -30,9 +36,12 @@ add_executable(devmgr_tests
     unit/test_update_models.cpp
     unit/test_updates_vm.cpp
     unit/test_snapshots_vm.cpp
+    unit/test_tui_state_roles.cpp
 )
 target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest GTest::gtest_main)
-target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# ${CMAKE_SOURCE_DIR} reaches tui/src/state_roles.hpp — a toolkit-free header
+# (no FTXUI), so the documented TUI colour table is unit-testable here.
+target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
 if(UNIX AND NOT APPLE)
     # Header-only udev mapping helpers (NO libudev link) — unit-test them directly.
     target_include_directories(devmgr_tests PRIVATE ${CMAKE_SOURCE_DIR}/platform/linux/include)

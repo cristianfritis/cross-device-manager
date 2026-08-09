@@ -38,10 +38,10 @@
 - [x] 6.1 VM acceptance script against installed artifacts: enumeration both UIs, hotplug, disable+restore, blacklist round-trip, firmware check, CLI recovery, journal sandbox-denial scan; ends `ACCEPTANCE OK`; rig wiring beside existing smokes
 - [x] 6.2 Upgrade matrix scripts: 0.5→0.6 upgrade preserving config+snapshots (`--previous <path>` pinned artifact, loud failure if absent), downgrade outcome, interrupted install recovery, tarball→package replacement, purge residue — DEB path and RPM path
 - [x] 6.3 Version bump to 0.6.0 + full standard gates (build/ctest both configs, format, gated tidy, purity greps) + acceptance suite green
-- [ ] 6.4 Tag `v0.6.0-beta.1` through the extended pipeline — **owner action**; draft release verified (full asset set incl. signatures + SBOM, attestation verify passes), owner publishes
+- [x] 6.4 Tag `v0.6.0-beta.1` through the extended pipeline — **owner action**; draft release verified (full asset set incl. signatures + SBOM, attestation verify passes), owner publishes
 
 ## 7. Stretch (optional — droppable by pre-agreement)
 
-- [ ] 7.1 libFuzzer harness for the validation layer + `snapshot_json` parsing, optional CI job
-- [ ] 7.2 Resource-exhaustion and restart/recovery tests (daemon kill/restart mid-operation, disk-full on state dir)
-- [ ] 7.3 Written compatibility/versioning policy: D-Bus ApiVersion additive-only rules + snapshot formatVersion migration policy
+- [~] 7.1 libFuzzer harness for the validation layer + `snapshot_json` parsing, optional CI job — **DROPPED** (pre-agreed droppable; deferred to a later change)
+- [~] 7.2 Resource-exhaustion and restart/recovery tests (daemon kill/restart mid-operation, disk-full on state dir) — **DROPPED** (pre-agreed droppable; deferred to a later change)
+- [x] 7.3 Written compatibility/versioning policy: D-Bus ApiVersion additive-only rules + snapshot formatVersion migration policy → `docs/COMPATIBILITY-POLICY.md`

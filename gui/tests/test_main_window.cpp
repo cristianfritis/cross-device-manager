@@ -17,8 +17,14 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTextEdit>
+#include <QRegularExpression>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
+#include <QtTest/QTest>
+
+#include "devmgr/core/backend_wording.hpp"
+#include "tests/fixtures/backend_sentences.hpp"
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_detail_vm.hpp"
@@ -46,6 +52,15 @@
 using namespace devmgr;
 
 namespace {
+// The raw shape fwupd::mapError composes for an absent service — what the beta
+// user saw verbatim in the Updates banner.
+constexpr const char* kRawServiceUnknown =
+    "org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.fwupd was not provided "
+    "by any .service files";
+// What the privileged channel hands back when the bus cannot reach devmgrd
+// (platform/linux/.../dbus_contract.hpp) — diagnostic, never presentation.
+constexpr const char* kRawDaemonUnavailable = "helper devmgrd is not available";
+
 core::Device dev(std::string id, core::BusType bus, std::string name) {
     core::Device d;
     d.id = core::DeviceId{std::move(id)};
@@ -292,12 +307,16 @@ TEST(MainWindowTest, ToggleActionDisabledWithoutSelectionEnabledOnDeviceRow) {
     f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
     auto window = f.makeWindow();
     EXPECT_FALSE(window.toggleAction()->isEnabled());
+    // Nothing selected is a state of the selection, not of the tab: the verb
+    // belongs to Devices, so it stays present and explains itself by being off.
+    EXPECT_TRUE(window.toggleAction()->isVisible());
 
     f.refreshAndPump();
     const int row = f.firstDeviceRow();
     ASSERT_GE(row, 0);
     window.listView()->setCurrentIndex(window.listView()->model()->index(row, 0));
     EXPECT_TRUE(window.toggleAction()->isEnabled());
+    EXPECT_TRUE(window.toggleAction()->isVisible());
     EXPECT_EQ(window.toggleAction()->text(), QStringLiteral("Disable"));
 }
 
@@ -365,26 +384,39 @@ TEST(MainWindowTest, ModulesTabGatesActionEnablement) {
     f.refreshAndPump();
 
     ASSERT_EQ(window.tabs()->count(), 4);  // Devices | Modules | Updates | Snapshots
-    // Devices tab: module actions off; device actions follow the selection.
+    // Devices tab: module actions are not merely off, they are gone — a verb from
+    // another tab is absent (DESIGN.md §5.3). Device actions follow the selection
+    // and stay present while they wait for one.
     EXPECT_FALSE(window.loadModuleAction()->isEnabled());
+    EXPECT_FALSE(window.loadModuleAction()->isVisible());
     EXPECT_FALSE(window.unloadModuleAction()->isEnabled());
+    EXPECT_FALSE(window.unloadModuleAction()->isVisible());
     EXPECT_FALSE(window.unbindAction()->isEnabled());  // nothing selected yet
+    EXPECT_TRUE(window.unbindAction()->isVisible());
     EXPECT_FALSE(window.bindAction()->isEnabled());
+    EXPECT_TRUE(window.bindAction()->isVisible());
     f.selectFirstDevice(window);
     EXPECT_TRUE(window.unbindAction()->isEnabled());
     EXPECT_TRUE(window.bindAction()->isEnabled());
 
     window.tabs()->setCurrentIndex(1);
     EXPECT_TRUE(window.loadModuleAction()->isEnabled());
+    EXPECT_TRUE(window.loadModuleAction()->isVisible());
     // The VM starts on row 0 = "dummy" → unload has a target.
     EXPECT_TRUE(window.unloadModuleAction()->isEnabled());
+    EXPECT_TRUE(window.unloadModuleAction()->isVisible());
     EXPECT_FALSE(window.bindAction()->isEnabled());  // device actions off on Modules tab
+    EXPECT_FALSE(window.bindAction()->isVisible());
     EXPECT_FALSE(window.unbindAction()->isEnabled());
+    EXPECT_FALSE(window.unbindAction()->isVisible());
     EXPECT_FALSE(window.toggleAction()->isEnabled());
+    EXPECT_FALSE(window.toggleAction()->isVisible());
 
     window.tabs()->setCurrentIndex(0);
     EXPECT_FALSE(window.loadModuleAction()->isEnabled());
+    EXPECT_FALSE(window.loadModuleAction()->isVisible());
     EXPECT_TRUE(window.bindAction()->isEnabled());  // device selection retained
+    EXPECT_TRUE(window.bindAction()->isVisible());
 }
 
 TEST(MainWindowTest, PlaceholderRowDisablesUnload) {
@@ -392,7 +424,10 @@ TEST(MainWindowTest, PlaceholderRowDisablesUnload) {
     auto window = f.makeWindow();
     window.tabs()->setCurrentIndex(1);
     EXPECT_TRUE(window.loadModuleAction()->isEnabled());
+    // A placeholder row is no target, but Unload still belongs to this tab, so it
+    // stays present and off rather than vanishing.
     EXPECT_FALSE(window.unloadModuleAction()->isEnabled());
+    EXPECT_TRUE(window.unloadModuleAction()->isVisible());
 }
 
 TEST(MainWindowTest, ModulesTabEntrySetsBannerRowsAndAsyncSignatureFill) {
@@ -595,6 +630,9 @@ TEST(MainWindowTest, InstallActionDisabledForRemoteOnlyRelease) {  // review tes
     window.tabs()->setCurrentIndex(2);  // rebuild + refresh on entry
     ASSERT_EQ(window.updatesView()->model()->rowCount(), 1);
     EXPECT_FALSE(window.installUpdateAction()->isEnabled());
+    // A remote-only release is a refusal about the selected candidate, not an
+    // inapplicable verb: it stays on the toolbar to be explained.
+    EXPECT_TRUE(window.installUpdateAction()->isVisible());
 }
 
 TEST(MainWindowTest, InstallActionEnabledOnUpdatesTabWithLocalCab) {
@@ -604,6 +642,326 @@ TEST(MainWindowTest, InstallActionEnabledOnUpdatesTabWithLocalCab) {
     window.tabs()->setCurrentIndex(2);
     ASSERT_EQ(window.updatesView()->model()->rowCount(), 1);
     EXPECT_TRUE(window.installUpdateAction()->isEnabled());
+    EXPECT_TRUE(window.installUpdateAction()->isVisible());
+}
+
+// ----- Backend unavailability: sentence visible, raw detail demoted -----
+
+// The shipped defect, from the GUI side: an unreachable fwupd put
+// "org.freedesktop.DBus.Error.ServiceUnknown: …" straight into the banner, and
+// the list still claimed "(no updates available)" as though the query had run.
+TEST(MainWindowTest, UnreachableProviderShowsSentenceNotRawDbusName) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.provider.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    f.facade.refreshUpdates().wait();
+    auto window = f.makeWindow();
+    window.show();  // child visibility is only meaningful once the window is up
+    window.tabs()->setCurrentIndex(2);
+
+    const QString banner = window.updatesBannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    // The shared fixture constant, byte-pinned to the core table by
+    // tests/unit/test_backend_parity.cpp — the same string the TUI render test
+    // asserts, which is what makes the two surfaces provably agree.
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kFwupdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));        // glyph, not colour (§9 exception)
+    EXPECT_TRUE(window.updatesBannerLabel()->font().bold());  // weight carries the warning role
+
+    // No primary widget claims a completed, empty query.
+    for (int row = 0; row < window.updatesView()->model()->rowCount(); ++row)
+        EXPECT_FALSE(window.updatesView()->model()->index(row, 0).data().toString().contains(
+            QStringLiteral("(no updates available)")));
+
+    // The detail is demoted, not deleted — and stays hidden until asked for.
+    ASSERT_TRUE(window.updatesDetailsButton()->isVisible());
+    // Staged but not shown: the raw text exists in the collapsed region only,
+    // which renders nothing until the disclosure is opened.
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+}
+
+TEST(MainWindowTest, DisclosureRevealsTheRawDiagnostic) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.provider.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    f.facade.refreshUpdates().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    window.updatesDetailsButton()->setChecked(true);
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawServiceUnknown)));
+    // Read-only, and reachable without a pointer.
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->textInteractionFlags() &
+                Qt::TextSelectableByKeyboard);
+
+    window.updatesDetailsButton()->setChecked(false);
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+}
+
+// Keyboard-only path: the disclosure is in the tab order and toggles from a key
+// event alone, so the diagnostic is never pointer-gated (ui-accessibility).
+TEST(MainWindowTest, DisclosureIsReachableAndToggledByKeyboardAlone) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.provider.availability_ = {
+        .available = false,
+        .version = {},
+        .error = core::Error{.code = core::Error::Code::Io, .message = kRawServiceUnknown},
+        .notices = {}};
+    f.facade.refreshUpdates().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    EXPECT_FALSE(window.updatesDetailsButton()->accessibleName().isEmpty());
+    ASSERT_NE(window.updatesDetailsButton()->focusPolicy() & Qt::TabFocus, Qt::NoFocus);
+
+    window.updatesDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.updatesDetailsButton(), Qt::Key_Space);
+    EXPECT_TRUE(window.updatesDiagnosticLabel()->isVisible());
+    QTest::keyClick(window.updatesDetailsButton(), Qt::Key_Space);
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+}
+
+// Healthy providers: no note, so no disclosure control and no region — the
+// affordance collapses to nothing rather than sitting there disabled.
+TEST(MainWindowTest, HealthyProvidersShowNoDisclosure) {
+    Fixture f;
+    f.provider.id_ = "fwupd";
+    f.seedUpdateAndRefresh(/*localCab=*/true);
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(2);
+
+    EXPECT_FALSE(window.updatesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.updatesDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.updatesBannerLabel()->font().bold());
+}
+
+// ----- Backend unavailability: the daemon, on the view it feeds (§13) --------
+
+// The Snapshots list comes from devmgrd, so an unreachable daemon is explained
+// here — with the same sentence, glyph, weight and disclosure the Updates page
+// uses for fwupd. One accessor, two pages, no page-specific wording.
+TEST(MainWindowTest, UnreachableDaemonShowsSentenceOnSnapshotsPage) {
+    Fixture f;
+    f.channel.snapshotMetas = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refreshSnapshots().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(3);
+
+    const QString banner = window.snapshotsBannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kDevmgrdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));
+    EXPECT_TRUE(window.snapshotsBannerLabel()->font().bold());
+    // The raw diagnostic is not on the primary surface either.
+    EXPECT_FALSE(banner.contains(QString::fromStdString(kRawDaemonUnavailable)));
+
+    // No row claims a completed, empty query.
+    for (int row = 0; row < window.snapshotsView()->model()->rowCount(); ++row)
+        EXPECT_FALSE(window.snapshotsView()->model()->index(row, 0).data().toString().contains(
+            QStringLiteral("(no snapshots)")));
+
+    ASSERT_TRUE(window.snapshotsDetailsButton()->isVisible());
+    EXPECT_FALSE(window.snapshotsDiagnosticLabel()->isVisible());
+}
+
+TEST(MainWindowTest, SnapshotsDisclosureRevealsTheRawDaemonDiagnostic) {
+    Fixture f;
+    f.channel.snapshotMetas = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refreshSnapshots().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(3);
+
+    // Keyboard alone, like the Updates disclosure: named, focusable, togglable.
+    EXPECT_FALSE(window.snapshotsDetailsButton()->accessibleName().isEmpty());
+    ASSERT_NE(window.snapshotsDetailsButton()->focusPolicy() & Qt::TabFocus, Qt::NoFocus);
+    window.snapshotsDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.snapshotsDetailsButton(), Qt::Key_Space);
+
+    EXPECT_TRUE(window.snapshotsDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.snapshotsDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawDaemonUnavailable)));
+
+    QTest::keyClick(window.snapshotsDetailsButton(), Qt::Key_Space);
+    EXPECT_FALSE(window.snapshotsDiagnosticLabel()->isVisible());
+}
+
+// §14 F1/F2. The live matrix found the GUI carrying the note on Snapshots and
+// Updates but NOT on Devices (no banner existed at all) and only half-carrying
+// it on Modules (the plain string, so no glyph, no weight, no disclosure) —
+// while the TUI carried it fully on all three. The daemon owns every mutation
+// verb on Devices and Modules, so a user looking at dimmed controls is owed the
+// reason on the tab they are standing on.
+TEST(MainWindowTest, UnreachableDaemonShowsSentenceOnDevicesPage) {
+    Fixture f;
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(0);
+
+    const QString banner = window.devicesBannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kDevmgrdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));
+    EXPECT_TRUE(window.devicesBannerLabel()->font().bold());
+    EXPECT_FALSE(banner.contains(QString::fromStdString(kRawDaemonUnavailable)));
+
+    // Reachable by keyboard alone, and the raw text is demoted, not deleted.
+    ASSERT_TRUE(window.devicesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.devicesDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.devicesDetailsButton()->accessibleName().isEmpty());
+    ASSERT_NE(window.devicesDetailsButton()->focusPolicy() & Qt::TabFocus, Qt::NoFocus);
+    window.devicesDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.devicesDetailsButton(), Qt::Key_Space);
+    EXPECT_TRUE(window.devicesDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.devicesDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawDaemonUnavailable)));
+}
+
+TEST(MainWindowTest, UnreachableDaemonShowsSentenceOnModulesPage) {
+    Fixture f;
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(1);
+
+    const QString banner = window.bannerLabel()->text();
+    static const QRegularExpression raw(
+        QStringLiteral("org\\.freedesktop|DBus\\.Error|ServiceUnknown|errno"));
+    EXPECT_FALSE(banner.contains(raw)) << banner.toStdString();
+    EXPECT_TRUE(banner.contains(QString::fromUtf8(tests::kDevmgrdUnreachableSentence)));
+    EXPECT_TRUE(banner.contains(QStringLiteral("?")));
+    // The role now arrives with the text through bannerLine(), so the weight is
+    // the VM's decision rather than a string the GUI re-read.
+    EXPECT_TRUE(window.bannerLabel()->font().bold());
+
+    ASSERT_TRUE(window.modulesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.modulesDiagnosticLabel()->isVisible());
+    window.modulesDetailsButton()->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(window.modulesDetailsButton(), Qt::Key_Space);
+    EXPECT_TRUE(window.modulesDiagnosticLabel()->isVisible());
+    EXPECT_TRUE(window.modulesDiagnosticLabel()->text().contains(
+        QString::fromStdString(kRawDaemonUnavailable)));
+}
+
+// The affordance collapses to nothing while the daemon serves — no empty row
+// reserved, no inert button in the tab order.
+TEST(MainWindowTest, HealthyDaemonShowsNoDevicesOrModulesDisclosure) {
+    Fixture f;
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    window.show();
+
+    window.tabs()->setCurrentIndex(0);
+    EXPECT_FALSE(window.devicesBannerLabel()->isVisible());
+    EXPECT_FALSE(window.devicesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.devicesDiagnosticLabel()->isVisible());
+
+    window.tabs()->setCurrentIndex(1);
+    EXPECT_FALSE(window.modulesDetailsButton()->isVisible());
+    EXPECT_FALSE(window.modulesDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.bannerLabel()->text().contains(QStringLiteral("?")));
+}
+
+TEST(MainWindowTest, HealthyDaemonShowsNoSnapshotsDisclosure) {
+    Fixture f;
+    f.facade.refreshSnapshots().wait();  // answered, and the store is empty
+    auto window = f.makeWindow();
+    window.show();
+    window.tabs()->setCurrentIndex(3);
+
+    EXPECT_FALSE(window.snapshotsDetailsButton()->isVisible());
+    EXPECT_FALSE(window.snapshotsDiagnosticLabel()->isVisible());
+    EXPECT_FALSE(window.snapshotsBannerLabel()->font().bold());
+    // A completed query that found nothing still says so.
+    ASSERT_EQ(window.snapshotsView()->model()->rowCount(), 1);
+    EXPECT_EQ(window.snapshotsView()->model()->index(0, 0).data().toString(),
+              QStringLiteral("(no snapshots)"));
+}
+
+// ----- Blocked verbs reuse the shared sentence (§5.3, §11) -------------------
+
+// The catalog's #7/#8: a verb the daemon cannot serve stays VISIBLE and greyed,
+// and says WHY in the shared words. Hidden-while-down and a blank reason are
+// both defects — the first removes the affordance, the second removes the
+// explanation, and either one sends the user to the logs.
+TEST(MainWindowTest, DaemonDownDisablesVerbsVisiblyWithTheSharedReason) {
+    Fixture f;
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    window.show();
+    f.refreshAndPump();
+    f.selectFirstDevice(window);
+
+    const QString sentence = QString::fromUtf8(tests::kDevmgrdUnreachableSentence);
+    for (QAction* action : {window.toggleAction(), window.bindAction(), window.unbindAction()}) {
+        EXPECT_FALSE(action->isEnabled()) << action->text().toStdString();
+        EXPECT_TRUE(action->isVisible()) << "a blocked verb must stay visible (§5.3)";
+        EXPECT_EQ(action->toolTip(), sentence) << action->text().toStdString();
+        // The reason is never the raw diagnostic and never a generic failure.
+        EXPECT_FALSE(action->toolTip().contains(QString::fromStdString(kRawDaemonUnavailable)));
+        EXPECT_FALSE(action->toolTip().contains(QStringLiteral("Operation failed")));
+    }
+
+    window.tabs()->setCurrentIndex(1);
+    EXPECT_FALSE(window.loadModuleAction()->isEnabled());
+    EXPECT_TRUE(window.loadModuleAction()->isVisible());
+    EXPECT_EQ(window.loadModuleAction()->toolTip(), sentence);
+
+    window.tabs()->setCurrentIndex(3);
+    for (QAction* action : {window.createSnapshotAction(), window.restoreSnapshotAction(),
+                            window.deleteSnapshotAction()}) {
+        EXPECT_FALSE(action->isEnabled()) << action->text().toStdString();
+        EXPECT_TRUE(action->isVisible()) << "a blocked verb must stay visible (§5.3)";
+        EXPECT_EQ(action->toolTip(), sentence);
+    }
+    // History is a local view toggle over rows already on screen — no daemon
+    // needed, so a degraded daemon must NOT disable it.
+    EXPECT_TRUE(window.historySnapshotAction()->isEnabled());
+    EXPECT_TRUE(window.historySnapshotAction()->isVisible());
+}
+
+TEST(MainWindowTest, HealthyDaemonLeavesVerbsEnabledAndUnexplained) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    auto window = f.makeWindow();
+    window.show();
+    f.refreshAndPump();
+    f.selectFirstDevice(window);
+
+    EXPECT_TRUE(window.toggleAction()->isEnabled());
+    EXPECT_TRUE(window.toggleAction()->isVisible());
+    // QAction::toolTip() falls back to text() when unset, so "no reason attached"
+    // is "the tooltip is not the availability sentence", not "the tooltip is empty".
+    EXPECT_NE(window.toggleAction()->toolTip(),
+              QString::fromUtf8(tests::kDevmgrdUnreachableSentence));
+    window.tabs()->setCurrentIndex(3);
+    EXPECT_TRUE(window.createSnapshotAction()->isEnabled());
+    EXPECT_TRUE(window.createSnapshotAction()->isVisible());
 }
 
 TEST(MainWindowTest, QuitGuardBlocksCloseDuringInstall) {
@@ -757,21 +1115,24 @@ TEST(MainWindowTest, SnapshotsTabAddedAndVerbsGatedToTab) {
     ASSERT_EQ(window.tabs()->count(), 4);
     EXPECT_EQ(window.tabs()->tabText(3), QStringLiteral("Snapshots"));
 
-    // Off the Snapshots tab (Devices): every verb disabled.
-    EXPECT_FALSE(window.createSnapshotAction()->isEnabled());
-    EXPECT_FALSE(window.restoreSnapshotAction()->isEnabled());
-    EXPECT_FALSE(window.deleteSnapshotAction()->isEnabled());
-    EXPECT_FALSE(window.diffSnapshotAction()->isEnabled());
-    EXPECT_FALSE(window.historySnapshotAction()->isEnabled());
+    // Off the Snapshots tab (Devices): every verb disabled AND absent — a verb
+    // that cannot apply here is not left standing greyed (DESIGN.md §5.3).
+    for (QAction* action : {window.createSnapshotAction(), window.restoreSnapshotAction(),
+                            window.deleteSnapshotAction(), window.diffSnapshotAction(),
+                            window.historySnapshotAction()}) {
+        EXPECT_FALSE(action->isEnabled()) << action->text().toStdString();
+        EXPECT_FALSE(action->isVisible()) << action->text().toStdString();
+    }
 
     window.tabs()->setCurrentIndex(3);
     // On the tab, the verbs are live; the per-selection refusal is enforced on
     // click (TUI parity), not by greying the action out.
-    EXPECT_TRUE(window.createSnapshotAction()->isEnabled());
-    EXPECT_TRUE(window.restoreSnapshotAction()->isEnabled());
-    EXPECT_TRUE(window.deleteSnapshotAction()->isEnabled());
-    EXPECT_TRUE(window.diffSnapshotAction()->isEnabled());
-    EXPECT_TRUE(window.historySnapshotAction()->isEnabled());
+    for (QAction* action : {window.createSnapshotAction(), window.restoreSnapshotAction(),
+                            window.deleteSnapshotAction(), window.diffSnapshotAction(),
+                            window.historySnapshotAction()}) {
+        EXPECT_TRUE(action->isEnabled()) << action->text().toStdString();
+        EXPECT_TRUE(action->isVisible()) << action->text().toStdString();
+    }
 }
 
 TEST(MainWindowTest, SnapshotsTabEntrySetsBannerAndRows) {
@@ -1133,4 +1494,228 @@ TEST(MainWindowTest, ListRowsElideLongValuesButDetailKeepsFullText) {
     ASSERT_GE(window.detailTree()->topLevelItemCount(), 1);
     EXPECT_EQ(window.detailTree()->topLevelItem(0)->text(1),
               QString::fromStdString(longName));  // full value, not elided
+}
+
+// ----- Contextual toolbar: only the active tab's verbs are present ----------
+//
+// Before this, all fourteen verbs stood on every tab and `disabled` meant both
+// "wrong tab" and "applies here, cannot run right now". The second meaning is
+// the one carrying the shared unavailability sentence and the guard reasons, so
+// the first had to go (DESIGN.md §5.3).
+
+namespace {
+// The toolbar exactly as the user sees it on the active tab: separators as `|`,
+// actions as their visible text, in toolbar order.
+QStringList visibleToolbarEntries(const gui::MainWindow& window) {
+    QStringList entries;
+    for (const QAction* action : window.toolbar()->actions()) {
+        if (!action->isVisible()) continue;
+        entries.push_back(action->isSeparator() ? QStringLiteral("|") : action->text());
+    }
+    return entries;
+}
+
+// The same list with the separators dropped — the verb set and its order.
+QStringList visibleVerbs(const gui::MainWindow& window) {
+    QStringList verbs = visibleToolbarEntries(window);
+    verbs.removeAll(QStringLiteral("|"));
+    return verbs;
+}
+
+std::vector<QAction*> allVerbs(const gui::MainWindow& window) {
+    return {window.refreshAction(),
+            window.toggleAction(),
+            window.bindAction(),
+            window.unbindAction(),
+            window.loadModuleAction(),
+            window.unloadModuleAction(),
+            window.refreshUpdatesAction(),
+            window.installUpdateAction(),
+            window.dismissRequestAction(),
+            window.createSnapshotAction(),
+            window.restoreSnapshotAction(),
+            window.diffSnapshotAction(),
+            window.historySnapshotAction(),
+            window.deleteSnapshotAction()};
+}
+}  // namespace
+
+TEST(MainWindowTest, ToolbarShowsOnlyTheActiveTabsVerbsInOrder) {
+    Fixture f;
+    auto window = f.makeWindow();
+
+    window.tabs()->setCurrentIndex(0);
+    EXPECT_EQ(
+        visibleVerbs(window),
+        QStringList({QStringLiteral("Refresh"), QStringLiteral("Disable"),
+                     QStringLiteral("Bind driver…"), QStringLiteral("Unbind driver (advanced)")}));
+
+    window.tabs()->setCurrentIndex(1);
+    EXPECT_EQ(visibleVerbs(window),
+              QStringList({QStringLiteral("Load Module…"), QStringLiteral("Unload")}));
+
+    // No dismissible request yet, so `Dismiss Request` has no object at all.
+    window.tabs()->setCurrentIndex(2);
+    EXPECT_EQ(visibleVerbs(window),
+              QStringList({QStringLiteral("Refresh Updates"), QStringLiteral("Install Update")}));
+
+    window.tabs()->setCurrentIndex(3);
+    EXPECT_EQ(visibleVerbs(window),
+              QStringList({QStringLiteral("Create Snapshot…"), QStringLiteral("Restore Snapshot…"),
+                           QStringLiteral("Diff Snapshot"), QStringLiteral("History"),
+                           QStringLiteral("Delete Snapshot")}));
+
+    // And back: switching tabs re-composes the one toolbar, it does not rebuild it.
+    window.tabs()->setCurrentIndex(0);
+    EXPECT_EQ(visibleVerbs(window).front(), QStringLiteral("Refresh"));
+}
+
+// A foreign verb is ABSENT, and also inert: hidden alone would leave its
+// shortcut and its context-menu entry live on the wrong view.
+TEST(MainWindowTest, ForeignVerbsAreHiddenAndDisabledOnEveryTab) {
+    Fixture f;
+    auto window = f.makeWindow();
+
+    for (int tab = 0; tab < window.tabs()->count(); ++tab) {
+        window.tabs()->setCurrentIndex(tab);
+        for (QAction* action : allVerbs(window)) {
+            if (action->data().toInt() == tab) continue;
+            EXPECT_FALSE(action->isVisible())
+                << action->text().toStdString() << " visible on tab " << tab;
+            EXPECT_FALSE(action->isEnabled())
+                << action->text().toStdString() << " enabled on tab " << tab;
+        }
+    }
+}
+
+TEST(MainWindowTest, ToolbarSeparatorsAreNeverOrphaned) {
+    Fixture f;
+    auto window = f.makeWindow();
+
+    for (int tab = 0; tab < window.tabs()->count(); ++tab) {
+        window.tabs()->setCurrentIndex(tab);
+        const QStringList entries = visibleToolbarEntries(window);
+        ASSERT_FALSE(entries.isEmpty()) << "tab " << tab << " shows no toolbar entry at all";
+        EXPECT_NE(entries.front(), QStringLiteral("|")) << "leading separator on tab " << tab;
+        EXPECT_NE(entries.back(), QStringLiteral("|")) << "trailing separator on tab " << tab;
+        for (int i = 1; i < entries.size(); ++i)
+            EXPECT_FALSE(entries[i] == QStringLiteral("|") && entries[i - 1] == QStringLiteral("|"))
+                << "doubled separator on tab " << tab << " at " << i;
+    }
+    // The groups themselves are real: Devices separates refresh, enable/disable,
+    // the additive bind and the destructive unbind (§5.3, §10).
+    window.tabs()->setCurrentIndex(0);
+    EXPECT_EQ(
+        visibleToolbarEntries(window),
+        QStringList({QStringLiteral("Refresh"), QStringLiteral("|"), QStringLiteral("Disable"),
+                     QStringLiteral("|"), QStringLiteral("Bind driver…"), QStringLiteral("|"),
+                     QStringLiteral("Unbind driver (advanced)")}));
+}
+
+// Shortcuts stay bound and become inert off their tab (DESIGN.md §10.1) — the
+// binding is never removed and re-added, so it cannot be lost by a mis-ordered
+// update.
+TEST(MainWindowTest, VerbShortcutsStayBoundAndGoInertOffTab) {
+    Fixture f;
+    auto window = f.makeWindow();
+
+    for (int tab : {1, 2, 3, 0}) window.tabs()->setCurrentIndex(tab);
+    EXPECT_EQ(window.refreshAction()->shortcut(), QKeySequence(QKeySequence::Refresh));
+    EXPECT_EQ(window.toggleAction()->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_E));
+    EXPECT_EQ(window.loadModuleAction()->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_L));
+    EXPECT_EQ(window.createSnapshotAction()->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_N));
+
+    // On Devices, F5's action is live and refreshes devices.
+    window.refreshAction()->trigger();
+    EXPECT_EQ(f.refreshCalls, 1);
+
+    // On Modules it is hidden and disabled, so the same key cannot refresh a view
+    // the user is not looking at (the pre-change behaviour).
+    window.tabs()->setCurrentIndex(1);
+    EXPECT_FALSE(window.refreshAction()->isVisible());
+    EXPECT_FALSE(window.refreshAction()->isEnabled());
+    window.refreshAction()->trigger();  // no-ops while disabled
+    EXPECT_EQ(f.refreshCalls, 1);
+}
+
+// The daemon-backed verbs of the tab the user is standing on stay visible and
+// disabled with the shared sentence attached — a refusal is explained, never
+// hidden (DESIGN.md §5.3, §6.1).
+TEST(MainWindowTest, DaemonDownKeepsTheTabsVerbsVisibleWithTooltips) {
+    Fixture f;
+    f.pal.seedDevice(dev("u1", core::BusType::Usb, "Mouse"));
+    f.channel.disabledEntries = core::makeError(core::Error::Code::Io, kRawDaemonUnavailable);
+    f.facade.refresh().wait();
+    auto window = f.makeWindow();
+    f.refreshAndPump();
+    f.selectFirstDevice(window);
+
+    const QString sentence = QString::fromUtf8(tests::kDevmgrdUnreachableSentence);
+    struct Case {
+        int tab;
+        std::vector<QAction*> blocked;
+    };
+    const std::vector<Case> cases{
+        {0, {window.toggleAction(), window.bindAction(), window.unbindAction()}},
+        {1, {window.loadModuleAction()}},
+        {3,
+         {window.createSnapshotAction(), window.restoreSnapshotAction(),
+          window.diffSnapshotAction(), window.deleteSnapshotAction()}}};
+    for (const auto& c : cases) {
+        window.tabs()->setCurrentIndex(c.tab);
+        for (QAction* action : c.blocked) {
+            EXPECT_TRUE(action->isVisible())
+                << action->text().toStdString() << " hidden while devmgrd is down";
+            EXPECT_FALSE(action->isEnabled()) << action->text().toStdString();
+            EXPECT_TRUE(action->toolTip().contains(sentence))
+                << action->text().toStdString() << " tooltip: " << action->toolTip().toStdString();
+        }
+    }
+
+    // Reads stay usable while the daemon is degraded (§6), so Devices keeps a
+    // live Refresh rather than a greyed one.
+    window.tabs()->setCurrentIndex(0);
+    EXPECT_TRUE(window.refreshAction()->isVisible());
+    EXPECT_TRUE(window.refreshAction()->isEnabled());
+}
+
+// `Dismiss Request` is the one verb whose object can be missing on its own tab:
+// with no request there is nothing to dismiss, which is inapplicability rather
+// than a refusal, so it is hidden and comes back with the request.
+TEST(MainWindowTest, DismissRequestAppearsOnlyWithADismissibleRequest) {
+    Fixture f;
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(2);
+    EXPECT_FALSE(window.dismissRequestAction()->isVisible());
+    EXPECT_FALSE(window.dismissRequestAction()->isEnabled());
+    EXPECT_FALSE(visibleToolbarEntries(window).back() == QStringLiteral("|"));
+
+    f.bus.publish(core::UpdateRequestEvent{.providerId = "fake",
+                                           .deviceId = "a1",
+                                           .kind = "post",
+                                           .message = "unplug and replug the device"});
+    EXPECT_TRUE(window.dismissRequestAction()->isVisible());
+    EXPECT_TRUE(window.dismissRequestAction()->isEnabled());
+    EXPECT_EQ(visibleVerbs(window),
+              QStringList({QStringLiteral("Refresh Updates"), QStringLiteral("Install Update"),
+                           QStringLiteral("Dismiss Request")}));
+
+    window.dismissRequestAction()->trigger();
+    EXPECT_FALSE(window.dismissRequestAction()->isVisible());
+    const QStringList after = visibleToolbarEntries(window);
+    EXPECT_NE(after.back(), QStringLiteral("|"));  // its group separator went with it
+}
+
+// Icons supplement the label, never replace it: destructive and advanced verbs
+// stay text-labeled and every action's visible text remains its accessible name
+// (DESIGN.md §4.4, §10.1).
+TEST(MainWindowTest, ToolbarKeepsTextBesideAnyIcon) {
+    Fixture f;
+    auto window = f.makeWindow();
+
+    EXPECT_EQ(window.toolbar()->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
+    for (int tab = 0; tab < window.tabs()->count(); ++tab) {
+        window.tabs()->setCurrentIndex(tab);
+        for (const QString& verb : visibleVerbs(window)) EXPECT_FALSE(verb.isEmpty());
+    }
 }

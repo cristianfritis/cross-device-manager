@@ -9,11 +9,31 @@
 #include <vector>
 
 #include "devmgr/app/application_facade.hpp"
+#include "devmgr/app/status_line_vm.hpp"  // StatusSeverity
 #include "devmgr/app/ui_dispatcher.hpp"
+#include "devmgr/core/criticality.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
 
 namespace devmgr::app {
+
+// Per-row module signature state for TUI semantic colouring (design decision
+// 1a): the state ModulesVM already computes into its signature column.
+// Undetermined covers both "?" (could not classify) and the async-pending "…"
+// cell. Blacklist is a modprobe.d fact fetched only for the detail pane
+// (facade_.modprobeDetail), not held per row, so it stays a detail signal.
+enum class ModuleSignature { Signed, Unsigned, Undetermined };
+
+// A banner's words and its valence, produced together by the ViewModel that
+// owns both (design D6). The render path previously recovered the valence by
+// searching the rendered string for a phrase, which meant rewording a banner
+// silently recoloured it — the same reverse-engineering of state from
+// presentation that docs/DESIGN.md §11 lists as an anti-pattern and that the
+// per-row state seam already outlawed for rows.
+struct BannerLine {
+    std::string text;
+    StatusSeverity severity = StatusSeverity::Info;
+};
 
 // Toolkit-agnostic Modules view model: filtered rows over listModules(), a
 // selected module, an async-filled signature column (spec §7.1 perf note),
@@ -33,8 +53,30 @@ class ModulesVM {
     int& selectedRef() { return selected_; }
     void setFilter(std::string filter);
     std::optional<std::string> selectedModule() const;
+    // Per-row signature state for TUI colouring (read-only; no wording change).
+    // nullopt for the placeholder and out-of-range rows. Reads the same
+    // signature cell the row already shows, so colour and text never disagree.
+    std::optional<ModuleSignature> signedForRow(int row) const;
+    // Per-row criticality for the essential/important marker. Reads the same
+    // refcount and holders the row already shows, plus the curated essential
+    // list, so the marker cannot contradict the row's own numbers. nullopt for
+    // the placeholder and out-of-range rows.
+    std::optional<core::Criticality> criticalityForRow(int row) const;
     std::vector<std::string> detailLines() const;  // selected module deep info
-    std::string banner() const;
+    // One muted, non-selectable header row naming the columns (R5). Built from
+    // the row formatter's own widths so header and rows cannot drift apart; it
+    // is NOT a list entry, so it can never take the cursor.
+    std::string columnHeader() const;
+    std::string banner() const;  // == bannerLine().text
+    // The banner's words and its valence, decided together from one read of the
+    // system posture (design D6). A surface renders `.text` and colours by
+    // `.severity`; it never searches the string to decide how loud to be, so
+    // rewording the banner cannot silently recolour it.
+    BannerLine bannerLine() const;
+    // devmgrd's note, or empty while it is serving. The module LIST is read
+    // locally, but every verb on this view (load/unload) is the daemon's, so
+    // the view carries the note — read from the facade's single instance.
+    std::vector<BackendNote> availabilityNotes() const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     void rebuild();  // UI thread: snapshot + rows
     // Async: fills the signature cache for names not yet cached, then posts a

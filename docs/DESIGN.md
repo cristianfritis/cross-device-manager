@@ -146,10 +146,17 @@ with the desktop palette or terminal theme chosen by the user.
 | Muted text | `#5D6A65` | `#A5B1AD` | Secondary metadata |
 | Accent | `#0B6F66` | `#61C7B5` | Focus and current selection |
 | Accent surface | `#D6ECE7` | `#214E4A` | Selected row background |
-| Success | `#267A46` | `#73C991` | Completed operation, healthy result |
+| Nominal | `#46705A` | `#8FB79C` | Verified normal, resting state |
+| Success | `#267A46` | `#73C991` | Completed operation, reported as a task outcome |
 | Warning | `#8A5B00` | `#E8B35C` | Risk, suspended enforcement |
 | Danger | `#B4232A` | `#F06A6A` | Failure or destructive consequence |
 | Information | `#245FA8` | `#74A7E8` | Neutral security or task information |
+
+Nominal is the resting state of a row that has been checked and found normal: an
+enabled device, a signed module, an up-to-date component, a healthy snapshot. It
+is a quieter affirmative than Success, which reports an operation the user just
+performed and belongs on the status line rather than on a list row. Its GUI
+reference values are reserved: no GUI surface colors list rows by state today.
 
 These values are reference targets, not permission to replace the native Qt
 style with a global stylesheet. Prefer `QPalette`, `QStyle`, theme icons, and
@@ -160,8 +167,9 @@ meaningful icons, focus rings, and state boundaries should meet `3:1`.
 For the TUI:
 
 - Default to the terminal's foreground and background.
-- Map accent to cyan/teal, success to green, warning to yellow, danger to red,
-  and information to blue when those colors are available.
+- Map accent to cyan/teal, nominal to green plus the dim attribute, success to
+  green, warning to yellow, danger to red, and information to blue when those
+  colors are available.
 - Pair every color with text, weight, reverse video, a focus marker, or another
   non-color signal.
 - Do not emit hand-written ANSI sequences or require a true-color terminal.
@@ -391,6 +399,31 @@ change it once in the VM. The current shared list strings:
 | Modules | `(no modules)` | `(no matches)` |
 | Updates | `(no updates available)` | — (no filter) |
 | Snapshots | `(no snapshots)` | `No snapshots match "<filter>"` |
+
+An empty-result string asserts that the query ran. It is therefore withheld
+while a source feeding the view is unreachable, and before the sources have
+reported at all — the Updates view shows `(checking for updates)` until every
+provider has answered, and shows the source's own note instead of an empty
+result when one could not be reached. The current shared source-unavailable
+sentences:
+
+| Source | State | Sentence |
+| --- | --- | --- |
+| Device service (`devmgrd`) | unreachable | `Device service unavailable — showing read-only system state.` |
+| Firmware updates (`fwupd`) | unreachable | `Firmware updates unavailable — the fwupd service is not responding.` |
+| DKMS status | absent | `DKMS status unavailable — DKMS is not installed on this system.` |
+
+These are resolved from the backend's identity and an unavailability kind, never
+from the error text, so a D-Bus name, errno value, or filesystem path cannot
+reach the sentence. The raw text stays a diagnostic: logged once per state
+transition, and revealed on request (GUI `Details`, TUI `i`).
+
+The sentence appears on every view its backend feeds, from one shared accessor:
+`devmgrd` on Devices, Modules and Snapshots, the update providers on Updates. A
+verb the unavailable backend serves stays visible and disabled, and its reason is
+that same sentence rather than a separately authored one (§5.3). When only part
+of a refresh could not be read, the view keeps the data it has and names what it
+could not refresh — `Could not refresh devices; showing the previous result.`
 
 Other shared state text: an unselected device detail reads `(no device
 selected)`; a snapshot whose payload cannot be diffed reports `Differences are

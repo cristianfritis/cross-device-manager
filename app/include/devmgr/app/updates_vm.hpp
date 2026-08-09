@@ -11,12 +11,19 @@
 #include <vector>
 
 #include "devmgr/app/application_facade.hpp"
+#include "devmgr/app/backend_status_vm.hpp"
 #include "devmgr/app/ui_dispatcher.hpp"
 #include "devmgr/core/events.hpp"
 #include "devmgr/core/update_models.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 
 namespace devmgr::app {
+
+// Per-row update state for TUI semantic colouring (design decision 1a).
+// Available: the candidate offers a newer version. UpToDate: no candidate
+// version. Error: the row's provider failed to enumerate or is unavailable
+// (availability/refresh error) — the whole provider's rows are then suspect.
+enum class UpdateRowState { Available, UpToDate, Error };
 
 // Toolkit-agnostic Updates view model (spec §8.3): row/detail/banner
 // formatting single-source here (V3, byte-frozen parity T11/T12), durable
@@ -36,8 +43,16 @@ class UpdatesVM {
 
     std::vector<std::string>& rowsRef() { return rows_; }
     int& selectedRef() { return selected_; }
-    void rebuild();                     // UI thread: snapshot → rows
-    std::string banner() const;         // availability + version + reboot marker + Secure Boot
+    void rebuild();  // UI thread: snapshot → rows
+    // One muted, non-selectable header row naming the columns (R5). Built from
+    // the row formatter's own widths so header and rows cannot drift apart; it
+    // is NOT a list entry, so it can never take the cursor.
+    std::string columnHeader() const;
+    std::string banner() const;  // availability + version + reboot marker + Secure Boot
+    // Degraded update providers, in backend order; empty when every provider is
+    // serving. Both surfaces render notes[i].text verbatim (the parity contract)
+    // and put notes[i].diagnostic behind a disclosure — never in the sentence.
+    std::vector<BackendNote> availabilityNotes() const;
     std::string requestBanner() const;  // "" when none; DURABLE until dismiss (spec §9)
     void dismissRequest();
     std::vector<std::string> detailLines() const;  // selected candidate: facts + releases
@@ -47,6 +62,10 @@ class UpdatesVM {
         std::string confirmText;  // version delta + needs-reboot warn + duration (spec §9)
     };
     std::optional<InstallArgs> selectedInstall() const;  // nullopt ⇔ verb disabled (V1 gate)
+    // Per-row update state for TUI colouring (read-only; no wording change).
+    // nullopt for the placeholder / out-of-range rows. Resolved from the same
+    // provider snapshot the row was built from, so colour and row agree.
+    std::optional<UpdateRowState> stateForRow(int row) const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     std::string installProgressText() const;  // "" when idle
 
@@ -62,6 +81,11 @@ class UpdatesVM {
     // stable identity for selection restore across rebuilds.
     const core::UpdateCandidate* selectedCandidate() const;
     std::optional<std::pair<std::string, std::string>> selectedKey() const;
+    // Feeds each provider's availability to backendStatus_. Idempotent per
+    // frame: the note is replaced every call, but the raw diagnostic reaches the
+    // log only on a (backend, kind) transition, so calling it from the
+    // per-frame banner path does not turn a missing provider into log spam.
+    void observeAvailability(const std::vector<core::UpdateProviderState>& snapshot) const;
 
     ApplicationFacade& facade_;
     runtime::EventBus& bus_;
@@ -71,6 +95,13 @@ class UpdatesVM {
     std::vector<std::optional<std::pair<std::size_t, std::size_t>>> rowRefs_;
     std::vector<core::UpdateProviderState> snapshot_;
     std::vector<core::PendingAction> pending_;
+    // Owns the translated sentence, the raw diagnostic, and the role for every
+    // degraded provider (design D2). mutable because banner() is const and is
+    // the per-frame read path; the type is internally mutex-guarded.
+    // The facade's shared instance, not one of this VM's own: devmgrd's note is
+    // written there by the facade and this view must not report a second,
+    // independently-logged copy of it. This VM writes only its own providers.
+    BackendStatusVM& backendStatus_;
     int selected_ = 0;
     std::atomic<bool> rebuildQueued_{false};
     std::atomic<bool> refreshQueued_{false};

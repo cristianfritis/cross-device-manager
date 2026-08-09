@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "devmgr/app/backend_status_vm.hpp"
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/core/models.hpp"
 #include "devmgr/core/snapshot_diff.hpp"
@@ -68,6 +69,14 @@ class ApplicationFacade {
     // request — this result is never a substitute for that.
     services::GuardVerdict canDisable(const core::DeviceId& id) const;
 
+    // The probed facts behind canDisable(), for callers that must classify MANY
+    // devices at once: canDisable() re-probes the filesystem per call, which a
+    // per-row loop must never do. Probe once, then apply the pure policy
+    // (services::evaluateDisable / core::classifyDevice) to every row.
+    // nullopt when no prober is wired or the probe failed — callers degrade to
+    // "unmarked", exactly as the advisory guard degrades to "allowed".
+    std::optional<pal::CriticalityFacts> criticalityFacts() const;
+
     std::vector<core::Device> devices() const { return service_.devices(); }
     std::optional<core::Device> findById(const core::DeviceId& id) const {
         return service_.findById(id);
@@ -117,6 +126,22 @@ class ApplicationFacade {
     // ErrorEvent instead. Same future-custody contract as refresh().
     std::future<void> refreshSnapshots();
     std::vector<core::SnapshotMeta> snapshots() const;  // mutex-guarded copy
+    // The devmgrd reachability observed by the last refreshSnapshots() against a
+    // real channel: nullopt when it answered, the channel's error when it did
+    // not. snapshotList() is the unprivileged read every session already makes,
+    // so this costs no extra round trip and never prompts. A NULL channel
+    // reports nullopt — that is a build without the seam, not an outage.
+    // Presentation derives the sentence from Error::code through
+    // core::unavailabilityText(); the message here is the diagnostic only.
+    std::optional<core::Error> daemonAvailability() const;
+
+    // THE backend-availability instance — one per application, owned here
+    // because every view needs it and BackendStatusVM logs each transition
+    // exactly once. One instance per ViewModel would multiply that by the
+    // number of views watching, which is precisely the per-poll spam the
+    // once-per-transition rule exists to prevent. VMs read it; only this facade
+    // and UpdatesVM (for its own providers) write to it.
+    BackendStatusVM& backendStatus() const { return backendStatus_; }
     // Mutations (async, Phase 4 pattern): ONE TaskCompletedEvent each — success
     // and every failure alike — taskId prefixes "snapshot-create:",
     // "snapshot-restore:", "snapshot-delete:"; SnapshotsChangedEvent
@@ -191,8 +216,19 @@ class ApplicationFacade {
     std::map<std::pair<std::string, std::string>, core::PendingAction> pending_;
     std::atomic<bool> installActive_{false};  // serialization gate (spec §5.4)
 
-    mutable std::mutex snapshotsMutex_;  // guards snapshots_, diff_ and lastRestore_
+    // Records what an unprivileged channel READ just proved about devmgrd's
+    // reachability, and feeds backendStatus_. Reads only: a mutation that fails
+    // may have been refused by a daemon that answered perfectly well (polkit
+    // denial, guard refusal), and reporting that as "service unavailable" would
+    // be a confident falsehood. Mutations therefore only ever clear the note, on
+    // success — evidence of reachability, never evidence against it.
+    void observeDaemonRead(const std::optional<core::Error>& error);
+    void observeDaemonReachable();  // any successful channel call
+
+    mutable std::mutex snapshotsMutex_;  // guards snapshots_, diff_, lastRestore_, daemonError_
     std::vector<core::SnapshotMeta> snapshots_;
+    std::optional<core::Error> daemonError_;
+    mutable BackendStatusVM backendStatus_;
     std::optional<core::SnapshotDiff> diff_;
     std::optional<core::RestoreOutcome> lastRestore_;
 };

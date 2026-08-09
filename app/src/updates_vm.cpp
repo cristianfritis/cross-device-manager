@@ -3,13 +3,24 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
+
+#include "devmgr/core/backend_wording.hpp"
 
 namespace devmgr::app {
 namespace {
 
 constexpr std::string_view kInstallTaskPrefix = "install-update:";
+// "Checked every provider, nothing to install" — a whole-view claim, so it is
+// gated on every provider having actually reported (design D5).
 constexpr const char* kPlaceholderRow = "(no updates available)";
+// The pre-first-report row: §6 "Initial loading — show what is being loaded",
+// §6.1 "the first frame is never empty". Distinct from kPlaceholderRow because
+// "not checked yet" is not "nothing found".
+constexpr const char* kLoadingRow = "(checking for updates)";
 constexpr const char* kRemoteOnlyGuidance = "external download required — run `fwupdmgr update`";
 
 // Fixed-column update row (byte-frozen, shared with T11/T12 — V3: the emitted
@@ -67,12 +78,27 @@ std::string secureBootLine(const std::optional<pal::ISystemInfo::Info>& info) {
     return b;
 }
 
-// "<version>" when available, "unavailable[: reason]" otherwise.
-std::string availabilityCell(const core::UpdateProviderState& s) {
-    if (s.availability.available) return s.availability.version.value_or("available");
-    std::string cell = "unavailable";
-    if (s.availability.error) cell += ": " + s.availability.error->message;
-    return cell;
+// The banner segment for one provider.
+//
+// Available: "<providerId> <version>" — the provider's own name is the useful
+// key when it IS serving. Degraded: the shared sentence alone, with no provider
+// prefix and no error message. It already names the backend in the user's
+// language, and the raw detail lives in the note's diagnostic — the concatenation
+// this replaces is what put org.freedesktop.DBus.Error.ServiceUnknown on screen.
+std::string availabilitySegment(const core::UpdateProviderState& s) {
+    if (s.availability.available)
+        return s.providerId + " " + s.availability.version.value_or("available");
+    const auto backend = core::backendForProvider(s.providerId);
+    if (!backend) return s.providerId + " unavailable";  // no sentence to offer; invent none
+    const auto code = s.availability.error ? s.availability.error->code : core::Error::Code::Io;
+    return core::unavailabilityText(*backend, core::kindFor(code));
+}
+
+// D5: the empty-result string is a whole-view claim, so one provider that could
+// not be checked withdraws it for the whole view.
+bool allProvidersAvailable(const std::vector<core::UpdateProviderState>& snapshot) {
+    return std::ranges::all_of(
+        snapshot, [](const core::UpdateProviderState& s) { return s.availability.available; });
 }
 
 void appendReleaseLines(std::vector<std::string>& out, const core::UpdateCandidate& c) {
@@ -107,7 +133,7 @@ int restoreSelection(const std::vector<std::optional<std::pair<std::size_t, std:
 }  // namespace
 
 UpdatesVM::UpdatesVM(ApplicationFacade& facade, runtime::EventBus& bus, IUiDispatcher& dispatcher)
-    : facade_(facade), bus_(bus), dispatcher_(dispatcher) {
+    : facade_(facade), bus_(bus), dispatcher_(dispatcher), backendStatus_(facade.backendStatus()) {
     subRefreshed_ = bus_.subscribe<core::UpdatesRefreshedEvent>(
         [this](const core::UpdatesRefreshedEvent&) { queueRebuild(); });
     subChanged_ = bus_.subscribe<core::UpdatesChangedEvent>(
@@ -225,12 +251,23 @@ void UpdatesVM::rebuild() {
             rowRefs_.emplace_back(std::pair{pi, ci});
         }
     }
+    observeAvailability(snapshot_);
     if (rows_.empty()) {
-        rows_.emplace_back(kPlaceholderRow);
-        rowRefs_.emplace_back(std::nullopt);
+        // Three distinct truths, never conflated (design D5): nothing reported
+        // yet, everything reported and empty, or something could not be checked
+        // — the last is explained by the availability note, so no row claims a
+        // completed query on its behalf.
+        if (snapshot_.empty()) {
+            rows_.emplace_back(kLoadingRow);
+            rowRefs_.emplace_back(std::nullopt);
+        } else if (allProvidersAvailable(snapshot_)) {
+            rows_.emplace_back(kPlaceholderRow);
+            rowRefs_.emplace_back(std::nullopt);
+        }
     }
-    selected_ =
-        restoreSelection(rowRefs_, snapshot_, keep, selected_, static_cast<int>(rows_.size()));
+    selected_ = rows_.empty() ? 0
+                              : restoreSelection(rowRefs_, snapshot_, keep, selected_,
+                                                 static_cast<int>(rows_.size()));
     if (afterRebuild_) afterRebuild_();
 }
 
@@ -241,6 +278,16 @@ const core::UpdateCandidate* UpdatesVM::selectedCandidate() const {
     return &snapshot_[ref->first].candidates[ref->second];
 }
 
+std::optional<UpdateRowState> UpdatesVM::stateForRow(int row) const {
+    if (row < 0 || std::cmp_greater_equal(row, rowRefs_.size())) return std::nullopt;
+    const auto& ref = rowRefs_[static_cast<std::size_t>(row)];
+    if (!ref) return std::nullopt;  // placeholder row
+    const auto& state = snapshot_[ref->first];
+    if (state.refreshError || state.availability.error) return UpdateRowState::Error;
+    return state.candidates[ref->second].candidateVersion ? UpdateRowState::Available
+                                                          : UpdateRowState::UpToDate;
+}
+
 std::optional<std::pair<std::string, std::string>> UpdatesVM::selectedKey() const {
     if (selected_ < 0 || std::cmp_greater_equal(selected_, rowRefs_.size())) return std::nullopt;
     const auto& ref = rowRefs_[static_cast<std::size_t>(selected_)];
@@ -249,11 +296,46 @@ std::optional<std::pair<std::string, std::string>> UpdatesVM::selectedKey() cons
                      snapshot_[ref->first].candidates[ref->second].id};
 }
 
+std::string UpdatesVM::columnHeader() const {
+    // Same widths as formatRow(), including the literal "->" separator column,
+    // so the header stays aligned with the rows beneath it (R5).
+    static constexpr std::size_t kRowBufferSize = 128;
+    std::array<char, kRowBufferSize> row{};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    std::snprintf(row.data(), row.size(), "%-6s %-30.30s %-12.12s -> %-12.12s %s", "Src", "Device",
+                  "Version", "New", "");
+    std::string out{row.data()};
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
+void UpdatesVM::observeAvailability(const std::vector<core::UpdateProviderState>& snapshot) const {
+    for (const auto& s : snapshot) {
+        const auto backend = core::backendForProvider(s.providerId);
+        if (!backend) continue;
+        if (s.availability.available) {
+            backendStatus_.observe(*backend, std::nullopt);
+            continue;
+        }
+        // A provider that reports unavailable without an error still owes the
+        // user a note; Io is the honest reading of "did not serve, no reason
+        // given" and is what kindFor() maps to unreachable.
+        backendStatus_.observe(*backend, s.availability.error.value_or(core::Error{
+                                             .code = core::Error::Code::Io, .message = {}}));
+    }
+}
+
+std::vector<BackendNote> UpdatesVM::availabilityNotes() const {
+    return backendStatus_.notes();
+}
+
 std::string UpdatesVM::banner() const {
+    const auto snapshot = facade_.updatesSnapshot();
+    observeAvailability(snapshot);
     std::string b;
-    for (const auto& s : facade_.updatesSnapshot()) {
+    for (const auto& s : snapshot) {
         if (!b.empty()) b += " | ";
-        b += s.providerId + " " + availabilityCell(s);
+        b += availabilitySegment(s);
         // Per-provider notices (spec §8.3, e.g. stale-metadata / failed-history
         // hints) apply whether the provider is available or not — appended
         // unconditionally, in provider order, using secureBootLine's mid-cell

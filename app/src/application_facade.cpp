@@ -33,10 +33,25 @@ std::future<void> ApplicationFacade::refresh() {
             return;
         }
         if (channel_ != nullptr) {
-            // ONE bulk fetch per refresh (spec §6.1); daemon-down or API-1
-            // degrades silently to Phase 4 rendering.
-            if (auto disabled = channel_->listDisabledDevices(); disabled)
+            // ONE bulk fetch per refresh (spec §6.1). The device rows themselves
+            // come from sysfs and are unaffected by the daemon, so a failed
+            // overlay fetch still renders every device — but it is no longer
+            // SILENT: this is an unprivileged read, so its outcome is exactly
+            // the evidence devmgrd's availability note is made of, and it is the
+            // point that re-observes reachability while the user sits on the
+            // Devices tab. Partial failure, named (docs/DESIGN.md §6): the rows
+            // are valid prior data, the disabled overlay is what could not be
+            // refreshed.
+            auto disabled = channel_->listDisabledDevices();
+            if (disabled) {
                 applyDisabledOverlay(*result, *disabled);
+                observeDaemonRead(std::nullopt);
+            } else {
+                observeDaemonRead(disabled.error());
+                bus_.publish(core::ErrorEvent{
+                    .source = "disabled-overlay",
+                    .message = "Could not refresh devices; showing the previous result."});
+            }
         }
         service_.applyEnumeration(std::move(*result));
     });
@@ -60,6 +75,7 @@ std::future<void> ApplicationFacade::setDeviceEnabled(const core::DeviceId& id, 
         }
         auto result = channel_->setDeviceEnabled(*device, enabled);
         if (result) {
+            observeDaemonReachable();
             bus_.publish(core::TaskCompletedEvent{
                 .taskId = taskId,
                 .ok = true,
@@ -78,6 +94,13 @@ services::GuardVerdict ApplicationFacade::canDisable(const core::DeviceId& id) c
     auto facts = prober_->probe();
     if (!facts) return {};  // advisory unavailable → allowed; daemon is authoritative
     return services::evaluateDisable(*facts, device->sysfsPath);
+}
+
+std::optional<pal::CriticalityFacts> ApplicationFacade::criticalityFacts() const {
+    if (prober_ == nullptr) return std::nullopt;
+    auto facts = prober_->probe();
+    if (!facts) return std::nullopt;
+    return *facts;
 }
 
 std::vector<core::Driver> ApplicationFacade::driverInfo(const core::DeviceId& id) const {
@@ -144,6 +167,7 @@ std::future<void> ApplicationFacade::runChannelTask(
         }
         auto result = call(*channel_);
         if (result) {
+            observeDaemonReachable();
             bus_.publish(
                 core::TaskCompletedEvent{.taskId = taskId, .ok = true, .message = okMessage});
             if (modulesChanged) bus_.publish(core::ModulesChangedEvent{});
@@ -333,14 +357,21 @@ std::future<void> ApplicationFacade::refreshSnapshots() {
         }
         auto result = channel_->snapshotList();
         if (!result) {
+            observeDaemonRead(result.error());
             bus_.publish(
                 core::ErrorEvent{.source = "snapshot-list", .message = result.error().message});
-            return;  // last list stays intact, mirroring refresh()
+            // The list stays intact, mirroring refresh() — but the refreshed
+            // event still fires so views re-read availability and render the
+            // degraded note. Without it the note would wait for an unrelated
+            // event, and the view would keep asserting a healthy empty store.
+            bus_.publish(core::SnapshotsRefreshedEvent{});
+            return;
         }
         {
             std::scoped_lock lock(snapshotsMutex_);
             snapshots_ = std::move(*result);
         }
+        observeDaemonRead(std::nullopt);
         bus_.publish(core::SnapshotsRefreshedEvent{});
     });
 }
@@ -348,6 +379,29 @@ std::future<void> ApplicationFacade::refreshSnapshots() {
 std::vector<core::SnapshotMeta> ApplicationFacade::snapshots() const {
     std::scoped_lock lock(snapshotsMutex_);
     return snapshots_;
+}
+
+std::optional<core::Error> ApplicationFacade::daemonAvailability() const {
+    std::scoped_lock lock(snapshotsMutex_);
+    return daemonError_;
+}
+
+void ApplicationFacade::observeDaemonRead(const std::optional<core::Error>& error) {
+    {
+        std::scoped_lock lock(snapshotsMutex_);
+        daemonError_ = error;
+    }
+    // The single write point for devmgrd's availability: BackendStatusVM logs
+    // the raw diagnostic once per transition, so every view watching the note
+    // costs zero extra log lines.
+    backendStatus_.observe(core::BackendId::Devmgrd, error);
+}
+
+void ApplicationFacade::observeDaemonReachable() {
+    // A call that succeeded is proof the daemon answered, whatever it answered.
+    // Only ever clears — see the header note on why a failed MUTATION is not
+    // proof of the opposite.
+    if (daemonAvailability()) observeDaemonRead(std::nullopt);
 }
 
 std::future<void> ApplicationFacade::refreshSnapshotDiff(std::string baseId, std::string targetId) {
@@ -406,6 +460,7 @@ std::future<void> ApplicationFacade::runSnapshotMutation(
         }
         auto result = call(*channel_);
         if (result) {
+            observeDaemonReachable();
             bus_.publish(
                 core::TaskCompletedEvent{.taskId = taskId, .ok = true, .message = *result});
             bus_.publish(core::SnapshotsChangedEvent{});

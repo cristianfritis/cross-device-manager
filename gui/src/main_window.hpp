@@ -29,6 +29,8 @@ class QListView;
 class QStackedWidget;
 class QTabWidget;
 class QTextEdit;
+class QToolBar;
+class QToolButton;
 class QTreeWidget;
 
 namespace devmgr::gui {
@@ -80,6 +82,9 @@ class MainWindow final : public QMainWindow {
     QAction* refreshAction() const { return refreshAction_; }
     QAction* toggleAction() const { return toggleAction_; }
     QTabWidget* tabs() const { return tabs_; }
+    // The one toolbar. Tests read its ordered action list to assert which verbs
+    // the active tab shows, in what order, and that no separator is orphaned.
+    QToolBar* toolbar() const { return toolbar_; }
     QListView* modulesView() const { return modulesView_; }
     QTreeWidget* moduleDetailTree() const { return moduleDetailTree_; }
     QLineEdit* moduleFilterEdit() const { return moduleFilterEdit_; }
@@ -91,6 +96,10 @@ class MainWindow final : public QMainWindow {
     QListView* updatesView() const { return updatesView_; }
     QTreeWidget* updatesDetailTree() const { return updatesDetailTree_; }
     QLabel* updatesBannerLabel() const { return updatesBannerLabel_; }
+    // Disclosure for the raw backend diagnostic, and the region it reveals.
+    // Both render only while a backend is degraded (backend-availability spec).
+    QToolButton* updatesDetailsButton() const { return updatesDetailsButton_; }
+    QLabel* updatesDiagnosticLabel() const { return updatesDiagnosticLabel_; }
     QLabel* requestBannerLabel() const { return requestBannerLabel_; }
     QAction* installUpdateAction() const { return installUpdateAction_; }
     QAction* refreshUpdatesAction() const { return refreshUpdatesAction_; }
@@ -98,6 +107,10 @@ class MainWindow final : public QMainWindow {
     QListView* snapshotsView() const { return snapshotsView_; }
     QTreeWidget* snapshotsDetailTree() const { return snapshotsDetailTree_; }
     QLabel* snapshotsBannerLabel() const { return snapshotsBannerLabel_; }
+    // The Snapshots page's own disclosure for the devmgrd diagnostic (§13),
+    // shaped exactly like the Updates one above.
+    QToolButton* snapshotsDetailsButton() const { return snapshotsDetailsButton_; }
+    QLabel* snapshotsDiagnosticLabel() const { return snapshotsDiagnosticLabel_; }
     QAction* createSnapshotAction() const { return createSnapshotAction_; }
     QAction* restoreSnapshotAction() const { return restoreSnapshotAction_; }
     QAction* deleteSnapshotAction() const { return deleteSnapshotAction_; }
@@ -106,6 +119,13 @@ class MainWindow final : public QMainWindow {
     QLineEdit* snapshotFilterEdit() const { return snapshotFilterEdit_; }
     QTextEdit* snapshotDiffView() const { return snapshotDiffView_; }
     QLabel* snapshotGuidanceLabel() const { return snapshotGuidanceLabel_; }
+    // Devices and Modules read devmgrd too, so they owe the same note and the
+    // same keyboard-reachable diagnostic the other two pages carry (§14 F1/F2).
+    QLabel* devicesBannerLabel() const { return devicesBannerLabel_; }
+    QToolButton* devicesDetailsButton() const { return devicesDetailsButton_; }
+    QLabel* devicesDiagnosticLabel() const { return devicesDiagnosticLabel_; }
+    QToolButton* modulesDetailsButton() const { return modulesDetailsButton_; }
+    QLabel* modulesDiagnosticLabel() const { return modulesDiagnosticLabel_; }
 
    protected:
     void closeEvent(QCloseEvent* event) override;  // spec §5.5 quit guard: installActive()
@@ -118,8 +138,43 @@ class MainWindow final : public QMainWindow {
     void updateUpdatesDetailPane();
     void updateSnapshotsDetailPane();
     void updateStatusBar();
-    void updateActionEnablement();                  // tab-aware; folds the old updateToggleAction()
-    void updateRequestBannerLabel();                // requestBanner() text + visibility
+    // The single owner of every toolbar action's presentation: visibility,
+    // enablement, dynamic text and tooltip. Runs on tab change, selection
+    // change, model reset, backend-availability change, and operation
+    // start/completion — nothing else may set those four properties.
+    void updateActionPresentation();
+    // A verb owned by another tab is absent, not greyed (DESIGN.md §5.3), so
+    // `disabled` keeps its one meaning: applies here, cannot run right now.
+    void applyTabVisibility(int tab);
+    // A separator is visible only between two visible actions, which hides the
+    // leading, trailing, and doubled cases without knowing the active tab.
+    void updateToolbarSeparators();
+    void updateDeviceVerbEnablement(bool daemonUp, const QString& blockedReason);
+    static void gateOnDaemon(QAction* action, bool enabled, bool daemonUp,
+                             const QString& blockedReason);
+    void updateUpdatesBannerLabel();      // banner() text + role weight/glyph + disclosure
+    void updateAvailabilityDisclosure();  // diagnostic region text + visibility
+    void updateRequestBannerLabel();      // requestBanner() text + visibility
+    void updateSnapshotsBannerLabel();    // counts banner text + visibility (B4)
+    void updateSnapshotsDisclosure();     // devmgrd diagnostic region text + visibility
+    void updateDevicesBannerLabel();      // devmgrd note on Devices (§14 F1)
+    void updateDevicesDisclosure();
+    void updateModulesBannerLabel();  // bannerLine() text + role weight/glyph (§14 F2)
+    void updateModulesDisclosure();
+
+    // One availability banner row: the sentence, a keyboard-reachable `Details`
+    // disclosure at the trailing edge, and the region it reveals underneath.
+    // Four pages need exactly these three widgets wired exactly this way, and
+    // hand-rolling them per page is what let the Modules banner ship with no
+    // glyph, no weight and no disclosure at all (§14 F2) — so they are built in
+    // one place instead.
+    struct AvailabilityBanner {
+        QWidget* row = nullptr;
+        QLabel* label = nullptr;
+        QToolButton* details = nullptr;
+        QLabel* diagnostic = nullptr;
+    };
+    AvailabilityBanner makeAvailabilityBanner();
     void pruneAndPushPending(std::future<void> f);  // this window's own future custody
 
     app::ApplicationFacade& facade_;
@@ -131,6 +186,7 @@ class MainWindow final : public QMainWindow {
     app::SnapshotsVM& snapshotsVm_;
     runtime::EventBus& bus_;
     Actions actions_;
+    QToolBar* toolbar_ = nullptr;       // one stable toolbar; contents follow the tab
     DeviceListModel* model_ = nullptr;  // Qt-parented to this window
     QListView* listView_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;
@@ -151,6 +207,8 @@ class MainWindow final : public QMainWindow {
     QListView* updatesView_ = nullptr;
     QTreeWidget* updatesDetailTree_ = nullptr;
     QLabel* updatesBannerLabel_ = nullptr;
+    QToolButton* updatesDetailsButton_ = nullptr;
+    QLabel* updatesDiagnosticLabel_ = nullptr;
     QLabel* requestBannerLabel_ = nullptr;
     QAction* installUpdateAction_ = nullptr;
     QAction* refreshUpdatesAction_ = nullptr;
@@ -159,6 +217,13 @@ class MainWindow final : public QMainWindow {
     QListView* snapshotsView_ = nullptr;
     QTreeWidget* snapshotsDetailTree_ = nullptr;
     QLabel* snapshotsBannerLabel_ = nullptr;
+    QToolButton* snapshotsDetailsButton_ = nullptr;
+    QLabel* snapshotsDiagnosticLabel_ = nullptr;
+    QLabel* devicesBannerLabel_ = nullptr;
+    QToolButton* devicesDetailsButton_ = nullptr;
+    QLabel* devicesDiagnosticLabel_ = nullptr;
+    QToolButton* modulesDetailsButton_ = nullptr;
+    QLabel* modulesDiagnosticLabel_ = nullptr;
     QAction* createSnapshotAction_ = nullptr;
     QAction* restoreSnapshotAction_ = nullptr;
     QAction* deleteSnapshotAction_ = nullptr;

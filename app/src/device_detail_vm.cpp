@@ -5,6 +5,9 @@
 #include <string_view>
 #include <vector>
 
+#include "devmgr/core/criticality.hpp"
+#include "devmgr/core/device_presentation.hpp"
+
 namespace devmgr::app {
 namespace {
 
@@ -62,17 +65,38 @@ std::vector<std::string> DeviceDetailVM::lines(const std::optional<core::DeviceI
 
     const core::Device& d = *dev;
     std::vector<std::string> out;
-    out.push_back(kv("Name:", d.name));
+    // The same canonical formatter the list rows use, so a device cannot be
+    // called one thing in the list and another in the detail pane.
+    out.push_back(kv("Name:", core::displayDeviceName(d)));
+    // The three identity rows sit directly under the canonical name (R1): the
+    // address is what correlates a row with lspci/lsusb/dmesg, VID:PID is what
+    // identifies the model, and Id is the app's own stable handle. Now that the
+    // label above them is a NAME rather than a bare kernel address, the address
+    // has to be shown somewhere or it is simply lost.
+    out.push_back(kv("Address:", core::displayDeviceAddress(d)));
+    out.push_back(kv("VID:PID:", d.vendorId + ":" + d.productId));
     out.push_back(kv("Id:", d.id.value));
     out.push_back(kv("Bus:", core::displayBus(d.bus)));
     out.push_back(kv("Status:", core::to_string(d.status)));
     out.push_back(kv("Sysfs:", d.sysfsPath));
-    out.push_back(kv("VID:PID:", d.vendorId + ":" + d.productId));
     out.push_back(kv("Serial:", d.serial));
     out.push_back(kv("Driver:", d.boundDriver.value_or("(none)")));
     out.push_back(kv("Modalias:", d.modalias));
     if (d.parent.has_value()) out.push_back(kv("Parent:", d.parent->value));
     if (d.errorNote.has_value()) out.push_back(kv("Error:", *d.errorNote));
+    // R4/R6: the list marks a load-bearing device with a glyph (TUI) or the word
+    // (GUI); the risk itself is named here, so the marker never has to carry its
+    // meaning alone (docs/DESIGN.md §10). Classified from the guard's OWN facts
+    // and policy, so a device shown as essential is exactly one the guard would
+    // refuse to disable. Probing reads the filesystem — lines() is called on
+    // selection change and cached by both frontends, never per frame (§8).
+    if (const auto facts = facade_.criticalityFacts()) {
+        const auto level = core::classifyDevice(*facts, d.sysfsPath);
+        if (level != core::Criticality::Ordinary) {
+            out.push_back(kv("Risk:", std::string(core::displayCriticality(level)) +
+                                          " — disabling this may make the system unusable"));
+        }
+    }
     appendDriverSection(out, d, facade_.driverInfo(d.id));
     return out;
 }

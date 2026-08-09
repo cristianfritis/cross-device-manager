@@ -1,0 +1,63 @@
+#pragma once
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <ftxui/dom/elements.hpp>  // Element
+
+#include "tui/src/render_util.hpp"  // render::Glyph, render::menuRow
+#include "tui/src/theme.hpp"
+
+namespace devmgr::tui::views {
+
+// Selection/focus marker policy for a single Devices-list row (docs/DESIGN.md
+// §2.3 master-detail, §4.5 selection emphasis, §4.1 semantic colour): selected →
+// "> " prefix + bold, plus reverse video while the list owns the keyboard
+// (`listFocused`); otherwise a two-space alignment prefix. Both signals key off
+// `selected` alone so the marker, the bar and the detail pane can never name
+// different rows (pass-2 bug B1). `statusGlyph`/`role` colour and glyph-mark the
+// row by its device status (the shell maps DeviceStatus → glyph+role;
+// header/placeholder rows pass nullopt). Pure — the label windowing stays in the
+// shell (it needs live tick state) and hands the already-windowed label in. The
+// default arguments preserve the earlier no-colour signature for callers/tests
+// that do not colour.
+ftxui::Element renderDeviceRow(const std::string& label, bool selected, bool listFocused,
+                               std::optional<render::Glyph> statusGlyph = std::nullopt,
+                               std::optional<Role> role = std::nullopt,
+                               const Theme& theme = Theme{},
+                               std::optional<render::Badge> badge = std::nullopt);
+
+// Complete Devices tab composition: navigation bar, bold legend, master-detail
+// split (filter + scrolling device list on the left, detail on the right) and a
+// reverse-video status line (docs/DESIGN.md §2.3, §3.2, §9). Pure framing over
+// the shell's pre-rendered interactive bodies (filter Input, device Menu,
+// detail Renderer) — the interactive components keep their behaviour while the
+// layout renders identically against a fixed Screen for tests. No colour yet;
+// borders/separators are unchanged from the prior build (theme-aware borders and
+// semantic colour land in group 4).
+struct DevicesView {
+    int activeTab;
+    ftxui::Element filterInput;  // searchInput->Render()
+    ftxui::Element deviceList;   // deviceMenu->Render() (raw; scroll-framed here)
+    ftxui::Element detail;       // detailRenderer->Render()
+    std::string statusText;
+    int leftPaneWidth;
+    std::optional<Role> statusRole{};  // outcome severity for the status line (nullopt = neutral)
+    // ---- Backend availability (backend-availability spec, §13) ----
+    // This view's ROWS come from sysfs and survive a dead daemon, but the
+    // disabled-state overlay and every verb here are devmgrd's — so the note
+    // belongs on this tab too. Empty banner ⇒ no row is rendered at all, which
+    // is the healthy steady state: the Devices tab has no banner of its own.
+    std::string banner;
+    std::optional<Role> bannerRole{};
+    std::optional<render::Glyph> bannerGlyph{};
+    std::vector<std::string> diagnosticLines;  // revealed by `i`
+    bool showDiagnostics = false;
+    // Terminal width in columns, so the legend can be composed to FIT rather
+    // than be silently clipped by the screen (§14 F3). 0 means "unknown", which
+    // yields the roomiest legend — the behaviour before this field existed.
+    int terminalWidth = 0;
+};
+ftxui::Element renderDevicesView(DevicesView view, const Theme& theme);
+
+}  // namespace devmgr::tui::views

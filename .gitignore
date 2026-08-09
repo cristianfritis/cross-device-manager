@@ -41,6 +41,8 @@ Thumbs.db
 .claude/
 .codegraph/
 .mcp.json
+.serena/
+.pi/
 
 # ---- Vagrant & VM Test Artifacts ----
 # Vagrant stores machine state, SSH keys, and synced folder metadata here
@@ -74,3 +76,5 @@ dist/
 
 # Testing Production files
 .production-testing/
+# Local Pi runtime state
+.atl/

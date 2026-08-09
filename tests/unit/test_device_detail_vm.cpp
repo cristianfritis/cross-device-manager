@@ -117,3 +117,37 @@ TEST(DeviceDetailVmTest, BusCasingAndModaliasSpacingAreConsistent) {
     EXPECT_TRUE(busLine);
     EXPECT_TRUE(modaliasLine);
 }
+
+// R1 (task 11.1): the detail pane leads with the canonical name and then the
+// three identity rows. The address must be shown somewhere — the list label is
+// now a NAME rather than a bare kernel address, so without this row the address
+// would simply be lost.
+TEST(DeviceDetailVmTest, LeadsWithCanonicalNameThenAddressVidPidAndId) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::Device d;
+    d.id = core::DeviceId{"pci-0000:c5:00.4"};
+    d.name = "0000:c5:00.4";  // positional: the mapper's last-resort fallback
+    d.bus = core::BusType::Pci;
+    d.sysfsPath = "/sys/devices/pci0000:c0/0000:c0:08.3/0000:c5:00.4";
+    d.vendorId = "1022";
+    d.productId = "15b8";
+    d.properties["ID_VENDOR_FROM_DATABASE"] = "Advanced Micro Devices, Inc. [AMD]";
+    d.properties["ID_PCI_SUBCLASS_FROM_DATABASE"] = "USB controller";
+    pal.seedDevice(d);
+    app::DeviceService svc(bus);
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refresh().wait();
+    app::DeviceDetailVM vm(facade);
+
+    const auto lines = vm.lines(d.id);
+    ASSERT_GE(lines.size(), 4U);
+    EXPECT_TRUE(lines[0].starts_with("Name:")) << lines[0];
+    EXPECT_NE(lines[0].find("AMD USB controller"), std::string::npos) << lines[0];
+    EXPECT_TRUE(lines[1].starts_with("Address:")) << lines[1];
+    EXPECT_NE(lines[1].find("0000:c5:00.4"), std::string::npos) << lines[1];
+    EXPECT_TRUE(lines[2].starts_with("VID:PID:")) << lines[2];
+    EXPECT_NE(lines[2].find("1022:15b8"), std::string::npos) << lines[2];
+    EXPECT_TRUE(lines[3].starts_with("Id:")) << lines[3];
+}
