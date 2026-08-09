@@ -47,11 +47,19 @@ The empty state and the source-unreachable state SHALL be distinguishable and SH
 - **THEN** that view's empty-state string is absent from the render, and the degraded explanation is present instead
 
 ### Requirement: Color independence
-No state SHALL be conveyed by color alone in either UI. The TUI SHALL honor `NO_COLOR`, `--no-color`/`--ascii`, and `TERM=dumb` by disabling color while keeping every state distinguishable through paired glyphs and text; the GUI SHALL continue to pair color with text or iconography under light, dark, and high-contrast palettes.
+No state SHALL be conveyed by color alone in either UI. The TUI SHALL honor `NO_COLOR`, `--no-color`/`--ascii`, and `TERM=dumb` by disabling color while keeping every state distinguishable through paired glyphs and text; the GUI SHALL continue to pair color with text or iconography under light, dark, and high-contrast palettes. Where two states share a single role — including disabled and unknown devices, which both take muted — they SHALL remain distinguishable by glyph and state word in every color mode, so that sharing a role never costs a distinction.
 
 #### Scenario: TUI without color loses no meaning
 - **WHEN** the TUI runs with `NO_COLOR` set
 - **THEN** enabled/disabled/unavailable devices, signed/unsigned modules, and task outcomes remain distinguishable via glyphs and text
+
+#### Scenario: States sharing a role stay distinct
+- **WHEN** the Devices list renders a disabled device and an unknown device in full color mode, both carrying the muted role
+- **THEN** they are told apart by their glyphs and by their state words, with no reliance on color
+
+#### Scenario: Normal rows readable without their role
+- **WHEN** a view renders normal rows in MONO or PLAIN, where the nominal role produces no color
+- **THEN** the normal state is still identifiable from the row's glyph and state word alone
 
 #### Scenario: Monochrome terminal
 - **WHEN** the TUI runs on a terminal reporting `TERM=dumb`
