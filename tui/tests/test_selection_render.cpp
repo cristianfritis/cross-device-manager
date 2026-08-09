@@ -119,9 +119,9 @@ TEST(SelectionInvariant, DeviceRowsShareTheInvariantAtEverySize) {
         ftxui::Screen screen =
             renderTo(ftxui::vbox({
                          views::renderDeviceRow("nvme0n1 enabled", false, true,
-                                                render::Glyph::Enabled, Role::Success, theme),
+                                                render::Glyph::Enabled, Role::Nominal, theme),
                          views::renderDeviceRow("eth0 disabled", true, true,
-                                                render::Glyph::Disabled, Role::Danger, theme),
+                                                render::Glyph::Disabled, Role::Muted, theme),
                      }),
                      s);
         EXPECT_FALSE(rowHasMarker(screen, 0)) << s.w;
@@ -154,9 +154,9 @@ RowStyle styleOf(const ftxui::Screen& screen, int y) {
 // device, red on a disabled one and different again per view.
 TEST(SelectionTreatment, IsIdenticalWhateverTheRowState) {
     const Theme theme(ColorMode::Full, false);
-    const std::array<std::optional<Role>, 7> rowRoles{{std::nullopt, Role::Success, Role::Danger,
-                                                       Role::Warning, Role::Info, Role::Muted,
-                                                       Role::Accent}};
+    const std::array<std::optional<Role>, 8> rowRoles{{std::nullopt, Role::Nominal, Role::Success,
+                                                       Role::Danger, Role::Warning, Role::Info,
+                                                       Role::Muted, Role::Accent}};
     const RowStyle expected{ftxui::Color::Cyan, true, true};
     for (const auto& role : rowRoles) {
         ftxui::Screen screen =
@@ -174,12 +174,12 @@ TEST(SelectionTreatment, IsIdenticalAcrossAllFourViews) {
     const Theme theme(ColorMode::Full, false);
     const RowStyle expected{ftxui::Color::Cyan, true, true};
     EXPECT_EQ(styleOf(renderTo(views::renderDeviceRow("eth0 disabled", true, true,
-                                                      render::Glyph::Disabled, Role::Danger, theme),
+                                                      render::Glyph::Disabled, Role::Muted, theme),
                                {40, 1}),
                       0),
               expected)
         << "devices";
-    const std::array<std::optional<Role>, 3> otherViews{{Role::Success, Role::Info, Role::Accent}};
+    const std::array<std::optional<Role>, 3> otherViews{{Role::Nominal, Role::Info, Role::Accent}};
     const std::array<const char*, 3> labels{
         {"i915 signed: yes", "Dock fw 1.1 available", "a1b2c3 boot healthy"}};
     for (std::size_t i = 0; i < otherViews.size(); ++i) {
@@ -193,7 +193,8 @@ TEST(SelectionTreatment, IsIdenticalAcrossAllFourViews) {
 // same — reverse video plus the "> " marker, no hue anywhere (§10).
 TEST(SelectionTreatment, DegradesToOneMonoTreatment) {
     const Theme mono(ColorMode::Mono, false);
-    const std::array<std::optional<Role>, 3> rowRoles{{Role::Success, Role::Danger, Role::Muted}};
+    const std::array<std::optional<Role>, 4> rowRoles{
+        {Role::Nominal, Role::Success, Role::Danger, Role::Muted}};
     for (const auto& role : rowRoles) {
         ftxui::Screen screen =
             renderTo(render::menuRow("row text", true, true, std::nullopt, role, mono), {40, 1});
@@ -207,10 +208,34 @@ TEST(SelectionTreatment, DegradesToOneMonoTreatment) {
 TEST(SelectionTreatment, UnselectedRowsKeepTheirStateColour) {
     const Theme theme(ColorMode::Full, false);
     ftxui::Screen screen =
-        renderTo(render::menuRow("eth0 disabled", /*selected=*/false, /*listFocused=*/true,
+        renderTo(render::menuRow("nvme0n1 error", /*selected=*/false, /*listFocused=*/true,
                                  std::nullopt, Role::Danger, theme),
                  {40, 1});
     EXPECT_EQ(styleOf(screen, 0).fg, ftxui::Color::Red);
+}
+
+// A nominal row's dim attribute must not follow it into the selection: the
+// selected row takes the accent treatment whole, so the one row the user is
+// reading is never the quietest thing on screen. (design Risks: "does dim
+// survive inverted video".)
+TEST(SelectionTreatment, SelectedNominalRowIsNotDim) {
+    const Theme theme(ColorMode::Full, false);
+    ftxui::Screen selected =
+        renderTo(views::renderDeviceRow("nvme0n1 enabled", /*selected=*/true, /*listFocused=*/true,
+                                        render::Glyph::Enabled, Role::Nominal, theme),
+                 {40, 1});
+    const ftxui::Pixel& bar = selected.PixelAt(0, 0);
+    EXPECT_EQ(bar.foreground_color, ftxui::Color::Cyan);
+    EXPECT_TRUE(bar.inverted);
+    EXPECT_FALSE(bar.dim);
+
+    // Unselected, the same row keeps the quiet paint.
+    ftxui::Screen resting =
+        renderTo(views::renderDeviceRow("nvme0n1 enabled", /*selected=*/false, /*listFocused=*/true,
+                                        render::Glyph::Enabled, Role::Nominal, theme),
+                 {40, 1});
+    EXPECT_EQ(resting.PixelAt(2, 0).foreground_color, ftxui::Color::Green);
+    EXPECT_TRUE(resting.PixelAt(2, 0).dim);
 }
 
 // -------------------------------------------------------------------------
@@ -281,7 +306,7 @@ TEST(EmptyListRender, GroupHeaderNeverTakesTheCursor) {
         renderTo(ftxui::vbox({
                      views::renderDeviceRow("PCI", false, true, std::nullopt, Role::Muted, theme),
                      views::renderDeviceRow("nvme0n1 enabled", true, true, render::Glyph::Enabled,
-                                            Role::Success, theme),
+                                            Role::Nominal, theme),
                  }),
                  {40, 2});
     EXPECT_FALSE(rowHasMarker(screen, 0));
@@ -403,14 +428,18 @@ TEST(CriticalityBadge, MarksTheRowWithoutTouchingTheStateGlyph) {
     const render::Badge essential{render::Glyph::Essential, Role::Warning};
     ftxui::Screen screen =
         renderTo(views::renderDeviceRow("nvme0n1 enabled", false, false, render::Glyph::Enabled,
-                                        Role::Success, theme, essential),
+                                        Role::Nominal, theme, essential),
                  {40, 1});
     const std::string row = rowText(screen, 0);
     // "  " prefix, then the state glyph, then the badge, then the label.
     ASSERT_EQ(row.substr(0, 5), "  + #");
-    EXPECT_EQ(fgAt(screen, 2), ftxui::Color::Green);   // the "+" keeps success
+    EXPECT_EQ(fgAt(screen, 2), ftxui::Color::Green);   // the "+" keeps nominal
     EXPECT_EQ(fgAt(screen, 4), ftxui::Color::Yellow);  // the badge is warning
     EXPECT_EQ(fgAt(screen, 6), ftxui::Color::Green);   // the label keeps its state colour
+    // The badge is louder than the row it marks: warning is not dimmed by the
+    // nominal row around it.
+    EXPECT_TRUE(screen.PixelAt(2, 0).dim);
+    EXPECT_FALSE(screen.PixelAt(4, 0).dim);
 }
 
 TEST(CriticalityBadge, NeverUsesTheDangerRole) {
@@ -485,7 +514,7 @@ TEST(CriticalityBadge, OrdinaryRowsAreUnmarked) {
 TEST(CriticalityBadge, SurvivesTheSelectionTreatment) {
     const Theme theme(ColorMode::Full, false);
     ftxui::Screen screen =
-        renderTo(render::menuRow("amdgpu", true, true, std::nullopt, Role::Success, theme,
+        renderTo(render::menuRow("amdgpu", true, true, std::nullopt, Role::Nominal, theme,
                                  render::Badge{render::Glyph::Essential, Role::Warning}),
                  {40, 1});
     EXPECT_TRUE(rowHasMarker(screen, 0));

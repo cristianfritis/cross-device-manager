@@ -128,8 +128,9 @@ struct RoleColour {
     Color fg;
     bool dim;
 };
-const std::array<RoleColour, 6> kRoleColours{{
+const std::array<RoleColour, 7> kRoleColours{{
     {Role::Accent, Color::Cyan, false},
+    {Role::Nominal, Color::Green, true},  // resting state: green quieted by dim
     {Role::Success, Color::Green, false},
     {Role::Warning, Color::Yellow, false},
     {Role::Danger, Color::Red, false},
@@ -159,8 +160,8 @@ bool hasRolePixel(const ftxui::Screen& screen, Color fg, bool dim, bool inverted
 ftxui::Element deviceRows(const Theme& theme) {
     using namespace ftxui;
     return vbox({
-        views::renderDeviceRow("eth0", true, true, render::Glyph::Disabled, Role::Danger, theme),
-        views::renderDeviceRow("nvme0n1", false, false, render::Glyph::Enabled, Role::Success,
+        views::renderDeviceRow("eth0", true, true, render::Glyph::Disabled, Role::Muted, theme),
+        views::renderDeviceRow("nvme0n1", false, false, render::Glyph::Enabled, Role::Nominal,
                                theme),
         views::renderDeviceRow("wlan0", false, false, render::Glyph::Unavailable, Role::Warning,
                                theme),
@@ -170,7 +171,7 @@ ftxui::Element deviceRows(const Theme& theme) {
 ftxui::Element moduleRows(const Theme& theme) {
     return ftxui::vbox({
         render::menuRow("nvidia   signed: NO", true, true, std::nullopt, Role::Danger, theme),
-        render::menuRow("i915     signed: yes", false, false, std::nullopt, Role::Success, theme),
+        render::menuRow("i915     signed: yes", false, false, std::nullopt, Role::Nominal, theme),
         render::menuRow("acpi     signed: ?", false, false, std::nullopt, Role::Muted, theme),
     });
 }
@@ -178,7 +179,7 @@ ftxui::Element moduleRows(const Theme& theme) {
 ftxui::Element updateRows(const Theme& theme) {
     return ftxui::vbox({
         render::menuRow("Dock fw   1.1 available", true, true, std::nullopt, Role::Info, theme),
-        render::menuRow("SSD fw    up to date", false, false, std::nullopt, Role::Muted, theme),
+        render::menuRow("SSD fw    up to date", false, false, std::nullopt, Role::Nominal, theme),
         render::menuRow("BIOS      error: fetch", false, false, std::nullopt, Role::Danger, theme),
     });
 }
@@ -524,33 +525,37 @@ void expectRowMatrix(const std::vector<RowState>& states, const char* view) {
 
 TEST(PerViewColourMatrix, UpdatesEveryState) {
     expectRowMatrix({{"Dock fw    1.0 -> 1.1 available", Role::Info, Color::Blue, false},
-                     {"SSD fw     up to date", Role::Muted, Color::Default, true},
+                     {"SSD fw     up to date", Role::Nominal, Color::Green, true},
                      {"BIOS       error: refresh failed", Role::Danger, Color::Red, false}},
                     "updates");
 }
 
 TEST(PerViewColourMatrix, SnapshotsEveryState) {
     expectRowMatrix({{"a1b2c3 boot   HEAD", Role::Accent, Color::Cyan, false},
+                     {"7f8e9d auto   healthy", Role::Nominal, Color::Green, true},
                      {"d4e5f6 manual corrupt", Role::Danger, Color::Red, false},
                      {"99aa88 auto   unsupported", Role::Warning, Color::Yellow, false}},
                     "snapshots");
 }
 
 TEST(PerViewColourMatrix, ModulesEveryState) {
-    expectRowMatrix({{"i915     signed: yes", Role::Success, Color::Green, false},
+    expectRowMatrix({{"i915     signed: yes", Role::Nominal, Color::Green, true},
                      {"nvidia   signed: NO", Role::Danger, Color::Red, false},
                      {"acpi     signed: ?", Role::Muted, Color::Default, true}},
                     "modules");
 }
 
-// Devices carry a glyph as well as a colour; the four non-Active states are the
-// ones pass 1 never rendered on real hardware.
-TEST(PerViewColourMatrix, DevicesNonGreenStatesRender) {
+// Devices carry a glyph as well as a colour. Enabled is the resting state (dim
+// green, not the loud success green); the four others are the states pass 1
+// never rendered on real hardware. Disabled is muted rather than danger, so red
+// is left meaning a fault and nothing else.
+TEST(PerViewColourMatrix, DevicesEveryStateRenders) {
     const Theme full(ColorMode::Full, false);
     const Theme mono(ColorMode::Mono, false);
-    const std::array<std::tuple<const char*, Role, Color, bool, render::Glyph, const char*>, 4>
+    const std::array<std::tuple<const char*, Role, Color, bool, render::Glyph, const char*>, 5>
         cases{{
-            {"eth0 disabled", Role::Danger, Color::Red, false, render::Glyph::Disabled, "-"},
+            {"eth0 enabled", Role::Nominal, Color::Green, true, render::Glyph::Enabled, "+"},
+            {"eth1 disabled", Role::Muted, Color::Default, true, render::Glyph::Disabled, "-"},
             {"usb0 transitioning", Role::Warning, Color::Yellow, false, render::Glyph::Unavailable,
              "?"},
             {"nvme0n1 error", Role::Danger, Color::Red, false, render::Glyph::Unsigned, "!"},

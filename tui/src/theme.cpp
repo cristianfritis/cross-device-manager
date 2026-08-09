@@ -31,6 +31,10 @@ ftxui::Decorator Theme::decorate(Role role) const {
     switch (role) {
         case Role::Accent:
             return color(Color::Cyan);
+        case Role::Nominal:
+            // Verified normal: green, quieted by the dim attribute so a list of
+            // ordinary rows does not shout what Success means (an event).
+            return color(Color::Green) | dim;
         case Role::Success:
             return color(Color::Green);
         case Role::Warning:

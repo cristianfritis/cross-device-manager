@@ -20,8 +20,10 @@
 // documented per-view colour table is directly unit-testable: these are pure
 // switches over the app/core enums with no toolkit dependency, so the tests
 // that link app+core can assert the mapping while the render tests assert what
-// each role paints. A nullopt state (group header, placeholder, out-of-range
-// row) maps to no colour and no glyph — those rows stay plain.
+// each role paints. A nullopt state means the row is structural (group header,
+// placeholder, out-of-range row): it maps to no colour and no glyph and stays
+// plain. Nullopt never means "normal" — a checked-and-normal row takes
+// Role::Nominal, so the two cases cannot be confused.
 
 namespace devmgr::tui {
 
@@ -29,9 +31,11 @@ constexpr std::optional<Role> roleForDeviceStatus(std::optional<core::DeviceStat
     if (!status) return std::nullopt;
     switch (*status) {
         case core::DeviceStatus::Active:
-            return Role::Success;
+            return Role::Nominal;
         case core::DeviceStatus::Disabled:
-            return Role::Danger;
+            // Muted, not danger: a device the user turned off is not a fault, and
+            // Error below already owns danger.
+            return Role::Muted;
         case core::DeviceStatus::Transitioning:
             return Role::Warning;
         case core::DeviceStatus::Error:
@@ -64,7 +68,7 @@ constexpr std::optional<Role> roleForSignature(std::optional<app::ModuleSignatur
     if (!sig) return std::nullopt;
     switch (*sig) {
         case app::ModuleSignature::Signed:
-            return Role::Success;
+            return Role::Nominal;
         case app::ModuleSignature::Unsigned:
             return Role::Danger;
         case app::ModuleSignature::Undetermined:
@@ -79,7 +83,7 @@ constexpr std::optional<Role> roleForUpdateState(std::optional<app::UpdateRowSta
         case app::UpdateRowState::Available:
             return Role::Info;
         case app::UpdateRowState::UpToDate:
-            return Role::Muted;  // muted-success: settled, no action
+            return Role::Nominal;  // settled, no action
         case app::UpdateRowState::Error:
             return Role::Danger;
     }
@@ -101,7 +105,7 @@ constexpr std::optional<Role> roleForSnapshotRow(std::optional<core::SnapshotHea
             break;
     }
     if (isHead || isLastGood) return Role::Accent;
-    return std::nullopt;
+    return Role::Nominal;  // healthy, unmarked: the same resting state as the other views
 }
 
 constexpr std::optional<Role> roleForSeverity(app::StatusSeverity severity) {

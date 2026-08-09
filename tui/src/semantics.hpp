@@ -13,7 +13,10 @@ namespace devmgr::tui {
 // Semantic colour roles from docs/DESIGN.md §4.1, mapped to 16-colour ANSI in
 // Full mode and to identity (no colour) in Mono/Plain. Meaning never rides on
 // colour alone (§10): callers pair every role with a glyph and text.
-enum class Role : std::uint8_t { Accent, Success, Warning, Danger, Info, Muted };
+// Nominal is the resting state of a checked-and-normal row; Success is a
+// completed operation on the status line. They are separate roles so an ordinary
+// list stays quiet without giving up the affirmative (§4.1).
+enum class Role : std::uint8_t { Accent, Nominal, Success, Warning, Danger, Info, Muted };
 
 namespace render {
 

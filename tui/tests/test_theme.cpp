@@ -42,6 +42,7 @@ TEST(ThemeClassify, StrictestDegradeWins) {
 TEST(ThemeDecorate, FullModeMapsRolesToAnsiColours) {
     const Theme full(ColorMode::Full, false);
     EXPECT_EQ(renderRole(full, Role::Accent).foreground_color, Color::Cyan);
+    EXPECT_EQ(renderRole(full, Role::Nominal).foreground_color, Color::Green);
     EXPECT_EQ(renderRole(full, Role::Success).foreground_color, Color::Green);
     EXPECT_EQ(renderRole(full, Role::Warning).foreground_color, Color::Yellow);
     EXPECT_EQ(renderRole(full, Role::Danger).foreground_color, Color::Red);
@@ -52,6 +53,23 @@ TEST(ThemeDecorate, FullModeMapsRolesToAnsiColours) {
     EXPECT_TRUE(muted.dim);
 }
 
+// Nominal and Success share the hue and are told apart by the dim attribute
+// alone: resting state is a quieter affirmative than a completed operation.
+TEST(ThemeDecorate, NominalIsDimGreenAndSuccessIsNot) {
+    const Theme full(ColorMode::Full, false);
+    const ftxui::Pixel nominal = renderRole(full, Role::Nominal);
+    EXPECT_EQ(nominal.foreground_color, Color::Green);
+    EXPECT_TRUE(nominal.dim);
+
+    const ftxui::Pixel success = renderRole(full, Role::Success);
+    EXPECT_EQ(success.foreground_color, Color::Green);
+    EXPECT_FALSE(success.dim);
+
+    // Muted keeps the dim attribute without the hue, so "verified normal" and
+    // "could not determine" never collapse onto one paint.
+    EXPECT_EQ(renderRole(full, Role::Muted).foreground_color, Color::Default);
+}
+
 TEST(ThemeDecorate, MonoAndPlainAreIdentity) {
     for (ColorMode mode : {ColorMode::Mono, ColorMode::Plain}) {
         const Theme theme(mode, false);
@@ -59,6 +77,11 @@ TEST(ThemeDecorate, MonoAndPlainAreIdentity) {
         EXPECT_EQ(renderRole(theme, Role::Success).foreground_color, Color::Default);
         EXPECT_EQ(renderRole(theme, Role::Danger).foreground_color, Color::Default);
         EXPECT_EQ(renderRole(theme, Role::Accent).foreground_color, Color::Default);
+        // Nominal is invisible once colour is degraded: no hue and no dim, so the
+        // glyph and state word carry the resting state alone (§10).
+        const ftxui::Pixel nominal = renderRole(theme, Role::Nominal);
+        EXPECT_EQ(nominal.foreground_color, Color::Default);
+        EXPECT_FALSE(nominal.dim);
         // Muted no longer dims once colour is degraded.
         EXPECT_FALSE(renderRole(theme, Role::Muted).dim);
     }

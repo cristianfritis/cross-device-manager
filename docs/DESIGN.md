@@ -146,10 +146,17 @@ with the desktop palette or terminal theme chosen by the user.
 | Muted text | `#5D6A65` | `#A5B1AD` | Secondary metadata |
 | Accent | `#0B6F66` | `#61C7B5` | Focus and current selection |
 | Accent surface | `#D6ECE7` | `#214E4A` | Selected row background |
-| Success | `#267A46` | `#73C991` | Completed operation, healthy result |
+| Nominal | `#46705A` | `#8FB79C` | Verified normal, resting state |
+| Success | `#267A46` | `#73C991` | Completed operation, reported as a task outcome |
 | Warning | `#8A5B00` | `#E8B35C` | Risk, suspended enforcement |
 | Danger | `#B4232A` | `#F06A6A` | Failure or destructive consequence |
 | Information | `#245FA8` | `#74A7E8` | Neutral security or task information |
+
+Nominal is the resting state of a row that has been checked and found normal: an
+enabled device, a signed module, an up-to-date component, a healthy snapshot. It
+is a quieter affirmative than Success, which reports an operation the user just
+performed and belongs on the status line rather than on a list row. Its GUI
+reference values are reserved: no GUI surface colors list rows by state today.
 
 These values are reference targets, not permission to replace the native Qt
 style with a global stylesheet. Prefer `QPalette`, `QStyle`, theme icons, and
@@ -160,8 +167,9 @@ meaningful icons, focus rings, and state boundaries should meet `3:1`.
 For the TUI:
 
 - Default to the terminal's foreground and background.
-- Map accent to cyan/teal, success to green, warning to yellow, danger to red,
-  and information to blue when those colors are available.
+- Map accent to cyan/teal, nominal to green plus the dim attribute, success to
+  green, warning to yellow, danger to red, and information to blue when those
+  colors are available.
 - Pair every color with text, weight, reverse video, a focus marker, or another
   non-color signal.
 - Do not emit hand-written ANSI sequences or require a true-color terminal.
