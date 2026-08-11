@@ -21,10 +21,23 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "DEVMGR_PACKAGED_BUILD": "ON"
       }
+    },
+    {
+      "name": "windows-debug",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows-debug",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "DEVMGR_PLATFORM": "windows",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "linux-debug", "configurePreset": "linux-debug" },
-    { "name": "linux-packaged", "configurePreset": "linux-packaged" }
+    { "name": "linux-packaged", "configurePreset": "linux-packaged" },
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug" }
   ]
 }

@@ -282,6 +282,22 @@ derives from the same helper rather than a second ad-hoc conversion. Detail rows
 use a fixed-width label column so every value starts in the same place and no
 value abuts its colon.
 
+**Per-device detail fields come from one shared vocabulary.** Platform backends
+read wildly different property stores — udev keys on Linux, the property store
+on Windows — and none of those key names may reach a surface. `core` owns a
+closed set of detail fields, one product-facing label each and a fixed display
+order; each backend maps its native keys into that set inside its own directory.
+Surfaces render whatever fields are present, in the shared order, under the
+shared labels, and **must** author no label of their own and no platform-specific
+row. A field the backend did not supply is **absent**, not blank: an omitted row
+says "not reported", where an empty one says "reported as nothing".
+
+Two consequences worth stating outright. A native platform property name never
+appears on screen or in machine-readable output — not as a label, not as a field
+identifier. And device **status** is not one of these fields: it travels in the
+shared model's status value and is coloured by the shared role mapping, so no
+platform can introduce a second, differently-worded notion of state.
+
 ### 5.3 Toolbar and commands
 
 Order commands by frequency and consequence:
@@ -299,6 +315,24 @@ not for ordinary navigation.
 Disabled actions must explain why through a tooltip in Qt and contextual status
 text in FTXUI. Hiding an unavailable action is appropriate only when it cannot
 apply to the current object type; safety refusals remain visible and explained.
+
+**Inapplicable hides, unavailable disables.** These are two different states and
+they **must** read differently:
+
+- **Platform inapplicability** — the running platform has no such capability at
+  all, so the verb can never succeed here. The verb is **hidden**, along with
+  any separator that would be orphaned by its absence. A permanently disabled
+  control is an unkept promise: it invites a click that will never work.
+- **Runtime unavailability** — the platform has the capability but the backing
+  service is not answering right now (a stopped helper, a daemon that is not
+  running). The verb stays **visible and disabled**, and explains why, because
+  the situation is recoverable and the user may be able to fix it.
+
+The distinction lives here, once, so no surface re-derives it. Both cases also
+carry the shared unavailability sentence for their kind — `unsupported` at
+information severity, `unreachable` at warning severity — which is what tells a
+user whether they are looking at something to fix or something that is simply
+not part of this platform.
 
 An ellipsis is used only when a command opens a dialog or prompt requiring more
 input: `Load module...`, `Bind driver...`. Immediate commands do not use one.

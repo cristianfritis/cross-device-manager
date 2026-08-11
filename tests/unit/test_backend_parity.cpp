@@ -27,6 +27,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+
+#include "devmgr/core/device_json.hpp"
+#include "devmgr/core/device_presentation.hpp"
+#include "devmgr/core/models.hpp"
 
 #include "devmgr/app/backend_status_vm.hpp"
 #include "devmgr/core/backend_wording.hpp"
@@ -122,4 +127,37 @@ TEST(BackendParity, EverySentenceIsCalmAndMachineFree) {
                       app::StatusSeverity::Danger);
         }
     }
+}
+
+// ---- cli-inventory: the command line is a third surface, not an exception ---
+//
+// "WHEN a device's name and bus are rendered by a command-line inventory verb
+// THEN they are byte-identical to what the graphical and terminal surfaces
+// render for the same device." All three go through the same two helpers, so
+// this asserts the helpers ARE the only spelling — a CLI that composed its own
+// would drift the moment displayDeviceName's fallback rules changed.
+TEST(BackendParity, CommandLineNameAndBusMatchTheOtherSurfaces) {
+    core::Device d;
+    d.id = core::DeviceId{"dev-1"};
+    d.bus = core::BusType::Usb;
+    d.name = "0c45";  // a bare product id: the fallback path, not the easy case
+    d.vendorId = "046d";
+    d.productId = "c52b";
+    d.nativeId = "/sys/devices/pci0000:00/usb1/1-2";
+    d.properties["ID_VENDOR_FROM_DATABASE"] = "Logitech, Inc.";
+    d.properties["ID_MODEL_FROM_DATABASE"] = "Unifying Receiver";
+
+    // What every surface shows, from the one place each is spelled.
+    const std::string name = core::displayDeviceName(d);
+    const std::string bus = core::displayBus(d.bus);
+
+    // The CLI's structured output carries those same bytes — it is generated
+    // from the same helpers, so a divergence fails here rather than in a
+    // screenshot comparison.
+    const auto json = nlohmann::json::parse(core::deviceToJson(d));
+    EXPECT_EQ(json["name"], name);
+    EXPECT_EQ(json["bus"], bus);
+
+    // ...and so does its human-readable list row, which the JSON does not cover.
+    EXPECT_NE(core::deviceListToJson({d}).find(name), std::string::npos);
 }

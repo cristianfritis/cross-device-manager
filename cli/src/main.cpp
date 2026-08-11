@@ -78,7 +78,19 @@ int main(int argc, char** argv) {
             std::cerr << "devmgr: cannot start: " << backends.error().message << "\n";
             return devmgr::cli::kFailed;
         }
-        return devmgr::cli::run((*backends)->backends().privileged, args, std::cout, std::cerr);
+        // The whole backend set, not just the channel: the inventory verbs read
+        // the enumerator and must work with no helper running (design D6).
+        //
+        // Nothing here opens a connection. The privileged channel's constructor
+        // only remembers which endpoint to use — every one of its methods dials,
+        // calls and hangs up — so building the set is free, and the no-args,
+        // unknown-verb and usage paths reach no transport at all (tasks 6.1,
+        // 6.2). The connection happens on the path of a verb that needs one, and
+        // nowhere else.
+        const devmgr::cli::Context context{.channel = (*backends)->backends().privileged,
+                                           .enumerator = (*backends)->backends().enumerator,
+                                           .capabilities = (*backends)->capabilities()};
+        return devmgr::cli::run(context, args, std::cout, std::cerr);
     } catch (const std::exception& e) {
         // Belt-and-suspenders: every channel verb already catches sdbus errors
         // and returns a Result, so nothing should escape — but a recovery tool

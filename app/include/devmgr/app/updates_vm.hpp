@@ -53,6 +53,9 @@ class UpdatesVM {
     // serving. Both surfaces render notes[i].text verbatim (the parity contract)
     // and put notes[i].diagnostic behind a disclosure — never in the sentence.
     std::vector<BackendNote> availabilityNotes() const;
+    // The sentence that replaces this view's content when the running platform
+    // implements no update provider at all; nullopt otherwise.
+    std::optional<std::string> unsupportedContent() const;
     std::string requestBanner() const;  // "" when none; DURABLE until dismiss (spec §9)
     void dismissRequest();
     std::vector<std::string> detailLines() const;  // selected candidate: facts + releases

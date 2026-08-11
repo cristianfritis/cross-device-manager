@@ -13,6 +13,8 @@ add_library(devmgr_core
     src/identity.cpp
     src/refusing_backends.cpp
     src/device_presentation.cpp
+    src/device_detail_fields.cpp
+    src/device_json.cpp
     src/backend_wording.cpp
     src/criticality.cpp
     src/snapshot_models.cpp

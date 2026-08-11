@@ -4,6 +4,26 @@ Manage devices, drivers, firmware, and state snapshots on Linux — one
 polkit-gated daemon (`devmgrd`), a Qt 6 GUI (`devmgr-gui`), a terminal UI
 (`devmgr-tui`), and a recovery CLI (`devmgr`).
 
+## Supported platforms
+
+| Platform | Surfaces | What works |
+|---|---|---|
+| Linux | GUI, TUI, CLI, daemon | Everything |
+| Windows 10 1809+ / Windows 11 | GUI, CLI | Read-only: device inventory with detail, live hotplug, system information |
+| Windows 10 1607–1803 | CLI | Read-only, command line only — the GUI needs 1809 |
+| Windows 8.1 and earlier | — | Unsupported |
+
+**Read-only on Windows** means exactly that: devices are listed, described, and
+updated live as hardware comes and goes, and nothing can be changed. Enable,
+disable, bind, unbind, module load/unload, firmware install, and snapshots are
+not implemented there — the Modules, Updates, and Snapshots views say so in one
+sentence each, and the mutating toolbar verbs are absent rather than greyed out.
+
+The two floors have two different causes: **1607** is where the device
+notification interface the backend needs first exists (the build refuses an
+earlier target), and **1809** is the minimum Windows version Qt 6 officially
+supports. Full detail in [docs/COMPATIBILITY-POLICY.md](docs/COMPATIBILITY-POLICY.md).
+
 ## Install (beta)
 
 ### Ubuntu 22.04 / 24.04 (.deb)

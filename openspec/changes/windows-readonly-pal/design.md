@@ -361,21 +361,37 @@ forbid across platforms.
 
 ### D14 — The minimum Windows version is a declared contract, not an implementation detail
 
-Windows 10 version 1607 is the floor, because `CM_Register_Notification` (D8) is
-unavailable before it and the alternatives were rejected there. That floor is
-declared in three places that can each be checked: the `windows-device-inventory`
-spec states it as a requirement, the Windows build configuration enforces it at
-configure or compile time so an older target fails loudly rather than at a
-runtime symbol lookup, and the compatibility and README documentation state it
-as a supported-platform statement.
+Windows 10 version 1607 is the floor for the backend and the CLI, because
+`CM_Register_Notification` (D8) is unavailable before it and the alternatives
+were rejected there. That floor is declared in three places that can each be
+checked: the `windows-device-inventory` spec states it as a requirement, the
+Windows build configuration enforces it at configure or compile time so an older
+target fails loudly rather than at a runtime symbol lookup, and the
+compatibility and README documentation state it as a supported-platform
+statement.
 
 *Rationale.* A minimum version that lives only in an API choice is discovered by
 a user on an unsupported machine, as a missing-entry-point error. Formally
 dropping older Windows is a decision worth making visibly once, not an accident
 of which function was convenient.
 
+*The GUI's floor is higher, and it is a second declared number.* Qt 6 officially
+supports Windows 10 version 1809 and later — every Qt 6 release, including the
+LTS this change pins. Qt will in practice run at 1607 (its hard dependency,
+`GetSystemMetricsForDpi`, arrived in that release), but "runs" is not "supported",
+and a defect below Qt's floor has no upstream recourse. So the supported-platform
+statement carries two numbers: **1607 for the backend and the CLI, 1809 for the
+GUI.** Between them, `devmgr` is supported and `devmgr-gui` is not.
+
+*Alternatives considered.* Raising everything to 1809: rejected — it would drop
+machines the CLI genuinely works on, for no gain beyond one fewer table row.
+Keeping 1607 everywhere and shipping the GUI below Qt's floor: rejected — it
+would state support this project cannot honour, which is the same defect D14
+exists to prevent, pointed the other way.
+
 *What this forecloses.* Windows 8.1 and Windows 10 before 1607 are out of
-support for this project. That is the intended reading, not a side effect.
+support entirely. Windows 10 1607–1803 is command-line only. That is the
+intended reading, not a side effect.
 
 ## Risks / Trade-offs
 

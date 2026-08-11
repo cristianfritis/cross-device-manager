@@ -10,10 +10,15 @@
 #include <ostream>
 #include <string_view>
 
+#include "devmgr/core/device_detail_fields.hpp"
+#include "devmgr/core/device_json.hpp"
+#include "devmgr/core/device_presentation.hpp"
+#include "devmgr/core/models.hpp"
 #include "devmgr/core/snapshot_history.hpp"
 #include "devmgr/core/snapshot_json.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/snapshot_presentation.hpp"
+#include "devmgr/pal/refusing_backends.hpp"
 
 namespace devmgr::cli {
 namespace {
@@ -55,6 +60,17 @@ bool isDaemonUnavailableError(const core::Error& e) {
     });
 }
 
+// The inventory verbs are listed separately because they are a different
+// contract: they read the platform directly, so they work with no helper
+// running and on a platform that has none. They are appended to the usage text
+// only when the running platform has a device enumerator (task 6.9) — usage
+// must not advertise a verb the binary will refuse.
+constexpr const char* kInventoryUsageText =
+    "\n"
+    "       devmgr devices <command>            (reads the system directly; no helper needed)\n"
+    "  list [--json]              list present devices (name, bus, status)\n"
+    "  show <id> [--json]         show one device's full record\n";
+
 constexpr const char* kUsageText =
     "usage: devmgr [--bus system|session] snapshot <command>\n"
     "  list [--json]              list snapshots (short id, date, trigger, reason)\n"
@@ -66,8 +82,20 @@ constexpr const char* kUsageText =
     "restoring\n"
     "  delete <id>                delete a snapshot (id may be any unique prefix)\n";
 
+// Scoped usage: a user who typed `snapshot` and got the arguments wrong is
+// asking about snapshots, so the snapshot table is the answer.
 int usage(std::ostream& err) {
     err << kUsageText;
+    return kUsage;
+}
+
+// Full usage, for the top level where the user has not named a family yet. The
+// inventory table appears only when the running platform has a device
+// enumerator, so usage never advertises a verb this binary would refuse
+// (task 6.9).
+int topLevelUsage(std::ostream& err, bool inventoryOffered) {
+    err << kUsageText;
+    if (inventoryOffered) err << kInventoryUsageText;
     return kUsage;
 }
 
@@ -354,17 +382,145 @@ int doDelete(pal::IPrivilegedChannel& channel, const std::vector<std::string>& r
     out << "deleted " << core::snapshotShortId(*full) << "\n";
     return kOk;
 }
+
+// ---- Inventory verbs (design D6) -------------------------------------------
+//
+// These read IDeviceEnumerator directly: no privileged channel, no daemon, no
+// polkit. kUnreachable and kNotAuthorized are therefore structurally
+// unreachable for them, which is the point — a user with a dead helper can
+// still see what hardware is present.
+
+// One list row: the canonical name and bus label the GUI and TUI show for the
+// same device, byte for byte (cli-inventory: "Command-line output matches the
+// other surfaces"). Composed here, but not SPELLED here — every user-visible
+// word comes from a shared presentation helper.
+std::string deviceRow(const core::Device& d) {
+    return core::displayDeviceName(d) + "  [" + core::displayBus(d.bus) + "]  " +
+           std::string(core::to_string(d.status)) + "  " + d.id.value;
+}
+
+// Enumeration failed: the caller must be able to tell that from "the query ran
+// and found nothing" (task 6.6). A failure prints to stderr and returns
+// kFailed; it never prints an empty list and returns success.
+int reportEnumerationFailure(std::ostream& err, const core::Error& e) {
+    err << "devmgr: cannot read devices: " << e.message << "\n";
+    return kFailed;
+}
+
+int doDevicesList(pal::IDeviceEnumerator& enumerator, const std::vector<std::string>& rest,
+                  std::ostream& out, std::ostream& err) {
+    bool json = false;
+    for (const auto& a : rest) {
+        if (a == "--json") {
+            json = true;
+        } else {
+            err << "devmgr: unexpected argument '" << a << "'\n";
+            return kUsage;
+        }
+    }
+    auto devices = enumerator.enumerate();
+    if (!devices) return reportEnumerationFailure(err, devices.error());
+    if (json) {
+        out << core::deviceListToJson(*devices) << "\n";
+        return kOk;
+    }
+    // The empty-result string asserts a completed query, which is exactly what
+    // happened: the enumerator answered and reported nothing. The failure path
+    // above never reaches here, so this string cannot stand in for an error.
+    if (devices->empty()) {
+        out << "(no devices)\n";
+        return kOk;
+    }
+    for (const auto& d : *devices) out << deviceRow(d) << "\n";
+    return kOk;
+}
+
+// The full record for one device, as label/value rows. The shared detail-field
+// vocabulary supplies the rows that come from the property map, under the same
+// labels and in the same order the GUI and TUI use (task 5a.5) — the CLI
+// authors none of them and reads no raw platform key.
+void writeDeviceDetail(std::ostream& out, const core::Device& d) {
+    out << "Name:     " << core::displayDeviceName(d) << "\n";
+    out << "Id:       " << d.id.value << "\n";
+    out << "Bus:      " << core::displayBus(d.bus) << "\n";
+    out << "Status:   " << core::to_string(d.status) << "\n";
+    // Absent properties are omitted rather than blanked, the same rule the
+    // detail panes follow (ui-accessibility).
+    const auto row = [&out](const char* label, const std::string& value) {
+        if (!value.empty()) out << label << value << "\n";
+    };
+    const auto fields = core::detailFields(d);
+    const auto published = [&fields](core::DetailField field) {
+        return std::ranges::any_of(fields, [field](const auto& f) { return f.field == field; });
+    };
+    if (!published(core::DetailField::DeviceInstanceId)) row("Identity: ", d.nativeId);
+    if (!d.vendorId.empty() || !d.productId.empty())
+        out << "VID:PID:  " << d.vendorId << ":" << d.productId << "\n";
+    row("Serial:   ", d.serial);
+    if (d.boundDriver.has_value() && !published(core::DetailField::Driver))
+        out << "Driver:   " << *d.boundDriver << "\n";
+    if (!published(core::DetailField::HardwareIds)) row("Hardware ID: ", d.hardwareId);
+    if (d.parent.has_value()) out << "Parent:   " << d.parent->value << "\n";
+    for (const auto& field : fields) out << field.label << ": " << field.value << "\n";
+}
+
+int doDevicesShow(pal::IDeviceEnumerator& enumerator, const std::vector<std::string>& rest,
+                  std::ostream& out, std::ostream& err) {
+    bool json = false;
+    std::optional<std::string> id;
+    for (const auto& a : rest) {
+        if (a == "--json") {
+            json = true;
+        } else if (!id) {
+            id = a;
+        } else {
+            err << "devmgr: unexpected argument '" << a << "'\n";
+            return kUsage;
+        }
+    }
+    if (!id) {
+        err << "devmgr: devices show needs a device id\n";
+        return kUsage;
+    }
+    auto devices = enumerator.enumerate();
+    if (!devices) return reportEnumerationFailure(err, devices.error());
+    const auto match =
+        std::ranges::find_if(*devices, [&id](const core::Device& d) { return d.id.value == *id; });
+    if (match == devices->end()) {
+        err << "devmgr: no device matches id '" << *id << "'\n";
+        return kNotFound;
+    }
+    if (json) {
+        out << core::deviceToJson(*match) << "\n";
+        return kOk;
+    }
+    writeDeviceDetail(out, *match);
+    return kOk;
+}
+
+int runDevices(pal::IDeviceEnumerator& enumerator, const std::vector<std::string>& args,
+               std::ostream& out, std::ostream& err) {
+    if (args.empty()) {
+        err << "devmgr: devices needs a command (list|show)\n";
+        return kUsage;
+    }
+    const std::string& verb = args.front();
+    const std::vector<std::string> rest(args.begin() + 1, args.end());
+    if (verb == "list") return doDevicesList(enumerator, rest, out, err);
+    if (verb == "show") return doDevicesShow(enumerator, rest, out, err);
+    err << "devmgr: unknown devices command '" << verb << "'\n";
+    return kUsage;
+}
+
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — out/err are stdout/stderr
-int run(pal::IPrivilegedChannel& channel, const std::vector<std::string>& args, std::ostream& out,
-        std::ostream& err) {
-    if (args.empty() || args.front() != "snapshot") return usage(err);
-    if (args.size() < 2) return usage(err);
-    const std::string& verb = args[1];
-    const std::vector<std::string> rest(args.begin() + 2, args.end());
+int runSnapshot(pal::IPrivilegedChannel& channel, const std::vector<std::string>& args,
+                std::ostream& out, std::ostream& err) {
+    if (args.empty()) return usage(err);
+    const std::string& verb = args.front();
+    const std::vector<std::string> rest(args.begin() + 1, args.end());
     if (verb == "list") return doList(channel, rest, out, err);
     if (verb == "history") return doHistory(channel, rest, out, err);
     if (verb == "create") return doCreate(channel, rest, out, err);
@@ -373,6 +529,37 @@ int run(pal::IPrivilegedChannel& channel, const std::vector<std::string>& args, 
     if (verb == "delete") return doDelete(channel, rest, out, err);
     err << "devmgr: unknown snapshot command '" << verb << "'\n";
     return usage(err);
+}
+
+int run(const Context& context, const std::vector<std::string>& args, std::ostream& out,
+        std::ostream& err) {
+    // Read once, from the descriptor: whether this platform offers the
+    // inventory family at all is a build-and-machine fact, not something to
+    // discover by calling the enumerator and failing (design D1).
+    const bool inventory = context.capabilities.deviceEnumeration;
+    if (args.empty()) return topLevelUsage(err, inventory);
+    const std::string& family = args.front();
+    const std::vector<std::string> rest(args.begin() + 1, args.end());
+    // `snapshot` reaches the channel; `devices` never does. Nothing above this
+    // line has touched either backend, so the no-args, unknown-family and usage
+    // paths make no connection attempt of any kind (task 6.2).
+    if (family == "snapshot") return runSnapshot(context.channel, rest, out, err);
+    if (family == "devices" && inventory) return runDevices(context.enumerator, rest, out, err);
+    if (family == "devices") {
+        // The platform has no enumerator, so this verb cannot exist here. Said
+        // once, calmly, with no instruction to act on — there is nothing the
+        // user can install or start that would change it.
+        err << "devmgr: device inventory is not available on this platform\n";
+        return topLevelUsage(err, /*inventoryOffered=*/false);
+    }
+    return topLevelUsage(err, inventory);
+}
+
+int run(pal::IPrivilegedChannel& channel, const std::vector<std::string>& args, std::ostream& out,
+        std::ostream& err) {
+    const Context context{
+        .channel = channel, .enumerator = pal::refusingDeviceEnumerator(), .capabilities = {}};
+    return run(context, args, out, err);
 }
 
 }  // namespace devmgr::cli

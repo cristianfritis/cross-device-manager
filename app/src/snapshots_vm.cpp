@@ -278,7 +278,13 @@ void SnapshotsVM::rebuild() {
 //                                 may claim it did. The banner's shared sentence
 //                                 explains the empty region instead.
 void SnapshotsVM::pushEmptyStateRow(const std::string& needle) {
-    if (!needle.empty()) {
+    // A fourth truth, ahead of the other three: the running platform has no
+    // snapshot store at all. The sentence replaces the content — no filter
+    // string (nothing was searched) and no "(no snapshots)" (nothing was
+    // counted).
+    if (const auto unsupported = unsupportedContent()) {
+        rows_.push_back(*unsupported);
+    } else if (!needle.empty()) {
         rows_.push_back("No snapshots match \"" + filter_ + "\"");
     } else if (!facade_.daemonAvailability()) {
         rows_.emplace_back(kPlaceholderRow);
@@ -291,9 +297,23 @@ void SnapshotsVM::pushEmptyStateRow(const std::string& needle) {
 std::vector<BackendNote> SnapshotsVM::availabilityNotes() const {
     // This view reads devmgrd and nothing else, so it presents devmgrd's note
     // and nothing else — a stopped fwupd is not this screen's business.
+    //
+    // Except when the platform has no snapshot store at all: then the honest
+    // subject is snapshots, not the helper, and the Snapshots identity carries
+    // the sentence for exactly that case.
+    if (const auto own = facade_.backendStatus().noteFor(core::BackendId::Snapshots);
+        own && own->kind == core::UnavailabilityKind::Unsupported)
+        return {*own};
     const auto note = facade_.backendStatus().noteFor(core::BackendId::Devmgrd);
     if (!note) return {};
     return {*note};
+}
+
+// The snapshot store lives behind the privileged channel and has no other
+// source, so one capability decides the whole view.
+std::optional<std::string> SnapshotsVM::unsupportedContent() const {
+    return unsupportedViewText(core::BackendId::Snapshots,
+                               !facade_.capabilities().privilegedChannel);
 }
 
 void SnapshotsVM::setFilter(std::string filter) {

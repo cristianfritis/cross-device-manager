@@ -9,6 +9,7 @@ add_executable(devmgr_tests
     unit/test_refusing_backends.cpp
     unit/test_platform_backends.cpp
     unit/test_device_presentation.cpp
+    unit/test_device_detail_fields.cpp
     unit/test_backend_wording.cpp
     unit/test_backend_parity.cpp
     unit/test_backend_status_vm.cpp
@@ -24,7 +25,6 @@ add_executable(devmgr_tests
     unit/test_task_scheduler.cpp
     unit/test_delayed_scheduler.cpp
     unit/test_fake_pal.cpp
-    unit/test_udev_field_mapping.cpp
     unit/test_device_service.cpp
     unit/test_application_facade.cpp
     unit/test_application_facade_updates.cpp
@@ -45,11 +45,36 @@ target_link_libraries(devmgr_tests PRIVATE devmgr_core devmgr_app GTest::gtest G
 # ${CMAKE_SOURCE_DIR} reaches tui/src/state_roles.hpp — a toolkit-free header
 # (no FTXUI), so the documented TUI colour table is unit-testable here.
 target_include_directories(devmgr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
+
+# The Windows backend's DECISIONS — which property becomes which model field,
+# which identifier prefix is which bus, when a hotplug callback may fire — live
+# in platform-NEUTRAL sources on purpose (see platform/windows/CMakeLists.txt).
+# Compiling those two files here, unconditionally, is what puts them under the
+# Linux CI that gates this project: they are covered on every run, from captured
+# property fixtures and a fake notification source, with no Windows machine
+# involved. The Win32 half is not compiled here and cannot be.
+target_include_directories(devmgr_tests PRIVATE ${CMAKE_SOURCE_DIR}/platform/windows/include)
+target_sources(devmgr_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/platform/windows/src/windows_device_mapper.cpp
+    ${CMAKE_SOURCE_DIR}/platform/windows/src/windows_hotplug_monitor.cpp
+    unit/test_windows_device_mapper.cpp
+    unit/test_windows_hotplug_monitor.cpp)
+
+if(DEVMGR_PLATFORM STREQUAL "windows")
+    # The real Windows factory — the read-only guarantee is a property of which
+    # objects it wires, so it can only be asserted where it is compiled.
+    target_sources(devmgr_tests PRIVATE unit/test_windows_platform_backends.cpp)
+    target_link_libraries(devmgr_tests PRIVATE devmgr_pal_windows)
+endif()
+
 if(DEVMGR_PLATFORM STREQUAL "linux")
     # Header-only udev mapping helpers (NO libudev link) — unit-test them directly.
+    # The header lives under platform/linux, so the test that covers it is
+    # Linux-gated even though it links nothing.
     target_include_directories(devmgr_tests PRIVATE ${CMAKE_SOURCE_DIR}/platform/linux/include)
     # Linux-only concrete PAL units (controller/prober) — these DO link the PAL lib.
     target_sources(devmgr_tests PRIVATE
+        unit/test_udev_field_mapping.cpp
         unit/test_sysfs_device_controller.cpp
         unit/test_linux_criticality_prober.cpp
         unit/test_request_processor.cpp
@@ -103,3 +128,11 @@ if(DEVMGR_WITH_SDBUS)
 endif()
 
 gtest_discover_tests(devmgr_tests)
+
+# Native platform property identifiers stay inside their own backend directory
+# (windows-device-inventory spec). Script mode, so it runs on every platform and
+# needs no shell — the rule is gated by the Linux CI too, not only the Windows
+# job that could produce a violation.
+add_test(NAME native_property_key_guard
+         COMMAND ${CMAKE_COMMAND} -DDEVMGR_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+                 -P ${CMAKE_SOURCE_DIR}/scripts/check-native-keys.cmake)

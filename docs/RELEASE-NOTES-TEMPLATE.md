@@ -61,6 +61,31 @@ dependency is attached and covered by `SHA256SUMS`.
   session with a polkit agent.
 - Statically linked `sdbus-c++ 2.3.1` (Ubuntu ships an incompatible 1.x);
   security updates for it ride devmgr releases during the beta.
+- **Windows is read-only and unpackaged.** Devices are listed with detail and
+  hotplug is live; nothing can be changed, and there is no installer — the GUI
+  runs from the build tree. GUI needs Windows 10 1809+ (Qt's floor); the CLI
+  works from Windows 10 1607.
+
+### What the Windows CI job verifies — and what it does not
+
+The `windows-build-and-test` job covers **compilation and unit tests only**. A
+hosted runner has a synthetic device set, so a green Windows job is not evidence
+that the build works on real hardware. It does **not** cover:
+
+- that enumerated devices match what Device Manager reports for the same machine
+  (names, vendors, buses, detail rows);
+- device arrival and removal — no physical device is ever plugged or unplugged;
+- shutdown while devices are being plugged and unplugged, which is the one
+  interleaving where the notification API can hang or use freed state;
+- that unreported properties omit their detail rows rather than showing blanks;
+- that the Devices toolbar shows only `Refresh`, with no disabled mutating verb
+  and no orphan separator;
+- that a device in a problem state renders through the shared status colour and
+  word.
+
+Those are verified by the owner-gated manual smoke on real Windows before a
+release claims Windows support, and the Windows build number tested is recorded
+with the result.
 
 ## Testing & reporting
 

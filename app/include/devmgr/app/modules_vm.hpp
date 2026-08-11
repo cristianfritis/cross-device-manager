@@ -77,6 +77,10 @@ class ModulesVM {
     // locally, but every verb on this view (load/unload) is the daemon's, so
     // the view carries the note — read from the facade's single instance.
     std::vector<BackendNote> availabilityNotes() const;
+    // The sentence that replaces this view's content when the running platform
+    // implements none of its sources; nullopt otherwise. Public so a surface can
+    // ask whether the region is an explanation rather than a list.
+    std::optional<std::string> unsupportedContent() const;
     void setRebuildHooks(std::function<void()> before, std::function<void()> after);
     void rebuild();  // UI thread: snapshot + rows
     // Async: fills the signature cache for names not yet cached, then posts a
@@ -85,6 +89,8 @@ class ModulesVM {
 
    private:
     void onModulesChanged();  // EventBus handler → coalesced dispatcher post
+    // The one place that decides which "nothing here" an empty list is.
+    void pushEmptyStateRow();
 
     ApplicationFacade& facade_;
     runtime::EventBus& bus_;

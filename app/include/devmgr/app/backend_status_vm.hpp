@@ -8,8 +8,39 @@
 #include "devmgr/app/status_line_vm.hpp"  // StatusSeverity
 #include "devmgr/core/backend_wording.hpp"
 #include "devmgr/core/result.hpp"
+#include "devmgr/pal/capabilities.hpp"
 
 namespace devmgr::app {
+
+// Which PAL capability supplies each backend identity. A platform that does not
+// implement the capability has no such backend at all, which is what
+// UnavailabilityKind::Unsupported means.
+//
+//   devmgrd   privilegedChannel  every mutation and the module/device control
+//                                paths reach the helper through it
+//   fwupd     updateProviders    firmware candidates come from a provider
+//   dkms      updateProviders    the DKMS status reporter is a provider too
+//   snapshots privilegedChannel  the snapshot store lives behind the helper
+//
+// Free-standing and total so a test can enumerate it, and so the mapping is
+// stated once rather than re-derived at each call site.
+bool capabilitySupplies(const pal::PlatformCapabilities& capabilities, core::BackendId backend);
+
+// What a view renders IN PLACE OF ITS CONTENT when every source feeding it is
+// unimplemented on the running platform (backend-availability: "A view with no
+// implemented source states why rather than showing nothing").
+//
+// nullopt whenever the view has at least one implemented source — including
+// when that source is merely unreachable, which is a different fact with a
+// different sentence and a view that still renders what it can.
+//
+// `everySourceUnimplemented` is the caller's own reading of the capability
+// descriptor, because which capabilities feed a view is the view's knowledge,
+// not this type's. What is shared is the consequence: one sentence, from the
+// core table, at information severity, and no empty-result or loading string
+// beside it.
+std::optional<std::string> unsupportedViewText(core::BackendId backend,
+                                               bool everySourceUnimplemented);
 
 // One degraded backend, as both surfaces read it (backend-availability spec;
 // design D2). This type is the single accessor for "a backend cannot serve this
@@ -32,9 +63,16 @@ struct BackendNote {
 // The role mapping, total and free-standing so a test can enumerate every
 // (kind, blocksAttemptedVerb) pair (design D3):
 //
+//   Info         if kind is Unsupported                   (platform, not config)
 //   Warning      if kind is Unreachable or NotPermitted   (present, not serving)
 //   Warning      if the note explains a verb the user attempted
-//   Info         otherwise                                (Absent, Unsupported)
+//   Info         otherwise                                (Absent)
+//
+// Unsupported is tested FIRST, so it is information under every input including
+// the attempted-verb one. A platform that does not implement a backend offers no
+// verb that depends on it, so there is no attempt to escalate for; pinning it
+// here means a mis-gated caller degrades to a calm sentence instead of raising a
+// warning about something the user can never change.
 //
 // Danger is not in the range — not because a reviewer would catch it, but
 // because it is not a branch. Danger stays reserved for an operation that ran
@@ -71,8 +109,25 @@ class BackendStatusVM {
     BackendStatusVM(BackendStatusVM&&) = delete;
     BackendStatusVM& operator=(BackendStatusVM&&) = delete;
 
+    // Seeds the backends the running platform has no implementation of, from
+    // the capability descriptor alone — no backend is called and no error is
+    // needed to discover it (design D1; backend-availability: the distinction
+    // "SHALL be drawn from the platform capability descriptor, not from a
+    // failed call").
+    //
+    // Called once, at facade construction. A backend marked here is unsupported
+    // for the life of the process: a platform cannot grow a capability while
+    // running, so observe() cannot clear it and does not log for it. That also
+    // means a mis-gated caller that does attempt the verb gets the same calm
+    // unsupported sentence rather than a second, contradictory note.
+    void applyCapabilities(const pal::PlatformCapabilities& capabilities);
+
     // Current availability of one backend. An empty `error` means healthy and
     // clears any existing note; the next degradation logs again.
+    //
+    // Ignored for a backend applyCapabilities() marked unsupported — including
+    // an empty error, which would otherwise report a nonexistent backend as
+    // healthy.
     void observe(core::BackendId backend, const std::optional<core::Error>& error);
 
     // Degraded backends only, in core::kAllBackends order. Empty when every
@@ -106,6 +161,9 @@ class BackendStatusVM {
 
     mutable std::mutex mutex_;
     std::array<std::optional<Entry>, kSlots> entries_;
+    // Set once by applyCapabilities() and never cleared — the platform fact,
+    // held apart from entries_ so an observation cannot overwrite it.
+    std::array<bool, kSlots> unimplemented_{};
     // Last kind logged per backend — the transition key. Cleared when the
     // backend recovers so a later outage is logged again.
     std::array<std::optional<core::UnavailabilityKind>, kSlots> logged_;

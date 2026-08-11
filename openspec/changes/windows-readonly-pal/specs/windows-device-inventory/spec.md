@@ -5,13 +5,19 @@ The Windows backend SHALL declare Windows 10 version 1607 as its minimum support
 
 The floor exists because the hotplug notification interface this backend requires is unavailable before that version; the backend SHALL NOT work around it by falling back to an interface with weaker delivery or shutdown guarantees.
 
+The graphical surface SHALL declare a separate, higher minimum of Windows 10 version 1809, because that is the minimum its toolkit officially supports. The supported-platform documentation SHALL state both numbers and SHALL state that between them the command-line surface is supported and the graphical one is not. A surface SHALL NOT be declared supported on a version its toolkit does not support, even where it would run.
+
 #### Scenario: Build refuses an earlier target
 - **WHEN** the Windows backend is configured to target a Windows version earlier than 10 version 1607
 - **THEN** the build fails with a message naming the required minimum, and no program is produced
 
 #### Scenario: The floor is documented as a support statement
 - **WHEN** the supported-platform and compatibility documentation is read
-- **THEN** it states Windows 10 version 1607 as the minimum and that earlier releases are unsupported
+- **THEN** it states Windows 10 version 1607 as the minimum for the backend and command-line surface, Windows 10 version 1809 as the minimum for the graphical surface, and that earlier releases are unsupported
+
+#### Scenario: The graphical surface is not claimed below its toolkit's floor
+- **WHEN** a Windows version at or above 1607 but below 1809 is considered
+- **THEN** the command-line surface is stated as supported and the graphical surface is stated as unsupported, rather than the graphical surface being claimed on the strength of it happening to run
 
 #### Scenario: No weaker fallback is introduced
 - **WHEN** the Windows backend's hotplug implementation is examined

@@ -1,5 +1,15 @@
 {
   "name": "cross-device-manager",
   "version": "0.1.0",
-  "dependencies": ["gtest", "spdlog", "nlohmann-json", "tl-expected", "ftxui"]
+  "$comment": "ftxui is platform-qualified to Linux: it backs the TUI only, and the TUI is a Linux surface (its Windows console behaviour has not been through the DESIGN.md parity rules). An x64-windows configure therefore resolves no dependency that nothing on that platform links.",
+  "dependencies": [
+    "gtest",
+    "spdlog",
+    "nlohmann-json",
+    "tl-expected",
+    {
+      "name": "ftxui",
+      "platform": "linux"
+    }
+  ]
 }

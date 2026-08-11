@@ -71,9 +71,11 @@ std::string confirmTextFor(const core::UpdateCandidate& c, const core::ReleaseIn
 // Secure Boot line — ModulesVM's exact wording (Phase 5 reuse per spec §8.3).
 std::string secureBootLine(const std::optional<pal::ISystemInfo::Info>& info) {
     if (!info) return "Secure Boot: unknown";
-    std::string b = std::string("Secure Boot: ") + (info->secureBoot ? "ON" : "off") +
-                    " · Lockdown: " + info->lockdownMode;
-    if (info->secureBoot || info->lockdownMode != "none")
+    // A state the platform could not read reads as "unknown", never as "off":
+    // "off" is a claim that unsigned modules WILL load.
+    const char* state = !info->secureBoot ? "unknown" : (*info->secureBoot ? "ON" : "off");
+    std::string b = std::string("Secure Boot: ") + state + " · Lockdown: " + info->lockdownMode;
+    if (info->secureBoot.value_or(false) || info->lockdownMode != "none")
         b += " — unsigned modules will be rejected";
     return b;
 }
@@ -253,11 +255,19 @@ void UpdatesVM::rebuild() {
     }
     observeAvailability(snapshot_);
     if (rows_.empty()) {
-        // Three distinct truths, never conflated (design D5): nothing reported
-        // yet, everything reported and empty, or something could not be checked
-        // — the last is explained by the availability note, so no row claims a
-        // completed query on its behalf.
-        if (snapshot_.empty()) {
+        // Four distinct truths, never conflated (design D5): the platform has no
+        // providers at all, nothing reported yet, everything reported and empty,
+        // or something could not be checked — the last is explained by the
+        // availability note, so no row claims a completed query on its behalf.
+        //
+        // The unsupported case comes first and excludes the other three: with no
+        // provider implemented there is nothing to check, so "(checking for
+        // updates)" would be a promise that never resolves and
+        // "(no updates available)" would assert a query that never ran.
+        if (const auto unsupported = unsupportedContent()) {
+            rows_.push_back(*unsupported);
+            rowRefs_.emplace_back(std::nullopt);
+        } else if (snapshot_.empty()) {
             rows_.emplace_back(kLoadingRow);
             rowRefs_.emplace_back(std::nullopt);
         } else if (allProvidersAvailable(snapshot_)) {
@@ -326,7 +336,24 @@ void UpdatesVM::observeAvailability(const std::vector<core::UpdateProviderState>
 }
 
 std::vector<BackendNote> UpdatesVM::availabilityNotes() const {
-    return backendStatus_.notes();
+    // This view's OWN sources only. backendStatus_ is process-wide — it also
+    // carries devmgrd and snapshots — and a note for a backend this view never
+    // reads would explain an absence the user is not looking at. The membership
+    // test is the same one observeAvailability() uses to feed it: a backend
+    // identity that some update provider maps onto.
+    std::vector<BackendNote> out;
+    for (auto note : backendStatus_.notes())
+        if (note.backend == core::BackendId::Fwupd || note.backend == core::BackendId::Dkms)
+            out.push_back(std::move(note));
+    return out;
+}
+
+// Every source of this view is an update provider, so one capability decides it.
+// Fwupd names the sentence because firmware is what the view is for; a platform
+// with no providers has no dkms either, and two sentences for one empty region
+// would read as two separate problems.
+std::optional<std::string> UpdatesVM::unsupportedContent() const {
+    return unsupportedViewText(core::BackendId::Fwupd, !facade_.capabilities().updateProviders);
 }
 
 std::string UpdatesVM::banner() const {

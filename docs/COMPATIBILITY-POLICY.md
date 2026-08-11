@@ -16,6 +16,55 @@ over IPC) are out of scope.
 
 ---
 
+## 0. Supported platforms
+
+| Platform | Surfaces | What works |
+|---|---|---|
+| Linux | `devmgr-gui`, `devmgr-tui`, `devmgr`, `devmgrd` | Everything: inventory, enable/disable, driver and module management, firmware updates, snapshots |
+| Windows 10 version 1809+ / Windows 11 | `devmgr-gui`, `devmgr` | **Read-only.** Device inventory with detail, live hotplug, system information |
+| Windows 10 versions 1607–1803 | `devmgr` | **Read-only, command line only.** The GUI is not supported below 1809 |
+| Windows 8.1 and earlier | — | **Unsupported** |
+| macOS | — | Unsupported |
+
+### What "read-only" means on Windows
+
+The Windows backend implements device enumeration, hotplug notification, and
+system information. It implements **no** device control, driver management,
+privileged channel, update providers, or criticality probing. Those are not
+disabled features waiting to be switched on — the code paths do not exist, and
+any such call returns `Unsupported` without contacting the operating system.
+
+In the application this shows as: Devices populated and live, and the Modules,
+Updates, and Snapshots views each carrying a sentence naming why they are not
+available on this platform, at information severity. The Devices toolbar offers
+only `Refresh`; the mutating verbs are **absent**, not greyed out (see
+`docs/DESIGN.md` §5.3 — platform inapplicability hides a verb, runtime
+unavailability disables it).
+
+No device-mutating capability may be added on Windows until a real criticality
+prober exists there. Without one every device classifies at the lowest tier and
+the shared safety guard cannot refuse anything — including a request to disable
+the only keyboard attached to the machine.
+
+### The two Windows floors, and why there are two
+
+- **Windows 10 version 1607** is the floor for the backend and the CLI. The
+  device notification interface the hotplug monitor requires
+  (`CM_Register_Notification`) does not exist before it, and the alternatives —
+  a hidden window with `WM_DEVICECHANGE`, or polling — were rejected for needing
+  a message pump the CLI has not got, or for being visibly laggy. The Windows
+  build refuses to configure for an earlier target, naming this minimum.
+- **Windows 10 version 1809** is the floor for the GUI, because that is the
+  minimum Qt 6 officially supports. Qt will very likely run at 1607, but a
+  defect there has no upstream recourse, and a support statement this project
+  cannot honour is worse than a narrower one that it can.
+
+Between 1607 and 1803 the CLI is supported and the GUI is not. Formally dropping
+Windows 8.1 and pre-1607 Windows 10 is the intended reading of this table, not
+an accident of which API was convenient.
+
+---
+
 ## 1. D-Bus `ApiVersion` — additive-only
 
 `ApiVersion` is a single monotonically-increasing `uint32`, exposed by the

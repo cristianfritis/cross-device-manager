@@ -37,7 +37,13 @@ class ModulesVMTest : public ::testing::Test {
     devmgr::test::FakePal pal_;
     devmgr::app::DeviceService service_{bus_};
     devmgr::test::InlineUiDispatcher dispatcher_;
-    ApplicationFacade facade_{pal_, scheduler_, bus_, service_, nullptr, nullptr, &pal_, &pal_};
+    // A healthy helper, as a Linux box has. These tests are about the module
+    // list, not about a platform without device management: with no channel the
+    // facade now reports the privileged capability unimplemented, so every
+    // banner here would legitimately lead with the devmgrd unsupported sentence
+    // and bury what each test is actually asserting.
+    devmgr::test::FakePrivilegedChannel channel_;
+    ApplicationFacade facade_{pal_, scheduler_, bus_, service_, &channel_, nullptr, &pal_, &pal_};
     // ModulesVM holds references + a Subscription: construct in place per test
     // (it is neither copyable nor movable).
 

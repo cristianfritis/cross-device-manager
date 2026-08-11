@@ -35,7 +35,69 @@ jobs:
               | grep -vE '^(platform/linux/src/dbus_privileged_channel\.cpp|(platform|tests)/.*fwupd.*\.(cpp|hpp)):'
       - name: Build and unit-test (Docker)
         run: docker compose -f test/docker-compose.yml run --rm unit
+      - name: CLI inventory gate (no privileged helper present)
+        # `devices list` reads through the device enumerator directly: no
+        # daemon, no D-Bus, no polkit. The container runs no devmgrd, so this
+        # is exactly that condition. Gated on LINUX as well as Windows on
+        # purpose — the property is "needs no helper", not "needs no helper on
+        # the platform that hasn't got one", and Linux is where a regression
+        # would be introduced.
+        run: |
+          docker compose -f test/docker-compose.yml run --rm unit bash -c \
+            "build/linux-debug/cli/devmgr devices list > /dev/null \
+             && build/linux-debug/cli/devmgr devices show --json \
+                  \$(build/linux-debug/cli/devmgr devices list --json | grep -m1 '\"id\"' \
+                     | sed 's/.*: *\"//; s/\".*//') > /dev/null"
       - name: Static analysis (clang-tidy)
         # Reuses the image built above (toolchain + deps + compile_commands.json baked in).
         # Hard gate: any clang-tidy diagnostic in core/src fails the build.
         run: docker compose -f test/docker-compose.yml run --rm unit bash -c "clang-tidy -p build/linux-debug --warnings-as-errors='*' core/src/*.cpp app/src/*.cpp platform/linux/src/*.cpp gui/src/*.cpp daemon/src/*.cpp cli/src/*.cpp tui/src/*.cpp tui/src/views/*.cpp"
+
+  # Windows: COMPILATION AND UNIT TESTS ONLY. A hosted runner sees a synthetic
+  # device set with no physical USB and no hotplug, so a green job here says the
+  # Windows backend builds and its logic is correct — never that it works on a
+  # real machine. Behavioural truth comes from the owner-gated manual smoke
+  # (acceptance-suite spec).
+  windows-build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision Qt (pinned)
+        # D12: CI OWNS Qt provisioning. Windows has no system Qt — no
+        # distribution, no system package, every developer's install an
+        # independently chosen version at an arbitrary path — so "use what is
+        # installed" would make the build depend on an undeclared local
+        # artifact, which is the opposite of what the Linux system-Qt rule
+        # protects. The version below is the definition of what this build
+        # depends on. Nothing here reads a pre-existing local Qt, and no task or
+        # document resolves the Qt version by inspecting one; the owner's
+        # machine is the ACCEPTANCE GATE, never the source.
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Provision vcpkg (pinned commit)
+        # Pinned to a commit, not to whatever the runner image ships: the
+        # package versions this build resolves are a declared input
+        # (docs/REPRODUCIBILITY.md), not ambient machine state.
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: a34a3811fce990f9d2809cf0356dd443143c7000
+          runVcpkgInstall: false
+      - name: Configure
+        # DEVMGR_BUILD_GUI is forced ON rather than auto-detected: if the Qt
+        # provisioning above ever stops working, this job must FAIL rather than
+        # quietly stop covering the GUI.
+        run: cmake --preset windows-debug -DDEVMGR_BUILD_GUI=ON
+      - name: Build (core, app, platform/windows, gui, cli)
+        run: cmake --build --preset windows-debug
+      - name: Unit tests
+        run: ctest --test-dir build/windows-debug -C Debug --output-on-failure
+      - name: CLI inventory gate (no privileged helper present)
+        # The Windows half of the same gate the Linux job runs: inventory verbs
+        # need no daemon, no privileged channel and no elevation — which is the
+        # whole reason the CLI is not gated on an operating system.
+        run: build\windows-debug\cli\Debug\devmgr.exe devices list

@@ -32,6 +32,38 @@ metadata); the binaries are the meaningful reproducibility target, and they are
 what a downstream consumer ultimately runs. Archive-level reproducibility is out
 of scope for this gate.
 
+## Windows build inputs
+
+Windows produces **no release artifact** — no installer, no package, no signed
+binary — so the two-build byte-comparison above does not apply to it. What does
+apply is the rule underneath that check: a build must be re-creatable from
+**declared inputs**, never from whatever happens to be on a machine.
+
+Every input to the Windows build is declared:
+
+| Input | Declared where | Value |
+|---|---|---|
+| Qt | `.github/workflows/ci.yml` | `6.8.3`, `win64_msvc2022_64`, provisioned by `jurplel/install-qt-action@v4` from the official Qt distribution |
+| vcpkg | `.github/workflows/ci.yml` | pinned commit `a34a3811fce990f9d2809cf0356dd443143c7000` |
+| vcpkg packages | `vcpkg.json` | `gtest`, `spdlog`, `nlohmann-json`, `tl-expected` (`ftxui` is Linux-only) |
+| Triplet | `CMakePresets.json` (`windows-debug`) | `x64-windows` |
+| SDK floor | `platform/windows/CMakeLists.txt` | `NTDDI_VERSION` ≥ `0x0A000001`; configuring lower fails |
+| Toolchain | `.github/workflows/ci.yml` | `windows-latest` runner image, MSVC v143 |
+
+Nothing in that list is resolved by inspecting an installed artifact. In
+particular **no step reads a pre-existing local Qt**: the version above is the
+definition of what the build depends on, and a developer's machine is checked
+*against* it (`docs/WINDOWS-DEVELOPMENT.md`) rather than being consulted for it.
+Windows has no system Qt for the Linux system-Qt rule to point at, which is
+exactly why the rule inverts here.
+
+Two boundaries worth stating rather than leaving to be discovered. The
+`windows-latest` runner image floats — it is a declared input, but not a pinned
+one, and MSVC moves with it. And the Linux container clones vcpkg at image-build
+time rather than at a pinned commit, so the Linux and Windows jobs do not
+necessarily resolve the same package versions; the Linux release binaries are
+covered by the two-build comparison above instead.
+
 ## SOURCE_DATE_EPOCH
 
 Both builds run with the same `SOURCE_DATE_EPOCH` so any embedded build

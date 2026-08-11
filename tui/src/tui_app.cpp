@@ -676,6 +676,14 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             // two A-1 dirty flags above.
             if (activeTab == 2) refreshUpdatesBanner();
             if (activeTab == 3) bannerText = snapshotsVm.banner();
+            // The daemon note is NOT tab-gated here, unlike the two above: it is
+            // the same note on every tab the daemon feeds, and this drain is
+            // where a completed refresh first reveals that the helper is not
+            // answering. Without it the note only existed from the next tab
+            // ENTRY onward, so the Devices tab a user starts on stayed silent
+            // while its verbs sat dimmed. Reads BackendStatusVM state only — no
+            // PAL query, so it is safe at drain frequency (unlike banner()).
+            refreshDaemonNote();
             return true;
         }
         if (textPrompt) {  // modal typed input
@@ -1065,6 +1073,15 @@ int runTuiApp(bool selfTest, const Theme& theme) {
     try {
         facade.refresh().wait();
         dispatcher.drain();
+        // Startup lands on Devices WITHOUT going through switchToTab, and this
+        // initial refresh is where an unreachable helper is first discovered —
+        // so the note has to be computed here, after it. Without this the first
+        // screen a user sees claimed nothing was wrong while every mutating
+        // verb sat dimmed, and the note only appeared once they happened to
+        // visit another tab and come back. The GUI shows it from its first
+        // frame; this is what keeps the two surfaces saying the same thing at
+        // the same time.
+        refreshDaemonNote();
         statusVm.arm();
         if (auto started = hotplug.start(); !started) {
             // Degrade gracefully: without live events, 'r' refresh still works.

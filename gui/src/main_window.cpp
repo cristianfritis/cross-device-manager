@@ -46,6 +46,12 @@ constexpr int kDevicesTab = 0;
 constexpr int kModulesTab = 1;
 constexpr int kUpdatesTab = 2;
 constexpr int kSnapshotsTab = 3;
+// The tag a verb excluded by platform capability carries. No tab index ever
+// equals it, so applyTabVisibility() cannot reveal such a verb on any tab — the
+// exclusion is structural rather than a condition someone has to remember.
+// Excluded verbs are also left out of the toolbar entirely, so this tag only
+// matters for the few actions the window hands to a context menu.
+constexpr int kNoTab = -1;
 
 // A desktop theme icon with a QStyle standard-icon fallback (DESIGN.md §4.4).
 // If neither resolves, the action stays text-only: this product draws no one-off
@@ -118,19 +124,58 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // frequency and consequence — only one tab's run is ever visible, so one
     // order serves all four. Separators mark the group boundaries; a separator
     // whose neighbours are hidden is suppressed by updateToolbarSeparators().
+    //
+    // Platform capability is applied HERE and only here (gui-presentation:
+    // "Platform membership SHALL be decided once from the platform capability
+    // descriptor, and SHALL NOT be re-derived per frame or inferred from a
+    // failed call"). It cannot change within a process, so updateActionPresentation()
+    // never reads it: a verb the running platform cannot implement is not added
+    // to the toolbar at all, which is stronger than hiding it — there is nothing
+    // for a later pass to reveal, nothing for the separator pass to count, and
+    // no disabled control asserting a state that does not exist.
+    const pal::PlatformCapabilities caps = facade_.capabilities();
     const auto verb = [this](int tab, const QString& text) {
         QAction* action = toolbar_->addAction(text);
         action->setData(tab);
         return action;
     };
+    // Same, gated: `supported` false means the running platform has no
+    // implementation behind this verb. The action object is still created so
+    // every accessor and every enablement call below stays valid and null-free,
+    // but it is parented to the window instead of the toolbar and tagged kNoTab,
+    // so it belongs to no tab's verb set.
+    //
+    // Which capability backs which verb is decided by what EXECUTES the verb,
+    // not by which interface names it. Every mutation in this window — enable,
+    // disable, bind, unbind, load, unload, and every snapshot verb — runs
+    // through the privileged channel (ApplicationFacade::runChannelTask); the
+    // app never calls IDeviceController or IDriverManager to mutate, and
+    // IDriverManager supplies reads only. Gating those verbs on `deviceControl`
+    // or `driverManagement` would therefore hide them on a coincidence rather
+    // than on the capability whose absence actually makes them impossible. A
+    // read-only platform reports all three unimplemented, so the observable
+    // result is the same one the spec describes.
+    const auto gatedVerb = [this, &verb](int tab, const QString& text, bool supported) {
+        if (supported) return verb(tab, text);
+        auto* action = new QAction(text, this);
+        action->setData(kNoTab);
+        action->setEnabled(false);
+        // Explicitly invisible as well. A QAction that was never added to a
+        // widget reports isVisible() == true by default, and applyTabVisibility()
+        // walks only the toolbar's own actions — so without this an excluded
+        // verb would answer "yes, I am visible" to any surface that asked, and
+        // the first menu to adopt it would show it.
+        action->setVisible(false);
+        return action;
+    };
 
     // ----- Devices: refresh, persistent enable/disable, bind, unbind ----------
-    refreshAction_ = verb(kDevicesTab, QStringLiteral("Refresh"));
+    refreshAction_ = gatedVerb(kDevicesTab, QStringLiteral("Refresh"), caps.deviceEnumeration);
     applyThemeIcon(refreshAction_, "view-refresh", QStyle::SP_BrowserReload, *this);
     connect(refreshAction_, &QAction::triggered, this, [this] { actions_.onRefresh(); });
 
     toolbar_->addSeparator();
-    toggleAction_ = verb(kDevicesTab, QStringLiteral("Disable"));
+    toggleAction_ = gatedVerb(kDevicesTab, QStringLiteral("Disable"), caps.privilegedChannel);
     toggleAction_->setEnabled(false);
     connect(toggleAction_, &QAction::triggered, this, [this] {
         const auto id = listVm_.selectedDeviceId();
@@ -144,7 +189,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     });
 
     toolbar_->addSeparator();
-    bindAction_ = verb(kDevicesTab, QStringLiteral("Bind driver…"));
+    bindAction_ = gatedVerb(kDevicesTab, QStringLiteral("Bind driver…"), caps.privilegedChannel);
     connect(bindAction_, &QAction::triggered, this, [this] {
         const auto id = listVm_.selectedDeviceId();
         const auto device = id ? facade_.findById(*id) : std::nullopt;
@@ -165,7 +210,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     });
 
     toolbar_->addSeparator();
-    unbindAction_ = verb(kDevicesTab, QStringLiteral("Unbind driver (advanced)"));
+    unbindAction_ =
+        gatedVerb(kDevicesTab, QStringLiteral("Unbind driver (advanced)"), caps.privilegedChannel);
     connect(unbindAction_, &QAction::triggered, this, [this] {
         const auto id = listVm_.selectedDeviceId();
         const auto device = id ? facade_.findById(*id) : std::nullopt;
@@ -182,7 +228,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     });
 
     // ----- Modules: additive load, then destructive unload --------------------
-    loadModuleAction_ = verb(kModulesTab, QStringLiteral("Load Module…"));
+    loadModuleAction_ =
+        gatedVerb(kModulesTab, QStringLiteral("Load Module…"), caps.privilegedChannel);
     connect(loadModuleAction_, &QAction::triggered, this, [this] {
         const QString name = actions_.textInput
                                  ? actions_.textInput(QStringLiteral("Load module"), QString{})
@@ -194,7 +241,7 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     });
 
     toolbar_->addSeparator();
-    unloadModuleAction_ = verb(kModulesTab, QStringLiteral("Unload"));
+    unloadModuleAction_ = gatedVerb(kModulesTab, QStringLiteral("Unload"), caps.privilegedChannel);
     connect(unloadModuleAction_, &QAction::triggered, this, [this] {
         const auto name = modulesVm_.selectedModule();
         if (!name) return;
@@ -212,13 +259,15 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     });
 
     // ----- Updates: refresh, install, dismiss ---------------------------------
-    refreshUpdatesAction_ = verb(kUpdatesTab, QStringLiteral("Refresh Updates"));
+    refreshUpdatesAction_ =
+        gatedVerb(kUpdatesTab, QStringLiteral("Refresh Updates"), caps.updateProviders);
     applyThemeIcon(refreshUpdatesAction_, "view-refresh", QStyle::SP_BrowserReload, *this);
     connect(refreshUpdatesAction_, &QAction::triggered, this,
             [this] { pruneAndPushPending(facade_.refreshUpdates()); });
 
     toolbar_->addSeparator();
-    installUpdateAction_ = verb(kUpdatesTab, QStringLiteral("Install Update"));
+    installUpdateAction_ =
+        gatedVerb(kUpdatesTab, QStringLiteral("Install Update"), caps.updateProviders);
     applyThemeIcon(installUpdateAction_, "system-software-update", QStyle::SP_ArrowDown, *this);
     connect(installUpdateAction_, &QAction::triggered, this, [this] {
         const auto args = updatesVm_.selectedInstall();
@@ -239,7 +288,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     });
 
     toolbar_->addSeparator();
-    dismissRequestAction_ = verb(kUpdatesTab, QStringLiteral("Dismiss Request"));
+    dismissRequestAction_ =
+        gatedVerb(kUpdatesTab, QStringLiteral("Dismiss Request"), caps.updateProviders);
     applyThemeIcon(dismissRequestAction_, "window-close", QStyle::SP_DialogCloseButton, *this);
     connect(dismissRequestAction_, &QAction::triggered, this, [this] {
         updatesVm_.dismissRequest();
@@ -252,7 +302,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // pending_ (this window's own set, drained in the destructor). The ellipsis
     // on Create marks the label prompt (DESIGN.md §5.3).
     // ----- Snapshots: create, restore, inspect, delete -------------------------
-    createSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Create Snapshot…"));
+    createSnapshotAction_ =
+        gatedVerb(kSnapshotsTab, QStringLiteral("Create Snapshot…"), caps.privilegedChannel);
     connect(createSnapshotAction_, &QAction::triggered, this, [this] {
         // Label is optional (an unlabeled manual snapshot is valid, matching the
         // TUI). The real QInputDialog reports Cancel through `ok` so an empty
@@ -270,7 +321,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // The ellipsis marks the preview step (DESIGN.md §5.3): restore now opens a
     // preview and only runs on explicit confirmation from it.
     toolbar_->addSeparator();
-    restoreSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Restore Snapshot…"));
+    restoreSnapshotAction_ =
+        gatedVerb(kSnapshotsTab, QStringLiteral("Restore Snapshot…"), caps.privilegedChannel);
     connect(restoreSnapshotAction_, &QAction::triggered, this, [this] {
         const auto args = snapshotsVm_.selectedRestore();
         if (!args) {
@@ -301,7 +353,8 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // Diff and History inspect rows already on screen — the advanced group, kept
     // apart from the mutations above and the deletion below (§5.3, §10).
     toolbar_->addSeparator();
-    diffSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Diff Snapshot"));
+    diffSnapshotAction_ =
+        gatedVerb(kSnapshotsTab, QStringLiteral("Diff Snapshot"), caps.privilegedChannel);
     connect(diffSnapshotAction_, &QAction::triggered, this, [this] {
         if (snapshotDiffPaneRequested_) {  // toggle back to the detail pane
             snapshotDiffPaneRequested_ = false;
@@ -322,13 +375,15 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         updateSnapshotsDetailPane();
     });
 
-    historySnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("History"));
+    historySnapshotAction_ =
+        gatedVerb(kSnapshotsTab, QStringLiteral("History"), caps.privilegedChannel);
     historySnapshotAction_->setCheckable(true);
     connect(historySnapshotAction_, &QAction::triggered, this,
             [this](bool on) { snapshotsVm_.setHistoryView(on); });
 
     toolbar_->addSeparator();
-    deleteSnapshotAction_ = verb(kSnapshotsTab, QStringLiteral("Delete Snapshot"));
+    deleteSnapshotAction_ =
+        gatedVerb(kSnapshotsTab, QStringLiteral("Delete Snapshot"), caps.privilegedChannel);
     applyThemeIcon(deleteSnapshotAction_, "edit-delete", QStyle::SP_TrashIcon, *this);
     connect(deleteSnapshotAction_, &QAction::triggered, this, [this] {
         const auto args = snapshotsVm_.selectedDelete();
@@ -353,8 +408,11 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     listView_->setModel(model_);
     listView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    // Same action doubles as the list's context menu.
-    listView_->addAction(toggleAction_);
+    // Same action doubles as the list's context menu — but only when the
+    // platform implements it. A verb excluded from the toolbar must not
+    // reappear here: the context menu is a surface too, and an excluded verb is
+    // not advertised anywhere.
+    if (toggleAction_->data().toInt() != kNoTab) listView_->addAction(toggleAction_);
     listView_->setContextMenuPolicy(Qt::ActionsContextMenu);
 
     detailTree_ = new QTreeWidget;
@@ -631,10 +689,19 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // switching plus the per-view primary verb. The verb actions are gated to
     // their tab in updateActionPresentation(), so a shortcut fired off-tab is
     // inert rather than acting on the wrong view.
-    refreshAction_->setShortcut(QKeySequence::Refresh);              // F5
-    toggleAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));  // enable/disable
-    loadModuleAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
-    createSnapshotAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    //
+    // A verb excluded by platform capability gets NO binding at all
+    // (gui-presentation: "SHALL NOT be bound at all, so that pressing it does
+    // nothing and it is not advertised anywhere") — an unbound key cannot fire,
+    // and Qt cannot advertise a sequence on an action that carries none.
+    const auto bindShortcut = [](QAction* action, const QKeySequence& keys) {
+        if (action->data().toInt() == kNoTab) return;
+        action->setShortcut(keys);
+    };
+    bindShortcut(refreshAction_, QKeySequence::Refresh);              // F5
+    bindShortcut(toggleAction_, QKeySequence(Qt::CTRL | Qt::Key_E));  // enable/disable
+    bindShortcut(loadModuleAction_, QKeySequence(Qt::CTRL | Qt::Key_L));
+    bindShortcut(createSnapshotAction_, QKeySequence(Qt::CTRL | Qt::Key_N));
     for (int i = 0; i < tabs_->count(); ++i) {
         // Ctrl+1..Ctrl+4 jump straight to a tab. Parented to the window so Qt
         // owns them; the functor drives the same currentChanged path as a click.
@@ -1201,14 +1268,23 @@ void MainWindow::applyTabVisibility(int tab) {
     // The one verb whose object can be missing while its own tab is active: with
     // no dismissible request there is nothing to dismiss, which is exactly the
     // §5.3 case where hiding is right rather than explaining. The condition is
-    // the VM's own — the GUI derives no rule here.
-    if (tab == kUpdatesTab) dismissRequestAction_->setVisible(!updatesVm_.requestBanner().empty());
+    // the VM's own — the GUI derives no rule here. Skipped outright when the
+    // platform excluded the verb, so a request arriving can never resurrect it.
+    if (tab == kUpdatesTab && dismissRequestAction_->data().toInt() != kNoTab)
+        dismissRequestAction_->setVisible(!updatesVm_.requestBanner().empty());
 }
 
 // A separator earns its pixels only between two visible actions. Revealing one
 // when the NEXT visible action arrives handles the leading, trailing and doubled
 // cases in a single pass, without this function knowing which tab is active or
 // which groups it shows.
+//
+// That is also what makes it survive platform exclusion (gui-presentation, "No
+// separators survive an emptied toolbar"): a verb the platform does not
+// implement is never added to the toolbar, so its group collapses to adjacent
+// separators, which this pass leaves hidden exactly as it leaves a doubled pair
+// hidden. When every verb on a tab is excluded, no action is ever visible,
+// `sawVisible` stays false, and not one separator is revealed.
 void MainWindow::updateToolbarSeparators() {
     QAction* pending = nullptr;  // last separator seen after a visible action
     bool sawVisible = false;

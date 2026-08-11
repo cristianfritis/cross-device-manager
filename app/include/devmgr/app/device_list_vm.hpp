@@ -52,6 +52,9 @@ class DeviceListVM {
     // daemon's — so this view owes the user the note, and it reads it from the
     // facade's single instance rather than observing anything itself.
     std::vector<BackendNote> availabilityNotes() const;
+    // The sentence that replaces this view's content when the running platform
+    // has no device enumerator at all; nullopt otherwise.
+    std::optional<std::string> unsupportedContent() const;
     // The banner sentence for this view: the shared text while degraded, "" when
     // healthy. The Devices view has no banner of its own otherwise, so an empty
     // string means both surfaces render no banner row at all.

@@ -14,6 +14,17 @@ namespace {
 
 // udev property keys. These arrive through Device::properties, which the Linux
 // enumerator fills from udev; other backends simply do not set them.
+//
+// They are a DERIVATION INPUT, not a display vocabulary, and are deliberately
+// left as raw udev names (design D13). Nothing renders them: they are read here
+// to compose a canonical device NAME, and the name is what a surface shows. The
+// product-facing detail rows live in core/device_detail_fields.hpp, whose keys
+// a backend writes explicitly.
+//
+// Stated residual: Linux does not publish detail fields through that vocabulary
+// yet. It could — the vocabulary is designed for it — but this change does not
+// do it, so on Linux the detail pane shows the model fields only. That is a
+// deliberate gap, recorded here rather than left to be discovered.
 constexpr std::string_view kVendorFromDatabase = "ID_VENDOR_FROM_DATABASE";
 constexpr std::string_view kModelFromDatabase = "ID_MODEL_FROM_DATABASE";
 constexpr std::string_view kSelfReportedModel = "ID_MODEL";

@@ -4,8 +4,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include "cli/src/cli.hpp"
+#include "devmgr/core/device_detail_fields.hpp"
+#include "devmgr/core/models.hpp"
 #include "devmgr/core/result.hpp"
 #include "devmgr/core/snapshot_diff.hpp"
 #include "devmgr/core/snapshot_models.hpp"
@@ -528,4 +531,230 @@ TEST(CliRestorePreview, IdenticalSnapshotSaysNothingWouldChange) {
 TEST(CliRestorePreview, MissingIdIsUsageError) {
     FakeChannel ch;
     EXPECT_EQ(invoke(ch, {"snapshot", "restore", "--preview"}).code, cli::kUsage);
+}
+
+// ---- Inventory verbs (design D6) -------------------------------------------
+
+namespace {
+
+// Counts calls so "this path made no connection attempt" is asserted against
+// the seam rather than inferred from the absence of an error.
+class CountingChannel final : public devmgr::pal::IPrivilegedChannel {
+   public:
+    int calls = 0;
+    devmgr::core::Result<void> setDeviceEnabled(const devmgr::core::Device&, bool) override {
+        ++calls;
+        return {};
+    }
+    devmgr::core::Result<void> bindDriver(const devmgr::core::Device&,
+                                          const std::string&) override {
+        ++calls;
+        return {};
+    }
+    devmgr::core::Result<void> unbindDriver(const devmgr::core::Device&) override {
+        ++calls;
+        return {};
+    }
+    devmgr::core::Result<void> loadModule(const std::string&) override {
+        ++calls;
+        return {};
+    }
+    devmgr::core::Result<void> unloadModule(const std::string&) override {
+        ++calls;
+        return {};
+    }
+    devmgr::core::Result<std::vector<devmgr::core::DisabledDeviceEntry>> listDisabledDevices()
+        override {
+        ++calls;
+        return std::vector<devmgr::core::DisabledDeviceEntry>{};
+    }
+    devmgr::core::Result<std::vector<SnapshotMeta>> snapshotList() override {
+        ++calls;
+        return std::vector<SnapshotMeta>{};
+    }
+    devmgr::core::Result<std::string> snapshotCreate(const std::string&) override {
+        ++calls;
+        return std::string{};
+    }
+    devmgr::core::Result<devmgr::core::SnapshotDiff> snapshotDiff(const std::string&,
+                                                                  const std::string&) override {
+        ++calls;
+        return devmgr::core::SnapshotDiff{};
+    }
+    devmgr::core::Result<RestoreOutcome> snapshotRestore(const std::string&) override {
+        ++calls;
+        return RestoreOutcome{};
+    }
+    devmgr::core::Result<void> snapshotDelete(const std::string&) override {
+        ++calls;
+        return {};
+    }
+};
+
+// A scriptable enumerator: either a device list or a failure, so "the query
+// failed" and "the query found nothing" can be told apart in a test the same
+// way a caller must be able to tell them apart at the exit code.
+class FakeEnumerator final : public devmgr::pal::IDeviceEnumerator {
+   public:
+    std::vector<devmgr::core::Device> devices;
+    std::optional<Error> failure;
+    int calls = 0;
+    devmgr::core::Result<std::vector<devmgr::core::Device>> enumerate() override {
+        ++calls;
+        if (failure) return tl::unexpected(*failure);
+        return devices;
+    }
+};
+
+devmgr::core::Device mouse() {
+    devmgr::core::Device d;
+    d.id = devmgr::core::DeviceId{"dev-1"};
+    d.bus = devmgr::core::BusType::Usb;
+    d.name = "Wireless Receiver";
+    d.status = devmgr::core::DeviceStatus::Active;
+    d.nativeId = "/sys/devices/pci0000:00/usb1/1-2";
+    d.hardwareId = "usb:v046DpC52B";
+    d.vendorId = "046d";
+    d.productId = "c52b";
+    return d;
+}
+
+struct Inventory {
+    CountingChannel channel;
+    FakeEnumerator enumerator;
+    bool enumerationImplemented = true;
+
+    Run invoke(const std::vector<std::string>& args) {
+        std::ostringstream out;
+        std::ostringstream err;
+        const cli::Context context{.channel = channel,
+                                   .enumerator = enumerator,
+                                   .capabilities = {.deviceEnumeration = enumerationImplemented}};
+        const int code = cli::run(context, args, out, err);
+        return {code, out.str(), err.str()};
+    }
+};
+
+}  // namespace
+
+// design D6: the inventory verbs reach no helper, so a dead daemon cannot stop
+// a user from seeing what hardware is present.
+TEST(CliDevices, ListReadsTheEnumeratorAndNeverTheChannel) {
+    Inventory f;
+    f.enumerator.devices = {mouse()};
+    auto r = f.invoke({"devices", "list"});
+    EXPECT_EQ(r.code, cli::kOk);
+    EXPECT_EQ(f.channel.calls, 0);
+    EXPECT_NE(r.out.find("Wireless Receiver"), std::string::npos) << r.out;
+    EXPECT_NE(r.out.find("USB"), std::string::npos) << r.out;
+}
+
+// task 6.2: nothing before a verb that needs the channel may touch it.
+TEST(CliDevices, UsagePathsMakeNoConnectionAttempt) {
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{}, std::vector<std::string>{"nonsense"},
+          std::vector<std::string>{"devices"}, std::vector<std::string>{"devices", "bogus"}}) {
+        Inventory f;
+        auto r = f.invoke(args);
+        EXPECT_EQ(r.code, cli::kUsage);
+        EXPECT_EQ(f.channel.calls, 0) << "reached the channel for a usage path";
+    }
+}
+
+// task 6.6: enumeration failure is kFailed and is distinguishable from an
+// empty device set. It must never print an empty list and report success.
+TEST(CliDevices, EnumerationFailureIsDistinguishableFromZeroDevices) {
+    Inventory failing;
+    failing.enumerator.failure = Error{devmgr::core::Error::Code::Io, "udev enumerate failed"};
+    auto bad = failing.invoke({"devices", "list"});
+    EXPECT_EQ(bad.code, cli::kFailed);
+    EXPECT_TRUE(bad.out.empty()) << bad.out;
+    EXPECT_NE(bad.err.find("cannot read devices"), std::string::npos) << bad.err;
+
+    Inventory empty;
+    auto none = empty.invoke({"devices", "list"});
+    EXPECT_EQ(none.code, cli::kOk);
+    EXPECT_NE(none.out.find("(no devices)"), std::string::npos) << none.out;
+}
+
+// task 6.8: structured output parses, carries only device data, and repeats
+// byte for byte over an unchanged device set.
+TEST(CliDevices, JsonIsParseableDeviceDataAndDeterministic) {
+    Inventory f;
+    f.enumerator.devices = {mouse()};
+    auto first = f.invoke({"devices", "list", "--json"});
+    auto second = f.invoke({"devices", "list", "--json"});
+    EXPECT_EQ(first.code, cli::kOk);
+    EXPECT_EQ(first.out, second.out);  // byte-identical across runs
+
+    const auto parsed = nlohmann::json::parse(first.out);
+    ASSERT_TRUE(parsed.is_array());
+    ASSERT_EQ(parsed.size(), 1U);
+    EXPECT_EQ(parsed[0]["name"], "Wireless Receiver");
+    EXPECT_EQ(parsed[0]["bus"], "USB");
+    // Device data only: nothing about the run, the host, or the transport.
+    for (const auto& [key, value] : parsed[0].items())
+        for (const char* forbidden : {"elapsed", "host", "bus_address", "daemon", "timestamp"})
+            EXPECT_NE(key, forbidden) << key;
+    // Diagnostics never share the channel with results.
+    EXPECT_TRUE(first.err.empty()) << first.err;
+}
+
+// task 6.6: `show` with no match is kNotFound, the code the exit table already
+// has for "no such object" — no new code is introduced.
+TEST(CliDevices, ShowWithNoMatchExitsNotFound) {
+    Inventory f;
+    f.enumerator.devices = {mouse()};
+    auto r = f.invoke({"devices", "show", "dev-absent"});
+    EXPECT_EQ(r.code, cli::kNotFound);
+    EXPECT_TRUE(r.out.empty()) << r.out;
+    EXPECT_NE(r.err.find("no device matches"), std::string::npos) << r.err;
+
+    auto missingArg = f.invoke({"devices", "show"});
+    EXPECT_EQ(missingArg.code, cli::kUsage);
+}
+
+// task 5a.5: `show` emits the shared detail fields under the shared labels, in
+// the shared order — and no raw platform key reaches the output.
+TEST(CliDevices, ShowEmitsSharedDetailFieldsWithSharedLabels) {
+    Inventory f;
+    auto d = mouse();
+    d.properties[std::string(
+        devmgr::core::detailFieldKey(devmgr::core::DetailField::Manufacturer))] = "Logitech";
+    d.properties[std::string(devmgr::core::detailFieldKey(devmgr::core::DetailField::Class))] =
+        "HIDClass";
+    d.properties["DEVPKEY_Device_Manufacturer"] =  // native-key-guard: allow
+        "should never be rendered";
+    f.enumerator.devices = {d};
+
+    auto r = f.invoke({"devices", "show", "dev-1"});
+    ASSERT_EQ(r.code, cli::kOk);
+    const auto manufacturer = r.out.find("Manufacturer: Logitech");
+    const auto klass = r.out.find("Class: HIDClass");
+    EXPECT_NE(manufacturer, std::string::npos) << r.out;
+    EXPECT_NE(klass, std::string::npos) << r.out;
+    EXPECT_LT(manufacturer, klass) << "detail fields out of shared order:\n" << r.out;
+    EXPECT_EQ(r.out.find("DEVPKEY"), std::string::npos) << r.out;
+    EXPECT_EQ(r.out.find("should never be rendered"), std::string::npos) << r.out;
+}
+
+// task 6.9: a platform with no enumerator does not advertise the verbs and does
+// not pretend to run them.
+TEST(CliDevices, InventoryVerbsAreGatedOnTheEnumerationCapability) {
+    Inventory f;
+    f.enumerationImplemented = false;
+    f.enumerator.devices = {mouse()};
+
+    auto refused = f.invoke({"devices", "list"});
+    EXPECT_EQ(refused.code, cli::kUsage);
+    EXPECT_EQ(f.enumerator.calls, 0) << "called a backend the platform does not implement";
+    EXPECT_NE(refused.err.find("not available on this platform"), std::string::npos) << refused.err;
+    EXPECT_EQ(refused.err.find("devmgr devices"), std::string::npos)
+        << "usage advertised a verb this platform refuses:\n"
+        << refused.err;
+
+    // ...and where it IS implemented, usage lists it.
+    Inventory capable;
+    auto listed = capable.invoke({});
+    EXPECT_NE(listed.err.find("devmgr devices"), std::string::npos) << listed.err;
 }

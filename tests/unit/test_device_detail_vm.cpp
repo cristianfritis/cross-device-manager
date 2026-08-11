@@ -2,6 +2,7 @@
 
 #include "devmgr/app/application_facade.hpp"
 #include "devmgr/app/device_detail_vm.hpp"
+#include "devmgr/core/device_detail_fields.hpp"
 #include "devmgr/app/device_service.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
@@ -92,7 +93,7 @@ TEST(DeviceDetailVmTest, DriverSectionListsBoundFirstWithSignature) {
 // the fixed-width label column gives every value a gap after its colon — the
 // modalias line in particular gains the separating space it used to lack
 // (beta-06 task 3.6 consistent presentation).
-TEST(DeviceDetailVmTest, BusCasingAndModaliasSpacingAreConsistent) {
+TEST(DeviceDetailVmTest, BusCasingAndHardwareIdSpacingAreConsistent) {
     runtime::EventBus bus;
     runtime::TaskScheduler scheduler(2);
     test::FakePal pal;
@@ -109,13 +110,16 @@ TEST(DeviceDetailVmTest, BusCasingAndModaliasSpacingAreConsistent) {
 
     app::DeviceDetailVM vm(facade);
     const auto lines = vm.lines(core::DeviceId{"u1"});
-    bool busLine = false, modaliasLine = false;
+    bool busLine = false, hardwareIdLine = false;
     for (const auto& l : lines) {
-        if (l == "Bus:      USB") busLine = true;                  // displayBus, not "Usb"
-        if (l == "Modalias: usb:v1D6Bp0002") modaliasLine = true;  // one space after the colon
+        if (l == "Bus:         USB") busLine = true;  // displayBus, not "Usb"
+        // "Hardware ID", never "Modalias": the label may not name a Linux
+        // mechanism (ui-accessibility). One space after the colon on the widest
+        // label, which is what sets the shared column width.
+        if (l == "Hardware ID: usb:v1D6Bp0002") hardwareIdLine = true;
     }
     EXPECT_TRUE(busLine);
-    EXPECT_TRUE(modaliasLine);
+    EXPECT_TRUE(hardwareIdLine);
 }
 
 // R1 (task 11.1): the detail pane leads with the canonical name and then the
@@ -150,4 +154,174 @@ TEST(DeviceDetailVmTest, LeadsWithCanonicalNameThenAddressVidPidAndId) {
     EXPECT_TRUE(lines[2].starts_with("VID:PID:")) << lines[2];
     EXPECT_NE(lines[2].find("1022:15b8"), std::string::npos) << lines[2];
     EXPECT_TRUE(lines[3].starts_with("Id:")) << lines[3];
+}
+
+// ui-accessibility: "A property the backend did not supply SHALL be omitted
+// from the rendering rather than shown as an empty, placeholder, or
+// literal-unknown row, so that a device enumerated by a backend with fewer
+// properties reads as a smaller correct record rather than a damaged one."
+TEST(DeviceDetailVmTest, AbsentPropertiesAreOmittedNotBlanked) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::Device d;  // the minimum a backend can report: id, bus, name, status
+    d.id = core::DeviceId{"sparse-1"};
+    d.bus = core::BusType::Usb;
+    d.name = "Sparse Device";
+    d.status = core::DeviceStatus::Active;
+    pal.seedDevice(d);
+    app::DeviceService svc(bus);
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refresh().wait();
+
+    app::DeviceDetailVM vm(facade);
+    const auto lines = vm.lines(core::DeviceId{"sparse-1"});
+
+    for (const auto& l : lines) {
+        // Every rendered row carries a value after its padded label.
+        const auto colon = l.find(':');
+        ASSERT_NE(colon, std::string::npos) << l;
+        const auto value = l.substr(colon + 1);
+        EXPECT_NE(value.find_first_not_of(' '), std::string::npos)
+            << "blank value row: [" << l << "]";
+        EXPECT_EQ(l.find("unknown"), std::string::npos) << l;
+    }
+    // The rows whose values this backend did not supply are simply not there.
+    for (const char* label : {"Serial:", "Identity:", "Hardware ID:", "Driver:", "VID:PID:"})
+        for (const auto& l : lines)
+            EXPECT_NE(l.rfind(label, 0), 0U) << "unsupplied property rendered: " << l;
+    // ...and the ones the model always carries still are.
+    bool sawName = false, sawId = false, sawBus = false, sawStatus = false;
+    for (const auto& l : lines) {
+        sawName = sawName || l.rfind("Name:", 0) == 0;
+        sawId = sawId || l.rfind("Id:", 0) == 0;
+        sawBus = sawBus || l.rfind("Bus:", 0) == 0;
+        sawStatus = sawStatus || l.rfind("Status:", 0) == 0;
+    }
+    EXPECT_TRUE(sawName);
+    EXPECT_TRUE(sawId);
+    EXPECT_TRUE(sawBus);
+    EXPECT_TRUE(sawStatus);
+}
+
+// "No label or value names a platform-specific enumeration mechanism, and the
+// identity field is presented under a platform-neutral label." Both surfaces
+// render these same lines, so one assertion covers the GUI and the TUI.
+TEST(DeviceDetailVmTest, NoLabelNamesAPlatformMechanism) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::Device d;
+    d.id = core::DeviceId{"pci-1"};
+    d.bus = core::BusType::Pci;
+    d.name = "Controller";
+    d.status = core::DeviceStatus::Active;
+    d.nativeId = "/sys/devices/pci0000:00/0000:00:14.0";
+    d.hardwareId = "pci:v00008086d00009DED";
+    d.serial = "SN123";
+    d.boundDriver = "xhci_hcd";
+    pal.seedDevice(d);
+    app::DeviceService svc(bus);
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refresh().wait();
+
+    app::DeviceDetailVM vm(facade);
+    const auto lines = vm.lines(core::DeviceId{"pci-1"});
+
+    for (const auto& l : lines) {
+        const auto colon = l.find(':');
+        if (colon == std::string::npos) continue;  // section headings carry no label
+        const std::string label = l.substr(0, colon);
+        for (const char* mechanism : {"Sysfs", "sysfs", "Modalias", "modalias", "udev", "DEVPKEY",
+                                      "CfgMgr", "SetupAPI", "Registry"})
+            EXPECT_EQ(label.find(mechanism), std::string::npos)
+                << "label names a platform mechanism: " << l;
+    }
+    // The identity field is still shown — neutrally labelled, not dropped.
+    bool sawIdentity = false;
+    for (const auto& l : lines)
+        if (l.rfind("Identity:", 0) == 0) {
+            sawIdentity = true;
+            EXPECT_NE(l.find("/sys/devices/pci0000:00/0000:00:14.0"), std::string::npos) << l;
+        }
+    EXPECT_TRUE(sawIdentity);
+}
+
+// 5a.3/5a.4: the detail pane renders the shared vocabulary through the shared
+// accessor, in core's order, with core's labels. The GUI splits these same
+// lines on their first colon into (label, value) and the TUI prints them
+// verbatim, so asserting the VM's lines asserts both surfaces at once — neither
+// authors a label of its own.
+TEST(DeviceDetailVmTest, DetailFieldsRenderInSharedOrderWithSharedLabels) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::Device d;
+    d.id = core::DeviceId{"w1"};
+    d.bus = core::BusType::Usb;
+    d.name = "Wireless Receiver";
+    d.status = core::DeviceStatus::Active;
+    // Published out of order on purpose: the accessor imposes the order.
+    d.properties[std::string(core::detailFieldKey(core::DetailField::DeviceInstanceId))] =
+        "USB\\VID_046D&PID_C52B\\5&1234&0&2";
+    d.properties[std::string(core::detailFieldKey(core::DetailField::Class))] = "HIDClass";
+    d.properties[std::string(core::detailFieldKey(core::DetailField::Manufacturer))] = "Logitech";
+    d.properties[std::string(core::detailFieldKey(core::DetailField::DriverVersion))] =
+        "10.0.19041";
+    pal.seedDevice(d);
+    app::DeviceService svc(bus);
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refresh().wait();
+
+    app::DeviceDetailVM vm(facade);
+    const auto lines = vm.lines(core::DeviceId{"w1"});
+
+    std::vector<std::string> labels;
+    for (const auto& l : lines) {
+        const auto colon = l.find(':');
+        if (colon == std::string::npos) continue;
+        labels.push_back(l.substr(0, colon));
+    }
+    const auto indexOf = [&labels](const std::string& label) {
+        for (std::size_t i = 0; i < labels.size(); ++i)
+            if (labels[i] == label) return static_cast<int>(i);
+        return -1;
+    };
+    for (const char* label : {"Manufacturer", "Driver Version", "Class", "Device Instance ID"})
+        EXPECT_NE(indexOf(label), -1) << "missing detail field: " << label;
+    EXPECT_LT(indexOf("Manufacturer"), indexOf("Driver Version"));
+    EXPECT_LT(indexOf("Driver Version"), indexOf("Class"));
+    EXPECT_LT(indexOf("Class"), indexOf("Device Instance ID"));
+
+    // The published field replaces the model row for the same fact rather than
+    // standing beside it — the user must not read one string twice under two
+    // labels and assume they differ.
+    EXPECT_EQ(indexOf("Identity"), -1);
+    for (const auto& l : lines)
+        if (l.rfind("Device Instance ID:", 0) == 0)
+            EXPECT_NE(l.find("USB\\VID_046D&PID_C52B\\5&1234&0&2"), std::string::npos) << l;
+}
+
+// The mirror case: a backend that publishes nothing keeps the model's own
+// identity row, so Linux is unchanged by the vocabulary existing.
+TEST(DeviceDetailVmTest, ModelIdentityRowSurvivesWhenNoFieldIsPublished) {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler(2);
+    test::FakePal pal;
+    core::Device d;
+    d.id = core::DeviceId{"l1"};
+    d.bus = core::BusType::Pci;
+    d.name = "Controller";
+    d.status = core::DeviceStatus::Active;
+    d.nativeId = "/sys/devices/pci0000:00/0000:00:14.0";
+    pal.seedDevice(d);
+    app::DeviceService svc(bus);
+    app::ApplicationFacade facade(pal, scheduler, bus, svc);
+    facade.refresh().wait();
+
+    app::DeviceDetailVM vm(facade);
+    bool sawIdentity = false;
+    for (const auto& l : vm.lines(core::DeviceId{"l1"}))
+        sawIdentity = sawIdentity || l.rfind("Identity:", 0) == 0;
+    EXPECT_TRUE(sawIdentity);
 }

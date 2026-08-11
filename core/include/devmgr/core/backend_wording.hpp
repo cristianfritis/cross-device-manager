@@ -21,16 +21,26 @@ namespace devmgr::core {
 // raw text is a diagnostic — it belongs in the log and behind a disclosure,
 // which app::BackendStatusVM owns.
 
-enum class BackendId { Devmgrd, Fwupd, Dkms };
+// Snapshots is a backend identity even though no single service supplies it:
+// the snapshot store lives behind the privileged channel, so a platform without
+// one has no snapshots at all and the Snapshots view needs a sentence of its own
+// rather than borrowing the devmgrd one.
+enum class BackendId { Devmgrd, Fwupd, Dkms, Snapshots };
 
 // Why a backend cannot serve, at the granularity that changes what the user
 // would do about it. Derived from Error::Code by kindFor() — the single place
 // an error code is interpreted for presentation.
+//
+// Unsupported is the one kind that is a fact of the BUILD and the MACHINE, not
+// of the machine's configuration: the running platform has no implementation of
+// that backend. Nothing the user installs, starts or retries changes it, which
+// is why its sentences promise nothing and why noteRole() pins it to
+// information permanently.
 enum class UnavailabilityKind { Absent, Unreachable, NotPermitted, Unsupported };
 
 // Enumerable for the total-mapping tests (and any future exhaustive render).
-inline constexpr std::array<BackendId, 3> kAllBackends{BackendId::Devmgrd, BackendId::Fwupd,
-                                                       BackendId::Dkms};
+inline constexpr std::array<BackendId, 4> kAllBackends{BackendId::Devmgrd, BackendId::Fwupd,
+                                                       BackendId::Dkms, BackendId::Snapshots};
 inline constexpr std::array<UnavailabilityKind, 4> kAllUnavailabilityKinds{
     UnavailabilityKind::Absent, UnavailabilityKind::Unreachable, UnavailabilityKind::NotPermitted,
     UnavailabilityKind::Unsupported};

@@ -207,6 +207,99 @@ TEST(BackendStatusVM, AbsentOptionalServiceStaysCalm) {
     EXPECT_EQ(noteRole(UnavailabilityKind::Unsupported, false), StatusSeverity::Info);
 }
 
+// The whole point of the descriptor (design D1): the note exists before any
+// backend has been asked anything. No observe() call is made below.
+TEST(BackendStatusVM, UnimplementedCapabilityResolvesToUnsupportedWithoutACall) {
+    BackendStatusVM vm;
+    vm.applyCapabilities(devmgr::pal::PlatformCapabilities{});  // a platform implementing nothing
+
+    const auto notes = vm.notes();
+    ASSERT_EQ(notes.size(), kAllBackends.size());
+    for (const auto& note : notes) {
+        EXPECT_EQ(note.kind, UnavailabilityKind::Unsupported);
+        EXPECT_EQ(note.role, StatusSeverity::Info);
+        EXPECT_EQ(note.text, unavailabilityText(note.backend, UnavailabilityKind::Unsupported));
+        // Nothing reported a diagnostic because nothing was called; the
+        // disclosure region must not invent one for a platform fact.
+        EXPECT_TRUE(note.diagnostic.empty());
+    }
+}
+
+// A platform implementing everything seeds nothing — the descriptor is not a
+// source of notes on its own, only of the ones it denies.
+TEST(BackendStatusVM, FullyCapablePlatformSeedsNoNote) {
+    BackendStatusVM vm;
+    vm.applyCapabilities(devmgr::pal::PlatformCapabilities{.deviceEnumeration = true,
+                                                           .hotplug = true,
+                                                           .deviceControl = true,
+                                                           .driverManagement = true,
+                                                           .privilegedChannel = true,
+                                                           .updateProviders = true,
+                                                           .criticalityProbing = true,
+                                                           .systemInfo = true});
+    EXPECT_TRUE(vm.notes().empty());
+}
+
+// A platform cannot grow a capability while running, so no observation — not
+// even a healthy one — may retract the unsupported note.
+TEST(BackendStatusVM, ObservationCannotOverrideAnUnimplementedCapability) {
+    BackendStatusVM vm;
+    vm.applyCapabilities(devmgr::pal::PlatformCapabilities{});
+
+    for (const auto backend : kAllBackends) {
+        vm.observe(backend, std::nullopt);                       // "healthy"
+        vm.observe(backend, err(Error::Code::Io, kDevmgrdRaw));  // "unreachable"
+        const auto note = vm.noteFor(backend, /*blocksAttemptedVerb=*/true);
+        ASSERT_TRUE(note.has_value()) << static_cast<int>(backend);
+        EXPECT_EQ(note->kind, UnavailabilityKind::Unsupported);
+        EXPECT_EQ(note->role, StatusSeverity::Info);
+        EXPECT_TRUE(note->diagnostic.empty());
+    }
+}
+
+// Every backend identity is answered by the mapping, so adding one cannot leave
+// a view silently ungated.
+TEST(BackendStatusVM, CapabilityMappingIsTotalOverEveryBackend) {
+    const devmgr::pal::PlatformCapabilities none{};
+    const devmgr::pal::PlatformCapabilities all{.deviceEnumeration = true,
+                                                .hotplug = true,
+                                                .deviceControl = true,
+                                                .driverManagement = true,
+                                                .privilegedChannel = true,
+                                                .updateProviders = true,
+                                                .criticalityProbing = true,
+                                                .systemInfo = true};
+    for (const auto backend : kAllBackends) {
+        EXPECT_FALSE(devmgr::app::capabilitySupplies(none, backend))
+            << "backend " << static_cast<int>(backend) << " is supplied by no capability";
+        EXPECT_TRUE(devmgr::app::capabilitySupplies(all, backend))
+            << "backend " << static_cast<int>(backend) << " is denied by a capable platform";
+    }
+}
+
+// backend-availability, "Unsupported never escalates": the platform not
+// implementing a backend is not something an interaction can change, so no
+// input — including the attempted-verb one that escalates every other calm
+// kind — may raise it above information.
+TEST(BackendStatusVM, UnsupportedNeverEscalatesUnderAnyInput) {
+    for (const bool blocked : {false, true})
+        EXPECT_EQ(noteRole(UnavailabilityKind::Unsupported, blocked), StatusSeverity::Info)
+            << "blocked=" << blocked;
+
+    // ...and through the VM, on every backend, including the attempted-verb
+    // channel that noteFor() exposes.
+    for (const auto backend : kAllBackends) {
+        BackendStatusVM vm;
+        vm.observe(backend, err(Error::Code::Unsupported, kDkmsRaw));
+        for (const bool blocked : {false, true}) {
+            const auto note = vm.noteFor(backend, blocked);
+            ASSERT_TRUE(note.has_value());
+            EXPECT_EQ(note->role, StatusSeverity::Info)
+                << "backend " << static_cast<int>(backend) << " blocked=" << blocked;
+        }
+    }
+}
+
 TEST(BackendStatusVM, BlockedVerbEscalatesAnOtherwiseCalmNote) {
     EXPECT_EQ(noteRole(UnavailabilityKind::Absent, true), StatusSeverity::Warning);
 

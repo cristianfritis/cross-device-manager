@@ -213,6 +213,29 @@ void ModulesVM::setRebuildHooks(std::function<void()> before, std::function<void
     afterRebuild_ = std::move(after);
 }
 
+// Which "nothing here" the empty list actually is — the SnapshotsVM shape,
+// applied to this view. Four distinct truths, never conflated:
+//
+//   no source implemented -> the unsupported sentence, in place of the content:
+//                            no query ran and none can, so neither an
+//                            empty-result nor a filter string would be true
+//   a filter hid it       -> "(no matches)", true whether or not a source is up
+//   the daemon answered   -> "(no modules)", a completed query
+//   the daemon never did  -> NO row: the banner's shared sentence explains the
+//                            empty region instead (docs/DESIGN.md §6.1)
+void ModulesVM::pushEmptyStateRow() {
+    if (const auto unsupported = unsupportedContent()) {
+        rows_.push_back(*unsupported);
+    } else if (!filter_.empty()) {
+        rows_.emplace_back("(no matches)");
+    } else if (!facade_.daemonAvailability()) {
+        rows_.emplace_back("(no modules)");
+    } else {
+        return;
+    }
+    rowNames_.emplace_back(std::nullopt);
+}
+
 void ModulesVM::rebuild() {
     if (beforeRebuild_) beforeRebuild_();
     const auto keep = selectedModule();
@@ -230,13 +253,7 @@ void ModulesVM::rebuild() {
                                 .holders = joinHolders(m.holders)}));
         rowNames_.emplace_back(m.name);
     }
-    // "(no modules)" asserts a completed query and is withheld while a source
-    // feeding this view is unreachable (docs/DESIGN.md §6.1); "(no matches)" is
-    // about the filter the user typed and stays true either way.
-    if (rows_.empty() && (!filter_.empty() || !facade_.daemonAvailability())) {
-        rows_.emplace_back(filter_.empty() ? "(no modules)" : "(no matches)");
-        rowNames_.emplace_back(std::nullopt);
-    }
+    if (rows_.empty()) pushEmptyStateRow();
     // A withheld empty-state row can leave the list genuinely empty, and
     // restoreSelection clamps into [0, rowCount-1] — an empty range. Guard it
     // here, as UpdatesVM and SnapshotsVM already do for the same reason.
@@ -333,15 +350,33 @@ std::vector<BackendNote> ModulesVM::availabilityNotes() const {
     return {*note};
 }
 
+// This view has exactly two sources: the module list, read locally through
+// IDriverManager, and the load/unload verbs, which run through the privileged
+// channel. With neither implemented there is nothing here to report and nothing
+// to do, so the sentence replaces the list rather than an empty region
+// appearing under a banner.
+std::optional<std::string> ModulesVM::unsupportedContent() const {
+    const auto caps = facade_.capabilities();
+    return unsupportedViewText(core::BackendId::Devmgrd,
+                               !caps.driverManagement && !caps.privilegedChannel);
+}
+
 BannerLine ModulesVM::bannerLine() const {
-    // The degraded sentence leads and raises the row's valence to at least
-    // warning; the Secure Boot posture follows it. One banner row, one severity,
-    // both facts — the Snapshots composition, applied to this view's banner.
+    // The degraded sentence leads and raises the row's valence to at most the
+    // note's own role; the Secure Boot posture follows it. One banner row, one
+    // severity, both facts — the Snapshots composition, applied to this banner.
     const auto notes = availabilityNotes();
     const auto withNote = [&notes](BannerLine line) {
         if (notes.empty()) return line;
         line.text = notes.front().text + " | " + line.text;
-        line.severity = StatusSeverity::Warning;
+        // The note's OWN role decides whether the row rises, not the mere fact
+        // that a note exists: an unsupported backend is information under every
+        // input (backend-availability, "Unsupported never escalates"), so
+        // prepending its sentence must not raise the row. Raising only — a
+        // Secure Boot warning already on this line is never demoted by a calmer
+        // note joining it. (StatusSeverity is not ordered by severity, so this
+        // is a test, not a max().)
+        if (notes.front().role == StatusSeverity::Warning) line.severity = StatusSeverity::Warning;
         return line;
     };
     const auto info = facade_.systemInfo();
@@ -350,9 +385,12 @@ BannerLine ModulesVM::bannerLine() const {
     // makes an unsigned load fail is the same posture that is worth a warning.
     // Reading it once here is what retires the render-path substring match — the
     // surface can no longer disagree with the VM about which state it is in.
-    const bool rejectsUnsigned = info->secureBoot || info->lockdownMode != "none";
-    std::string text = std::string("Secure Boot: ") + (info->secureBoot ? "ON" : "off") +
-                       " · Lockdown: " + info->lockdownMode;
+    // An undeterminable Secure Boot state is "unknown", never "off": reporting
+    // it off would tell the user unsigned modules load, on the strength of a
+    // read that failed.
+    const bool rejectsUnsigned = info->secureBoot.value_or(false) || info->lockdownMode != "none";
+    const char* state = !info->secureBoot ? "unknown" : (*info->secureBoot ? "ON" : "off");
+    std::string text = std::string("Secure Boot: ") + state + " · Lockdown: " + info->lockdownMode;
     if (rejectsUnsigned) text += " — unsigned modules will be rejected";
     return withNote({.text = std::move(text),
                      .severity = rejectsUnsigned ? StatusSeverity::Warning : StatusSeverity::Info});

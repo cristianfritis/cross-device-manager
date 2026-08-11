@@ -37,8 +37,11 @@
 #include "devmgr/core/events.hpp"
 #include "devmgr/core/snapshot_models.hpp"
 #include "devmgr/core/update_models.hpp"
+#include "devmgr/pal/backend_set.hpp"
+#include "devmgr/pal/capabilities.hpp"
 #include "devmgr/pal/criticality.hpp"
 #include "devmgr/pal/hotplug_event.hpp"
+#include "devmgr/pal/refusing_backends.hpp"
 #include "devmgr/runtime/delayed_scheduler.hpp"
 #include "devmgr/runtime/event_bus.hpp"
 #include "devmgr/runtime/task_scheduler.hpp"
@@ -1718,4 +1721,188 @@ TEST(MainWindowTest, ToolbarKeepsTextBesideAnyIcon) {
         window.tabs()->setCurrentIndex(tab);
         for (const QString& verb : visibleVerbs(window)) EXPECT_FALSE(verb.isEmpty());
     }
+}
+
+// ----- Platform capability: inapplicable verbs are absent, not disabled ------
+//
+// The read-only platform this change exists for. Everything below drives a
+// SYNTHETIC capability descriptor — no Windows code is involved, and the same
+// assertions hold on any platform that reports the same descriptor.
+
+namespace {
+
+// A backend set shaped like a read-only platform: enumeration, hotplug and
+// system information are real (the FakePal supplies them), every mutating
+// interface is the refusing null object, and there are no update providers.
+// Exactly the shape platform/windows will report.
+struct ReadOnlyFixture {
+    runtime::EventBus bus;
+    runtime::TaskScheduler scheduler{2};
+    runtime::DelayedScheduler delayed;
+    // Named fakePal, not pal: `pal` is the namespace every type below lives in,
+    // and a member of that name would shadow it inside this struct.
+    test::FakePal fakePal;
+    app::DeviceService svc{bus};
+    gui::QtUiDispatcher dispatcher;
+
+    pal::BackendSet backends{.enumerator = fakePal,
+                             .hotplug = pal::refusingHotplugMonitor(),
+                             .controller = pal::refusingDeviceController(),
+                             .drivers = pal::refusingDriverManager(),
+                             .privileged = pal::refusingPrivilegedChannel(),
+                             .systemInfo = fakePal,
+                             .criticality = pal::refusingCriticalityProber(),
+                             .updateProviders = {}};
+    pal::PlatformCapabilities caps{.deviceEnumeration = true,
+                                   .hotplug = false,
+                                   .deviceControl = false,
+                                   .driverManagement = false,
+                                   .privilegedChannel = false,
+                                   .updateProviders = false,
+                                   .criticalityProbing = false,
+                                   .systemInfo = true};
+
+    app::ApplicationFacade facade{backends, caps, scheduler, bus, svc};
+    app::DeviceListVM listVm{facade, bus, dispatcher};
+    app::DeviceDetailVM detailVm{facade};
+    app::StatusLineVM statusVm{bus, delayed, dispatcher};
+    app::ModulesVM modulesVm{facade, bus, scheduler, dispatcher};
+    app::UpdatesVM updatesVm{facade, bus, dispatcher};
+    app::SnapshotsVM snapshotsVm{facade, bus, dispatcher};
+
+    gui::MainWindow makeWindow() {
+        gui::MainWindow::Actions actions;
+        actions.onRefresh = [] {};
+        actions.onSetEnabled = [](const core::DeviceId&, bool) {};
+        actions.onLoadModule = [](const std::string&) {};
+        actions.onUnloadModule = [](const std::string&) {};
+        actions.onBindDriver = [](const core::DeviceId&, const std::string&) {};
+        actions.onUnbindDriver = [](const core::DeviceId&) {};
+        actions.confirm = [](const QString&) { return true; };
+        actions.confirmQuit = [](const QString&) { return true; };
+        return gui::MainWindow(facade, listVm, detailVm, statusVm, modulesVm, updatesVm,
+                               snapshotsVm, dispatcher, bus, std::move(actions));
+    }
+};
+
+}  // namespace
+
+// gui-presentation, "Read-only platform reduces the Devices set": the mutating
+// verbs are ABSENT, not greyed — a disabled control would assert that this verb
+// could run under some reachable condition, and on this platform none exists.
+TEST(MainWindowTest, ReadOnlyDescriptorLeavesOnlyRefreshOnDevices) {
+    ReadOnlyFixture f;
+    auto window = f.makeWindow();
+    window.tabs()->setCurrentIndex(0);
+
+    EXPECT_EQ(visibleVerbs(window), QStringList({QStringLiteral("Refresh")}));
+    // Absent from the toolbar entirely — not present-and-disabled.
+    for (const QAction* action : window.toolbar()->actions())
+        EXPECT_NE(action, window.toggleAction());
+    EXPECT_FALSE(window.toggleAction()->isVisible());
+    EXPECT_FALSE(window.bindAction()->isVisible());
+    EXPECT_FALSE(window.unbindAction()->isVisible());
+    // ...and no disabled control carries an unsupported tooltip anywhere.
+    for (const QAction* action : allVerbs(window))
+        if (action->isVisible())
+            EXPECT_FALSE(action->toolTip().contains(QStringLiteral("platform")));
+}
+
+// "A wholly unsupported tab has an empty verb set": no verb, no disabled
+// remnant, and — the part a naive hide would get wrong — not one separator.
+TEST(MainWindowTest, WhollyUnsupportedTabsShowNoVerbAndNoSeparator) {
+    ReadOnlyFixture f;
+    auto window = f.makeWindow();
+
+    for (const int tab : {1, 2, 3}) {  // Modules, Updates, Snapshots
+        window.tabs()->setCurrentIndex(tab);
+        EXPECT_TRUE(visibleVerbs(window).isEmpty()) << "tab " << tab;
+        EXPECT_TRUE(visibleToolbarEntries(window).isEmpty())
+            << "tab " << tab << " kept a separator";
+    }
+}
+
+// Each unsupported tab stays reachable and carries its own explanation, so the
+// user reads why rather than meeting an empty list (backend-availability, "A
+// view with no implemented source states why rather than showing nothing").
+TEST(MainWindowTest, UnsupportedTabsStaySelectableAndCarryTheExplanation) {
+    ReadOnlyFixture f;
+    auto window = f.makeWindow();
+
+    for (int tab = 0; tab < window.tabs()->count(); ++tab) {
+        EXPECT_TRUE(window.tabs()->isTabEnabled(tab)) << "tab " << tab << " is not selectable";
+        window.tabs()->setCurrentIndex(tab);
+        EXPECT_EQ(window.tabs()->currentIndex(), tab);
+    }
+
+    EXPECT_EQ(
+        f.modulesVm.unsupportedContent(),
+        core::unavailabilityText(core::BackendId::Devmgrd, core::UnavailabilityKind::Unsupported));
+    EXPECT_EQ(
+        f.updatesVm.unsupportedContent(),
+        core::unavailabilityText(core::BackendId::Fwupd, core::UnavailabilityKind::Unsupported));
+    EXPECT_EQ(f.snapshotsVm.unsupportedContent(),
+              core::unavailabilityText(core::BackendId::Snapshots,
+                                       core::UnavailabilityKind::Unsupported));
+    // The Devices tab has a real enumerator, so it explains nothing away.
+    EXPECT_FALSE(f.listVm.unsupportedContent().has_value());
+}
+
+// gui-presentation, "Platform-excluded verbs stay excluded": the presentation
+// function runs on every tab switch, selection change and availability change,
+// and none of them may resurrect a verb excluded at construction.
+TEST(MainWindowTest, ExcludedVerbsNeverReappearAcrossTabAndAvailabilityChanges) {
+    ReadOnlyFixture f;
+    auto window = f.makeWindow();
+
+    const std::vector<QAction*> excluded = {
+        window.toggleAction(),         window.bindAction(),
+        window.unbindAction(),         window.loadModuleAction(),
+        window.unloadModuleAction(),   window.refreshUpdatesAction(),
+        window.installUpdateAction(),  window.dismissRequestAction(),
+        window.createSnapshotAction(), window.restoreSnapshotAction(),
+        window.diffSnapshotAction(),   window.historySnapshotAction(),
+        window.deleteSnapshotAction()};
+
+    const auto assertStillExcluded = [&excluded](const char* when) {
+        for (const QAction* action : excluded)
+            EXPECT_FALSE(action->isVisible())
+                << action->text().toStdString() << " reappeared " << when;
+    };
+
+    for (int pass = 0; pass < 2; ++pass)
+        for (int tab = 0; tab < window.tabs()->count(); ++tab) {
+            window.tabs()->setCurrentIndex(tab);
+            assertStillExcluded("on a tab switch");
+        }
+
+    // A dismissible request arriving is the one condition that MAKES a verb
+    // visible on a capable platform; here it must not.
+    f.bus.publish(core::UpdateRequestEvent{.providerId = "fake",
+                                           .deviceId = "a1",
+                                           .kind = "post",
+                                           .message = "unplug and replug the device"});
+    QCoreApplication::processEvents();
+    window.tabs()->setCurrentIndex(2);
+    assertStillExcluded("after an update request arrived");
+
+    // A device selection is the other: it enables the Devices mutations.
+    f.fakePal.seedDevice(dev("d1", core::BusType::Usb, "Keyboard"));
+    f.facade.refresh().wait();
+    QCoreApplication::processEvents();
+    window.tabs()->setCurrentIndex(0);
+    assertStillExcluded("after a device was selected");
+}
+
+// "Excluded verbs have no live shortcut": nothing is bound, so pressing the key
+// does nothing and no surface can advertise it.
+TEST(MainWindowTest, ExcludedVerbsCarryNoShortcut) {
+    ReadOnlyFixture f;
+    auto window = f.makeWindow();
+
+    EXPECT_TRUE(window.toggleAction()->shortcut().isEmpty());
+    EXPECT_TRUE(window.loadModuleAction()->shortcut().isEmpty());
+    EXPECT_TRUE(window.createSnapshotAction()->shortcut().isEmpty());
+    // Refresh survives: enumeration is implemented, so its verb and its key are.
+    EXPECT_EQ(window.refreshAction()->shortcut(), QKeySequence(QKeySequence::Refresh));
 }

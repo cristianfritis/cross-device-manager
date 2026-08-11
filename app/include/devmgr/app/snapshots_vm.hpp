@@ -50,6 +50,9 @@ class SnapshotsVM {
     // itself, so the once-per-transition log holds no matter how many views are
     // watching the same daemon.
     std::vector<BackendNote> availabilityNotes() const;
+    // The sentence that replaces this view's content when the running platform
+    // has no snapshot store at all; nullopt otherwise.
+    std::optional<std::string> unsupportedContent() const;
     std::vector<std::string> detailLines() const;  // full id, parent, payload counts
 
     // Case-insensitive substring over id, trigger and reason (snapshot-ui

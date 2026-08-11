@@ -160,6 +160,14 @@ std::vector<BackendNote> DeviceListVM::availabilityNotes() const {
     return {*note};
 }
 
+// The device list's one source is the enumerator. A platform with no enumerator
+// has no devices to show and no way to get any, so the sentence replaces the
+// list; the disabled-state overlay being unavailable is a different, lesser
+// fact that leaves the rows intact and is explained by the banner.
+std::optional<std::string> DeviceListVM::unsupportedContent() const {
+    return unsupportedViewText(core::BackendId::Devmgrd, !facade_.capabilities().deviceEnumeration);
+}
+
 std::string DeviceListVM::banner() const {
     const auto notes = availabilityNotes();
     return notes.empty() ? std::string{} : notes.front().text;

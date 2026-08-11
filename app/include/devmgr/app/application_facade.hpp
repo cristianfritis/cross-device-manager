@@ -63,7 +63,9 @@ class ApplicationFacade {
                         .privilegedChannel = channel_ != nullptr,
                         .updateProviders = !updateProviders_.empty(),
                         .criticalityProbing = prober_ != nullptr,
-                        .systemInfo = systemInfo_ != nullptr} {}
+                        .systemInfo = systemInfo_ != nullptr} {
+        backendStatus_.applyCapabilities(capabilities_);
+    }
 
     // The seam constructor: takes the whole platform backend set and the
     // platform's capability descriptor, so a composition root names no platform
@@ -83,7 +85,13 @@ class ApplicationFacade {
           drivers_(&backends.drivers),
           systemInfo_(&backends.systemInfo),
           updateProviders_(backends.updateProviders),
-          capabilities_(capabilities) {}
+          capabilities_(capabilities) {
+        // Resolved once, here: a backend whose capability the platform does not
+        // implement is unsupported from this point on, so no view has to attempt
+        // a call to discover it (backend-availability, "Unsupported verb is
+        // absent rather than disabled").
+        backendStatus_.applyCapabilities(capabilities_);
+    }
 
     // What the running platform implements. Constant for the process: a
     // platform cannot grow a capability while running, so presentation code

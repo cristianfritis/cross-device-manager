@@ -104,8 +104,14 @@ class ISystemInfo {
     struct Info {
         std::string osVersion;
         std::string kernelVersion;
-        bool secureBoot = false;
+        // nullopt means COULD NOT BE DETERMINED, which is not the same claim as
+        // `false`. A backend that cannot read the firmware state must say so
+        // here rather than report Secure Boot disabled, because "off" drives a
+        // sentence telling the user unsigned modules will load.
+        std::optional<bool> secureBoot;
         bool rebootPending = false;
+        // Linux-only concept. A platform without one leaves this at "none"
+        // rather than substituting a local equivalent.
         std::string lockdownMode = "none";
     };
     virtual ~ISystemInfo() = default;

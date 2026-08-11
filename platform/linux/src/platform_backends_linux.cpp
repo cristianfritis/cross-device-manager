@@ -61,9 +61,9 @@ class LinuxPlatformBackends final : public PlatformBackends {
         set_.updateProviders.push_back(&dkms_);
     }
 
-    const BackendSet& backends() const override { return set_; }
+    [[nodiscard]] const BackendSet& backends() const override { return set_; }
 
-    PlatformCapabilities capabilities() const override {
+    [[nodiscard]] PlatformCapabilities capabilities() const override {
         return PlatformCapabilities{.deviceEnumeration = true,
                                     .hotplug = true,
                                     .deviceControl = true,
