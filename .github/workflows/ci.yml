@@ -59,7 +59,23 @@ jobs:
   # real machine. Behavioural truth comes from the owner-gated manual smoke
   # (acceptance-suite spec).
   windows-build-and-test:
-    runs-on: windows-latest
+    # PINNED, and for the same reason Qt below is pinned (D12): the runner image
+    # is a build input, and `windows-latest` is a label that moves under the
+    # build without the build declaring anything. It moved on 2026-06-08, when
+    # `windows-latest` and `windows-2025` both became Windows Server 2025 with
+    # Visual Studio 2026 (v18); the `windows-debug` preset asks for the
+    # `Visual Studio 17 2022` generator, so configure failed with "could not
+    # find any instance of Visual Studio" — after vcpkg had already resolved
+    # every pinned package, which is what an undeclared input looks like when it
+    # breaks. `windows-2022` is the image GitHub names as the VS 2022 fallback.
+    #
+    # It is also the image that AGREES WITH THE ACCEPTANCE MACHINE, which runs
+    # VS 2022 BuildTools. CI proving a toolchain the owner never exercises is
+    # the same defect the Qt pin was moved to fix, pointed at the compiler.
+    # Moving to VS 2026 is a real decision — MSBuild, the MSVC toolchain, the
+    # .NET SDK and the Windows SDK headers all change together — and it belongs
+    # in its own change, made on both sides at once, not in a label that drifts.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Provision Qt (pinned)

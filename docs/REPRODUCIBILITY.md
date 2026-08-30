@@ -48,7 +48,7 @@ Every input to the Windows build is declared:
 | vcpkg packages | `vcpkg.json` | `gtest`, `spdlog`, `nlohmann-json`, `tl-expected` (`ftxui` is Linux-only) |
 | Triplet | `CMakePresets.json` (`windows-debug`) | `x64-windows` |
 | SDK floor | `platform/windows/CMakeLists.txt` | `NTDDI_VERSION` ≥ `0x0A000001`; configuring lower fails |
-| Toolchain | `.github/workflows/ci.yml` | `windows-latest` runner image, MSVC v143 |
+| Toolchain | `.github/workflows/ci.yml` | `windows-2022` runner image, Visual Studio 2022 / MSVC v143. Pinned to an image label with a fixed toolchain: `windows-latest` names whatever is current — it became Visual Studio 2026 on 2026-06-08 — so it declares nothing |
 
 Nothing in that list is resolved by inspecting an installed artifact. In
 particular **no step reads a pre-existing local Qt**: the version above is the

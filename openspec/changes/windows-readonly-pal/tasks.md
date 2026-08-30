@@ -231,4 +231,20 @@ assumption carried to Windows (task 9.1 territory).
 - [x] 13.3 `scripts/check-format.sh --container` passes under clang-format-18 — re-run 2026-08-29 after 11a/12a: **OK, 284 file(s) clean** under `/usr/bin/clang-format-18`. No divergence from the host clang-format 22 pass, which had only reformatted the newly added lines
 - [x] 13.4 Container clang-tidy gate exits 0 with no user diagnostics — re-run 2026-08-29 after 11a/12a: **exit 0** over all 81 translation units. `Suppressed 3007921 warnings (3007106 in non-user code, 815 NOLINT)` — the two numbers account for the total, so no user diagnostic was emitted (the exit code alone is not the check here: the gate is piped, so the count line is what proves it)
 - [ ] 13.5 Windows CI job green
+
+### 13a. The Windows CI runner image was not pinned (found 2026-08-29)
+
+First push of 13.5 failed at CONFIGURE, not compile: `Generator Visual Studio 17
+2022 could not find any instance of Visual Studio`, after vcpkg had already
+resolved every pinned package. `windows-latest` and `windows-2025` both became
+Windows Server 2025 with **Visual Studio 2026 (v18)** in the 2026-06-08 → 06-15
+rollout, and the `windows-debug` preset names the `Visual Studio 17 2022`
+generator. Task 10.2 pinned Qt and task 10.6 checked `docs/REPRODUCIBILITY.md`,
+but the runner image itself was left as a moving label — and that document's
+own toolchain row declared `windows-latest` AS the value, which is not a value.
+
+- [x] 13a.1 Pin `runs-on` to `windows-2022`, the image GitHub names as the VS 2022 fallback, with the reason recorded beside it. This also makes CI agree with the acceptance machine's VS 2022 BuildTools — the same argument that moved the Qt pin in 12.10, pointed at the compiler
+- [x] 13a.2 Correct the `docs/REPRODUCIBILITY.md` toolchain row: the declared value is an image label with a fixed toolchain, not `latest`
+- [x] 13a.3 Note in `docs/WINDOWS-DEVELOPMENT.md` that the preset requires a VS 2022 install, so a VS 2026 machine will not configure it
+- [ ] 13a.4 Moving to Visual Studio 2026 is deliberately NOT done here: MSBuild, the MSVC toolchain, the .NET SDK and the Windows SDK headers all move together, and CI and the acceptance machine must move in one step. Own change
 - [x] 13.6 Sync delta specs to main specs and create the three new main specs

@@ -17,7 +17,7 @@ install is worse than producing none, and Linux packaging is a whole capability
 | Input | Version | Where it comes from |
 |---|---|---|
 | Windows SDK target | Windows 10 version 1607 (`NTDDI_VERSION` `0x0A000001`) or later | `platform/windows/CMakeLists.txt` refuses to configure below it |
-| Visual Studio | 2022 (MSVC v143), x64 | Local install |
+| Visual Studio | 2022 (MSVC v143), x64 | Local install; CI pins the `windows-2022` runner image to match. The `windows-debug` preset names the `Visual Studio 17 2022` generator, so a VS 2026 (v18) install will not configure it |
 | Qt | **6.10.3**, `win64_msvc2022_64` | Official Qt online installer / `aqtinstall`; see below |
 | vcpkg | commit `a34a3811fce990f9d2809cf0356dd443143c7000` | `github.com/microsoft/vcpkg` |
 | vcpkg triplet | `x64-windows` | Set by the `windows-debug` CMake preset |
