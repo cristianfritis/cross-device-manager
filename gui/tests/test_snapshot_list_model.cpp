@@ -60,8 +60,13 @@ struct Fixture {
     Fixture() {
         // Byte-frozen rows render local time; pin the zone so the literals are
         // deterministic on every machine (test_snapshots_vm.cpp discipline).
+#ifdef _WIN32
+        _putenv_s("TZ", "UTC");
+        _tzset();
+#else
         setenv("TZ", "UTC", 1);
         tzset();
+#endif
     }
     runtime::EventBus bus;
     runtime::TaskScheduler scheduler{2};
@@ -168,8 +173,13 @@ TEST(SnapshotListModelTest, PlaceholderRowIsNeverActionable) {
 // reuses verbatim). The dispatcher deliberately outlives the VM, exactly like
 // the composition root's declaration order.
 TEST(SnapshotListModelTest, QueuedRebuildDeliveredAfterVmDestructionIsANoOp) {
+#ifdef _WIN32
+    _putenv_s("TZ", "UTC");
+    _tzset();
+#else
     setenv("TZ", "UTC", 1);
     tzset();
+#endif
     runtime::EventBus bus;
     runtime::TaskScheduler scheduler{2};
     test::FakePal pal;

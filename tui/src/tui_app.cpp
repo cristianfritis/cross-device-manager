@@ -299,6 +299,32 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         daemonBannerRole = roleForSeverity(notes.front().role);
         daemonBannerGlyph = render::Glyph::Unavailable;
     };
+    // The TUI half of the GUI's gateOnDaemon (gui/src/main_window.cpp): every verb
+    // that reaches the system through devmgrd cannot run while devmgrd is not
+    // answering, so its key refuses HERE rather than dispatching a request that
+    // will fail deep in the privileged channel and surface a lower-level error
+    // instead of the shared sentence. Without this the two surfaces disagreed
+    // about the SAME state — the toolbar disabled the verb and named the reason,
+    // while the key still fired (task 11.4).
+    //
+    // The refusal renders the shared sentence VERBATIM, escalated by
+    // noteFor(..., blocksAttemptedVerb) exactly as the toolbar's disabled-reason
+    // is, so a key never authors its own wording for a state the banner already
+    // names (docs/DESIGN.md §5.3). A guard verdict is checked BEFORE this at
+    // every call site that has one: it is the more specific reason, and it is
+    // the one that survives the daemon coming back.
+    //
+    // Returns true when the verb was refused, in which case the key is handled.
+    // Reads only: this is what a legend entry would look like greyed out, and a
+    // legend line cannot grey one entry.
+    auto refusedByDaemon = [&] {
+        const auto blocked = facade.backendStatus().noteFor(core::BackendId::Devmgrd,
+                                                            /*blocksAttemptedVerb=*/true);
+        if (!blocked) return false;
+        bus.publish(
+            core::TaskCompletedEvent{.taskId = "guard", .ok = false, .message = blocked->text});
+        return true;
+    };
     auto refreshUpdatesBanner = [&] {
         bannerText = updatesVm.banner();
         const auto notes = updatesVm.availabilityNotes();
@@ -818,6 +844,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         }
         if (activeTab == 1) {  // ----- modules keys -----
             if (event == Event::Character('l')) {
+                if (refusedByDaemon()) return true;
                 textPrompt = PendingText{.onSubmit =
                                              [&](const std::string& name) {
                                                  prunePending();
@@ -838,6 +865,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                                  .message = "cannot unload: " + verdict.reason});
                     return true;
                 }
+                if (refusedByDaemon()) return true;
                 confirm = PendingConfirm{.onYes =
                                              [&, name = *name] {
                                                  prunePending();
@@ -881,6 +909,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
         }
         if (activeTab == 3) {                      // ----- snapshots keys -----
             if (event == Event::Character('s')) {  // create manual snapshot (label prompt)
+                if (refusedByDaemon()) return true;
                 textPrompt = PendingText{.onSubmit =
                                              [&](const std::string& label) {
                                                  prunePending();
@@ -902,6 +931,9 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                         .message = "cannot restore: no healthy snapshot selected"});
                     return true;
                 }
+                // The preview fetch below is itself an IPC read of the daemon's
+                // store, so the modal must not open either.
+                if (refusedByDaemon()) return true;
                 // Preview first, restore only on explicit confirm from it
                 // (snapshot-ui spec). The diff fetch is async — the modal opens
                 // immediately in its loading state and fills in when it lands.
@@ -926,6 +958,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                                                  .message = "cannot diff: no snapshot selected"});
                     return true;
                 }
+                if (refusedByDaemon()) return true;  // the diff is the daemon's read too
                 snapshotsVm.requestPreview(*id);
                 // Remember which snapshot this diff describes: the selection
                 // can move while the pane is open, and a diff silently
@@ -948,6 +981,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                         .message = "cannot delete: no deletable snapshot selected"});
                     return true;
                 }
+                if (refusedByDaemon()) return true;
                 confirm = PendingConfirm{.onYes =
                                              [&, a = *args] {
                                                  prunePending();
@@ -976,6 +1010,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                     return true;
                 }
             }
+            if (refusedByDaemon()) return true;
             confirm = PendingConfirm{
                 .onYes =
                     [&, id = *id, enable] {
@@ -995,6 +1030,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
                     .taskId = "guard", .ok = false, .message = "cannot unbind: " + verdict.reason});
                 return true;
             }
+            if (refusedByDaemon()) return true;
             confirm = PendingConfirm{.onYes =
                                          [&, id = *id] {
                                              prunePending();
@@ -1005,6 +1041,7 @@ int runTuiApp(bool selfTest, const Theme& theme) {
             return true;
         }
         if (event == Event::Character('B')) {  // surgical bind (advanced)
+            if (refusedByDaemon()) return true;
             const auto id = listVm.selectedDeviceId();
             const auto device = id ? facade.findById(*id) : std::nullopt;
             if (!device) return true;

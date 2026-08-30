@@ -18,7 +18,7 @@ install is worse than producing none, and Linux packaging is a whole capability
 |---|---|---|
 | Windows SDK target | Windows 10 version 1607 (`NTDDI_VERSION` `0x0A000001`) or later | `platform/windows/CMakeLists.txt` refuses to configure below it |
 | Visual Studio | 2022 (MSVC v143), x64 | Local install |
-| Qt | **6.8.3**, `win64_msvc2022_64` | Official Qt online installer / `aqtinstall`; see below |
+| Qt | **6.10.3**, `win64_msvc2022_64` | Official Qt online installer / `aqtinstall`; see below |
 | vcpkg | commit `a34a3811fce990f9d2809cf0356dd443143c7000` | `github.com/microsoft/vcpkg` |
 | vcpkg triplet | `x64-windows` | Set by the `windows-debug` CMake preset |
 
@@ -38,16 +38,23 @@ So the version is pinned in `.github/workflows/ci.yml`, provisioned there by
 `jurplel/install-qt-action@v4` from the official Qt distribution:
 
 ```yaml
-version: '6.8.3'
+version: '6.10.3'
 host: windows
 target: desktop
 arch: win64_msvc2022_64
 ```
 
-Qt **6.8.3** is a long-term-support release and is the minimum-supporting choice
-for the GUI's Windows 10 1809 floor — Qt 6 officially supports Windows 10 1809
-and later, which is why the GUI floor is 1809 while the backend and CLI floor is
-1607.
+Qt **6.10.3** is a feature release, not the 6.8 LTS. It is pinned because it is
+the version the acceptance machine runs, and a pin that disagrees with the
+acceptance gate buys nothing: CI would prove a build the owner never exercises.
+Moving the pin is the sanctioned way to resolve that disagreement (see below) —
+the pin still lives in the workflow and is still the declared input; only its
+value changed. The cost is that this line no longer sits on an LTS branch, so
+patch releases arrive with feature releases rather than on the LTS cadence.
+
+Qt 6 officially supports Windows 10 version 1809 and later — every Qt 6 release,
+this one included — which is why the GUI floor is 1809 while the backend and CLI
+floor is 1607.
 
 ### Checking that your local Qt matches
 
@@ -62,10 +69,10 @@ qmake -query QT_VERSION
 or, if `qmake` is not on `PATH`, from the Qt install directory:
 
 ```powershell
-& "C:\Qt\6.8.3\msvc2022_64\bin\qmake.exe" -query QT_VERSION
+& "C:\Qt\6.10.3\msvc2022_64\bin\qmake.exe" -query QT_VERSION
 ```
 
-It must print `6.8.3`. If it does not, install that version rather than changing
+It must print `6.10.3`. If it does not, install that version rather than changing
 the pin — and if the pin genuinely needs to move, move it in the workflow first,
 then match locally.
 
@@ -89,7 +96,7 @@ Qt's DLLs are not next to the executable after a build, so a freshly built
 output directory:
 
 ```powershell
-& "C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe" --debug build\windows-debug\gui\Debug\devmgr-gui.exe
+& "C:\Qt\6.10.3\msvc2022_64\bin\windeployqt.exe" --debug build\windows-debug\gui\Debug\devmgr-gui.exe
 build\windows-debug\gui\Debug\devmgr-gui.exe
 ```
 

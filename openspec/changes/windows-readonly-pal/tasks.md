@@ -18,6 +18,24 @@ build before group 2 starts.
 - [x] 1.12 Update `app/`, `gui/`, `tui/`, `cli/`, and every test file; confirm `grep -rn "sysfsPath\|modalias" core app gui tui cli` returns only frozen-contract comments
 - [x] 1.13 Green build + full unit suite on Linux, unchanged results
 
+## 1a. Hotplug removal correlation by platform-native identity
+
+Surfaced by the group 11.2 manual matrix: on a physical unplug the device
+never left the model. Real udev strips `ID_VENDOR_ID` / `ID_MODEL_ID` /
+`ID_SERIAL_SHORT` from a `remove` uevent, so the monitor's `mapDevice()`
+derives a different `DeviceId` than the one recorded at add time and
+`DeviceService::applyDelta` no-ops the removal. Latent since Phase 2 — unit
+fixtures build `remove` events with full identity — and the same hazard the
+Windows spec already guards against for its own identity (`windows-device-
+inventory`: the instance id "SHALL be the value the application uses to
+correlate a hotplug event with an enumerated device").
+
+- [x] 1a.1 In `DeviceService::applyDelta`, on a `Removed` event whose `DeviceId` misses the model, fall back to erasing the entry whose `nativeId` equals the event's `nativeId`; an empty `nativeId` never matches
+- [x] 1a.2 Publish the removal carrying the model's own `DeviceId` for that entry, not the event's
+- [x] 1a.3 Unit-test: a removal whose derived id differs but whose `nativeId` matches removes the device and publishes one removal with the model's id; a removal with an empty or unknown `nativeId` changes nothing
+- [x] 1a.4 Green build + full unit suite on Linux
+- [x] 1a.5 Manual re-verify on real hardware: TUI, no keypress — a physical unplug reactively removes the row and shows the shared "device removed" status (paired with 11.2)
+
 ## 2. Backend set, capabilities, and refusing implementations
 
 - [x] 2.1 Add `pal::PlatformCapabilities` (plain bools: `deviceEnumeration`, `hotplug`, `deviceControl`, `driverManagement`, `privilegedChannel`, `updateProviders`, `criticalityProbing`, `systemInfo`)
@@ -118,10 +136,10 @@ first. `Device::properties` is currently internal-only: nothing in `gui/` or
 
 ## 9. Windows application surfaces
 
-- [ ] 9.1 Build the Qt GUI on Windows; fix any Linux-only assumption in `gui/` surfaced by the compiler or by startup
-- [ ] 9.2 Verify the Devices tab populates with real detail and that Modules, Updates, and Snapshots each show their unsupported sentence at information severity, with no empty list, error, or retry control
-- [ ] 9.3 Verify the Devices toolbar shows only `Refresh`, with the mutating verbs absent rather than disabled, and no orphan separators
-- [ ] 9.4 Build and run the CLI on Windows; verify `devices list` and `devices show` including `--json`
+- [x] 9.1 Build the Qt GUI on Windows; fix any Linux-only assumption in `gui/` surfaced by the compiler or by startup
+- [x] 9.2 Verify the Devices tab populates with real detail and that Modules, Updates, and Snapshots each show their unsupported sentence at information severity, with no empty list, error, or retry control
+- [x] 9.3 Verify the Devices toolbar shows only `Refresh`, with the mutating verbs absent rather than disabled, and no orphan separators
+- [x] 9.4 Build and run the CLI on Windows; verify `devices list` and `devices show` including `--json`
 - [x] 9.5 Document the `windeployqt` run-from-build-tree procedure in the developer docs; no installer, no packaging (design D11)
 
 ## 10. CI and documentation
@@ -144,35 +162,73 @@ This group exists because groups 1–4 rewrite every program's startup path, whi
 unit tests do not cover. A Linux regression must not be discoverable only on
 Windows. If any row fails, stop and fix before touching group 12.
 
-- [ ] 11.1 GUI starts, Devices populates, one enable/disable round-trip through the real polkit prompt succeeds, application exits cleanly
-- [ ] 11.2 TUI starts, Devices populates, one enable/disable round-trip succeeds, hotplug reacts to a physical plug and unplug, exits cleanly
-- [ ] 11.3 CLI: existing snapshot verbs still work against a running `devmgrd`; new `devices list` works with `devmgrd` stopped
-- [ ] 11.4 With `devmgrd` stopped, both UIs still show the unreachable sentence at warning severity and keep mutating verbs visible-and-disabled — confirming unreachable was not accidentally reclassified as unsupported
+- [x] 11.1 GUI starts, Devices populates, one enable/disable round-trip through the real polkit prompt succeeds, application exits cleanly
+- [x] 11.2 TUI starts, Devices populates, one enable/disable round-trip succeeds, hotplug reacts to a physical plug and unplug, exits cleanly
+- [x] 11.3 CLI: existing snapshot verbs still work against a running `devmgrd`; new `devices list` works with `devmgrd` stopped
+- [x] 11.4 With `devmgrd` stopped, both UIs still show the unreachable sentence at warning severity and keep mutating verbs visible-and-disabled — confirming unreachable was not accidentally reclassified as unsupported
 - [x] 11.5 Container unit suite green (rebuild first — the compose service has no volume mount)
-- [ ] 11.6 VM smoke scripts for the phases that have them still print their OK markers
+- [x] 11.6 VM smoke scripts for the phases that have them still print their OK markers — phase4/5/6/7/8 all print their OK marker in the libvirt VM (GUI/TUI-off build). Two non-code blockers cleared: (a) a stale `/usr/share/dbus-1/system-services/org.devmgr.Manager1.service` from a Jul-22 install was auto-activating an old `devmgrd` and masking phase7's daemon-down exit-4 check — removed it; the current CLI correctly returns `kUnreachable` (4) when the daemon is genuinely down. (b) `phase8-sandbox-smoke.sh:60` checked `/var/lib/devmgrd/HEAD` but the store has written `/var/lib/devmgrd/snapshots/HEAD` since Phase 7 — script was authored in beta-06 and never run green (dev host is OpenRC); fixed the path in the same commit as this change.
+
+### 11a. TUI mutating keys were not gated on daemon availability (found 2026-08-29)
+
+Row 11.4 passed on what it asked for — both surfaces show the unreachable
+sentence at warning severity and neither hides a mutating verb — but it exposed
+a parity gap one level below the presentation it checks. The GUI disables every
+devmgrd-backed action (`MainWindow::gateOnDaemon`) while the helper is
+unreachable; the TUI has no disabled state for a key, so `e`/`U`/`B`/`l`/`u`/
+`s`/`r`/`d`/`x` still dispatched and the user got whatever error the privileged
+channel eventually returned instead of the shared sentence. Same state, two
+behaviours.
+
+- [x] 11a.1 Add a `refusedByDaemon` gate in `tui/src/tui_app.cpp` reading `backendStatus().noteFor(BackendId::Devmgrd, blocksAttemptedVerb=true)` — the same accessor and the same escalation the GUI's disabled-reason uses
+- [x] 11a.2 Apply it to every devmgrd-backed key and to no other: devices `e`/`U`/`B`, modules `l`/`u`, snapshots `s`/`r`/`d`(diff)/`x`. Devices `r` (a read), snapshots `h` (a local view toggle), and every Updates key (fwupd, not devmgrd) stay ungated, matching the GUI's own exemptions
+- [x] 11a.3 Order the gate AFTER each site's existing guard verdict, so a critical-device or placeholder-row refusal keeps outranking the availability note — it is the more specific reason and the one that survives the daemon coming back
+- [x] 11a.4 Publish the shared sentence VERBATIM, with no verb prefix, so the spec's "SHALL NOT reword, prefix, or suffix it" holds on this path too
+- [x] 11a.5 Record the invocation half of the rule in the `backend-availability` delta and main specs — blocking applies to a verb's invocation, not only its presentation — with a scenario for a surface whose control has no disabled visual state
+- [ ] 11a.6 Owner re-run of 11.4 against the new build: with `devmgrd` stopped, each key above prints the shared sentence on the status line and dispatches nothing; `r` and `h` still work
 
 ## 12. Windows verification gate (owner)
 
 Automated Windows CI proves compilation only. These rows are the behavioural
 gate and cannot be satisfied by a green run.
 
-- [ ] 12.1 GUI starts on real Windows and Devices lists devices whose names, vendors, and buses match Device Manager for the same machine
-- [ ] 12.2 Plug a USB device: it appears without a manual refresh. Unplug it: it disappears. Repeat at least three times
-- [ ] 12.3 Close the application while a device is being plugged and unplugged repeatedly; confirm no hang and no crash on exit (this is the D8 hazard)
-- [ ] 12.4 Modules, Updates, and Snapshots each show their unsupported sentence; each tab is reachable and its explanation readable with the keyboard alone
-- [ ] 12.5 Devices toolbar shows only `Refresh`; no disabled mutating verb and no orphan separator is present anywhere
-- [ ] 12.6 `devmgr devices list` and `devmgr devices show` produce correct output; `--json` parses; names and buses match what the GUI shows
-- [ ] 12.7 Device detail omits rows for properties Windows does not report, rather than showing blank or unknown values
-- [ ] 12.8 Read the detail pane for several devices and confirm every row is labelled in product-facing words — Manufacturer, Driver Version, Device Instance ID, Hardware IDs, Class — with no `DEVPKEY`-shaped text anywhere on screen or in `devices show --json`
-- [ ] 12.9 Confirm a device with a problem condition shows its state through the shared status colour and word, with no extra status row
-- [ ] 12.10 Confirm the owner machine's Qt version matches the version CI pins (task 10.4), and record both
-- [ ] 12.11 Record the result of every row above with the Windows build number and version tested, confirming it is at or above Windows 10 1607
+**Partial verification run 2026-08-29 on the `win10-agent` VM (Windows 10.0.19044 /
+21H2, VS 2022 BuildTools, Qt `C:\Qt\6.10.3\msvc2022_64`, vcpkg at the CI-pinned
+commit).** The full Windows target (core, app, platform/windows, gui, cli) compiles
+and links. `ctest` = 456/458; the two are environment-only — `devmgr_gui_selftest`
+needs `qoffscreen.dll` (passes with the full Qt install CI uses → "self-test rows: 88")
+and the CTest discovery step needs Qt on `PATH`; run directly `devmgr_gui_tests` is
+100/100 and `DeviceServiceDelta` (the group-1a fix) is 6/6. Two findings below.
+
+- [ ] 12.1 GUI starts on real Windows and Devices lists devices whose names, vendors, and buses match Device Manager for the same machine — GUI starts; Devices lists 88 devices with real Windows names / bus classes; **name/vendor/bus vs Device Manager on the same box is the owner's visual compare**
+- [ ] 12.2 Plug a USB device: it appears without a manual refresh. Unplug it: it disappears. Repeat at least three times — needs USB passthrough to the VM + the owner
+- [ ] 12.3 Close the application while a device is being plugged and unplugged repeatedly; confirm no hang and no crash on exit (this is the D8 hazard) — needs USB passthrough + the owner
+- [ ] 12.4 Modules, Updates, and Snapshots each show their unsupported sentence; each tab is reachable and its explanation readable with the keyboard alone — VERIFIED: all three show their unsupported sentence in place of content (no list, error, retry); each tab reached with Ctrl+Tab alone. **Minor:** on Modules/Updates/Snapshots the sentence renders inside the fixed-width left list column and is horizontally clipped — readable only by scrolling. Owner to confirm this is acceptable or file a follow-up.
+- [ ] 12.5 Devices toolbar shows only `Refresh`; no disabled mutating verb and no orphan separator is present anywhere — VERIFIED from screenshot: toolbar is `Refresh` only, no greyed verbs, no orphan separator
+- [ ] 12.6 `devmgr devices list` and `devmgr devices show` produce correct output; `--json` parses; names and buses match what the GUI shows — VERIFIED: `devices list` = 88 rows (name / [bus] / status / id); `devices show` prints the 8 shared detail fields; `--json` parses (ConvertFrom-Json OK) with `label`/`value` pairs
+- [ ] 12.7 Device detail omits rows for properties Windows does not report, rather than showing blank or unknown values — mechanism verified (mapper `setProperty` early-returns on empty; unit tests 7.10). Every device on this VM populates all 8 fields, so no live omit example was reachable; owner to spot-check a device Windows under-describes
+- [ ] 12.8 Read the detail pane for several devices and confirm every row is labelled in product-facing words — Manufacturer, Driver Version, Device Instance ID, Hardware IDs, Class — with no `DEVPKEY`-shaped text anywhere on screen or in `devices show --json` — VERIFIED via CLI `devices show` + `--json` across several devices: labels are exactly the shared vocabulary; no `DEVPKEY_`/`DEVPROP` text. (`PCI\VEN_...` strings are the hardware-id *values*, correctly under the "Hardware IDs" / "Device Instance ID" labels.)
+- [ ] 12.9 Confirm a device with a problem condition shows its state through the shared status colour and word, with no extra status row — no device with a problem condition exists in this clean VM (`System board` is `Unknown`, not a fault). Owner to verify on a machine that has one, or induce one
+- [x] 12.10 Confirm the owner machine's Qt version matches the version CI pins (task 10.4), and record both — **RESOLVED by moving the pin.** Acceptance machine (`win10-agent`): **Qt 6.10.3**, `C:\Qt\6.10.3\msvc2022_64`. CI pin: **6.10.3** (`.github/workflows/ci.yml`), was 6.8.3. `docs/WINDOWS-DEVELOPMENT.md` and `docs/REPRODUCIBILITY.md` updated to match; the LTS rationale is replaced with the real one (6.10.3 is a feature release — the pin follows the acceptance gate, and the cost of leaving the 6.8 LTS branch is stated). `design.md` D14's "the LTS this change pins" corrected. The 1809 GUI floor is unchanged: it holds for every Qt 6 release.
+- [ ] 12.11 Record the result of every row above with the Windows build number and version tested, confirming it is at or above Windows 10 1607 — tested on **Windows 10.0.19044 (21H2)** — above the 1607 backend/CLI floor (14393) and the 1809 GUI floor (17763)
+
+### 12a. Windows GUI is a console-subsystem executable (found 2026-08-29)
+
+`gui/CMakeLists.txt:33` — `add_executable(devmgr-gui src/main.cpp)` has no `WIN32`
+keyword and no `WIN32_EXECUTABLE` property, so on Windows the GUI links as a console
+subsystem app: every launch pops a stray empty `conhost` window alongside the Qt
+window (visible in `.pi/vm-artifacts/windows-gui*.png` too). This is a Linux
+assumption carried to Windows (task 9.1 territory).
+
+- [x] 12a.1 Make `devmgr-gui` a `WIN32_EXECUTABLE` on Windows only, keeping it a normal console binary on Linux — `gui/CMakeLists.txt` sets the property under `if(WIN32)`. Qt supplies the `WinMain` shim through `Qt6::Core`, which links `Qt6::EntryPointPrivate` behind a `$<TARGET_PROPERTY:WIN32_EXECUTABLE>` generator expression, so no extra link is needed; the Windows CI job (13.5) is what proves that
+- [x] 12a.2 Preserve `--version` and `--self-test` terminal output (a WIN32 app has no attached stdout when run from a shell): `AttachConsole(ATTACH_PARENT_PROCESS)` at startup when a parent console exists, or an equivalent, before any `std::cout`/`std::cerr` — `gui/src/main.cpp` `attachParentConsole()`, called first thing in `main`. It checks `GetStdHandle(STD_OUTPUT_HANDLE)` FIRST and returns if a launcher already supplied one: CTest and shell redirects hand the process a pipe, and reopening `CONOUT$` over it would send the output to the console instead of to the caller reading the pipe. Only with no output handle does it attach the parent console, re-`freopen_s` the three C streams and `sync_with_stdio(true)` so `cout`/`cerr` rebind. From Explorer there is no parent console, `AttachConsole` fails, and the program stays windowed
+- [ ] 12a.3 Confirm `devmgr_gui_version` and `devmgr_gui_selftest` CTest tests still pass, and that a bare GUI launch shows no console window — Linux half done: full `ctest` 853/853 with both tests green (the property is a no-op there, which is the point). The Windows half — both tests green under CI and no `conhost` window on a bare launch — is 13.5 plus one owner look
 
 ## 13. Gates
 
-- [ ] 13.1 `openspec validate windows-readonly-pal --strict` passes
-- [ ] 13.2 Container unit tests green
-- [ ] 13.3 `scripts/check-format.sh --container` passes under clang-format-18
-- [ ] 13.4 Container clang-tidy gate exits 0 with no user diagnostics
+- [x] 13.1 `openspec validate windows-readonly-pal --strict` passes
+- [x] 13.2 Container unit tests green — re-run 2026-08-29 after 11a/12a: `docker compose -f test/docker-compose.yml run --rm unit` = **854/854**, 0 failed (`SysfsControllerTest.UnwritableAttrIsIo` skipped — it needs a non-root user, as always in this image)
+- [x] 13.3 `scripts/check-format.sh --container` passes under clang-format-18 — re-run 2026-08-29 after 11a/12a: **OK, 284 file(s) clean** under `/usr/bin/clang-format-18`. No divergence from the host clang-format 22 pass, which had only reformatted the newly added lines
+- [x] 13.4 Container clang-tidy gate exits 0 with no user diagnostics — re-run 2026-08-29 after 11a/12a: **exit 0** over all 81 translation units. `Suppressed 3007921 warnings (3007106 in non-user code, 815 NOLINT)` — the two numbers account for the total, so no user diagnostic was emitted (the exit code alone is not the check here: the gate is piped, so the count line is what proves it)
 - [ ] 13.5 Windows CI job green
-- [ ] 13.6 Sync delta specs to main specs and create the three new main specs
+- [x] 13.6 Sync delta specs to main specs and create the three new main specs

@@ -33,6 +33,17 @@ gtest_discover_tests(devmgr_gui_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 add_executable(devmgr-gui src/main.cpp)
 target_link_libraries(devmgr-gui PRIVATE devmgr_gui)
 
+# Windows only: link as a GUI-subsystem binary. A console-subsystem Qt app pops
+# a stray empty conhost window beside its own window on every launch, which is a
+# Linux assumption (every binary owns a terminal) carried onto a platform where
+# it is visible. On Linux the property is meaningless and devmgr-gui stays a
+# normal console binary, so `--version` and `--self-test` keep working there
+# unchanged; main.cpp reattaches to the parent console on Windows so they keep
+# working here too.
+if(WIN32)
+    set_target_properties(devmgr-gui PROPERTIES WIN32_EXECUTABLE ON)
+endif()
+
 # Offscreen launch smoke: full wiring (real PAL) + one enumeration + rebuild.
 # In containers the netlink hotplug start may fail — the degrade path still
 # exits 0; the smoke asserts wiring, not host capabilities.

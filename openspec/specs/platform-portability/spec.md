@@ -1,4 +1,13 @@
-## ADDED Requirements
+# platform-portability Specification
+
+## Purpose
+
+Cross-platform backend selection and capability behavior. Frontends and application
+code consume one platform-neutral backend set; unsupported interfaces remain callable
+through refusing implementations, while presentation reads an explicit capability
+descriptor.
+
+## Requirements
 
 ### Requirement: One platform backend set, resolved in one place
 The application SHALL obtain every platform-dependent implementation from a single backend set produced by one factory entry point declared in `core` and defined exactly once per platform target. Frontends and the application layer SHALL NOT name, include, or construct a platform-specific implementation type. Exactly one platform definition SHALL be linked into any binary.
@@ -66,8 +75,8 @@ The set of fields is extensible, but a new field SHALL be added to the shared vo
 - **THEN** each surface renders that field under the identical shared label, in the identical position relative to the other fields
 
 #### Scenario: Native key mapping is contained
-- **WHEN** the source tree is searched for a platform's native property-key identifiers
-- **THEN** they appear only within that platform's own backend directory, and in no shared, application, or surface code
+- **WHEN** the source tree outside a platform's own backend directory is searched for native property-key identifiers
+- **THEN** none is found
 
 #### Scenario: A backend populating a subset renders correctly
 - **WHEN** a backend populates only some of the shared detail fields
@@ -78,7 +87,7 @@ Each platform backend SHALL declare a minimum supported operating-system version
 
 #### Scenario: Below-minimum target fails loudly at build time
 - **WHEN** the platform backend is configured to target an operating-system version below its declared minimum
-- **THEN** the build fails with a message naming the required minimum version, and no program is produced
+- **THEN** the build fails with a message naming the required minimum, and no program is produced
 
 #### Scenario: The minimum is documented, not inferred
 - **WHEN** the supported-platform documentation is read

@@ -16,6 +16,8 @@ never replace it.
 ### Requirement: Toolbar composition follows the active tab
 The GUI toolbar SHALL present only the verbs belonging to the active tab. A verb owned by another tab SHALL be hidden (`QAction::setVisible(false)`), not merely disabled, so that a disabled toolbar action always means *this verb applies here and cannot run right now*. The toolbar region itself SHALL remain a single stable toolbar; per-tab toolbars, stacked toolbars, and rebuilding the toolbar on tab change are not permitted.
 
+Tab ownership determines which verbs are candidates. A candidate whose backing capability has no implementation on the running platform SHALL NOT be a member of its tab's verb set at all. Platform membership SHALL be decided once from the platform capability descriptor, and SHALL NOT be re-derived per frame or inferred from a failed call.
+
 The per-tab verb sets SHALL be:
 
 | Tab | Verbs, in presentation order |
@@ -37,8 +39,16 @@ The per-tab verb sets SHALL be:
 - **WHEN** the user switches from Devices to Modules
 - **THEN** the Devices verbs become invisible and the Modules verbs become visible in the same toolbar, without the toolbar being rebuilt or replaced
 
+#### Scenario: Read-only platform reduces the Devices set
+- **WHEN** the Devices tab is active on a platform whose capability descriptor reports device control and driver management as not implemented
+- **THEN** the only visible toolbar action is `Refresh`, and the enable/disable, bind and unbind verbs are absent rather than disabled
+
+#### Scenario: A wholly unsupported tab has an empty verb set
+- **WHEN** a tab is active on a platform where every one of its verbs' backing capabilities is not implemented
+- **THEN** no verb is visible, the toolbar shows no disabled remnants and no orphan separators, and the tab's content region carries the backend's unsupported explanation
+
 ### Requirement: One function owns action presentation
-A single presentation function SHALL own visibility, enablement, dynamic text and tooltip for every toolbar action, and SHALL be the only place that sets them. It SHALL run on every input that can change them: tab change, selection change, model reset, backend-availability change, and operation start/completion.
+A single presentation function SHALL own visibility, enablement, dynamic text and tooltip for every toolbar action, and SHALL be the only place that sets them. It SHALL run on every input that can change them: tab change, selection change, model reset, backend-availability change, and operation start/completion. Platform capability is not among those inputs because it cannot change within a process; it SHALL be applied once when the toolbar is constructed, and the presentation function SHALL NOT re-derive it.
 
 That function SHALL NOT perform sysfs, libkmod, D-Bus, or filesystem work. It SHALL read only ViewModel and `BackendStatusVM` state already resolved for the current frame, and SHALL NOT author wording for a state the ViewModels or the availability banner already name.
 
@@ -50,8 +60,14 @@ That function SHALL NOT perform sysfs, libkmod, D-Bus, or filesystem work. It SH
 - **WHEN** a verb is visible on its own tab
 - **THEN** whether it is enabled is decided by the same predicate as before this change, and its refusal wording is still the shared ViewModel/`BackendStatusVM` text
 
+#### Scenario: Platform-excluded verbs stay excluded
+- **WHEN** the presentation function runs repeatedly across tab switches, selection changes, and availability transitions on a platform missing a capability
+- **THEN** a verb excluded at construction never becomes visible
+
 ### Requirement: Hiding is reserved for inapplicability
-A verb SHALL be hidden only when it cannot apply at all — it belongs to another tab, or it has no object to act on. A verb that belongs to the active tab but is temporarily blocked — by an unreachable `devmgrd`, by an operation already in flight, or by a safety guard — SHALL remain visible, be disabled, and carry the concrete shared reason as its tooltip. Safety refusals SHALL NOT be hidden.
+A verb SHALL be hidden only when it cannot apply at all — it belongs to another tab, it has no object to act on, or its backing capability has no implementation on the running platform. A verb that belongs to the active tab but is temporarily blocked — by an unreachable `devmgrd`, by an operation already in flight, or by a safety guard — SHALL remain visible, be disabled, and carry the concrete shared reason as its tooltip. Safety refusals SHALL NOT be hidden.
+
+Platform inapplicability and runtime blocking SHALL NOT be conflated. A capability that the running platform does not implement can never become available in this process, so presenting it as a disabled control would assert a reachable state that does not exist; a backend that is merely unreachable can recover, so it stays visible and disabled. The two SHALL be distinguished by the platform capability descriptor rather than by observing a call fail.
 
 `Dismiss Request` SHALL be visible on the Updates tab only while a dismissible request exists, that condition being read from the ViewModel rather than derived in the GUI.
 
@@ -67,8 +83,12 @@ A verb SHALL be hidden only when it cannot apply at all — it belongs to anothe
 - **WHEN** the Updates tab is active and no dismissible request exists
 - **THEN** `Dismiss Request` is not visible; and **WHEN** a request arrives, it becomes visible on the same tab
 
+#### Scenario: Unsupported capability hides rather than disables
+- **WHEN** the capability descriptor reports a verb's backing capability as not implemented and that verb's tab is active
+- **THEN** the verb is not visible, and no disabled control bearing an unsupported tooltip appears anywhere on the toolbar
+
 ### Requirement: Separator groups without orphans
-Visible toolbar actions SHALL be separated into the `docs/DESIGN.md` §5.3 groups — refresh, persistent enable/disable, additive commands, destructive commands, advanced commands. When a group is hidden, no leading, trailing, or consecutive visible separator SHALL remain, so a separator is visible only between two visible actions.
+Visible toolbar actions SHALL be separated into the `docs/DESIGN.md` §5.3 groups — refresh, persistent enable/disable, additive commands, destructive commands, advanced commands. When a group is hidden, no leading, trailing, or consecutive visible separator SHALL remain, so a separator is visible only between two visible actions. This SHALL hold when a group is empty because the running platform does not implement its verbs, including when every group on a tab is empty.
 
 #### Scenario: No orphan separators on any tab
 - **WHEN** each of the four tabs is active in turn
@@ -77,6 +97,10 @@ Visible toolbar actions SHALL be separated into the `docs/DESIGN.md` §5.3 group
 #### Scenario: Destructive verbs are separated from benign ones
 - **WHEN** the Snapshots tab is active
 - **THEN** a separator stands between `Delete Snapshot` and the actions preceding it
+
+#### Scenario: No separators survive an emptied toolbar
+- **WHEN** a tab whose every verb is excluded by platform capability is active
+- **THEN** the toolbar shows no separator at all
 
 ### Requirement: Verb shortcuts are inert off their tab
 Existing verb shortcuts (`F5` refresh, `Ctrl+E` enable/disable, `Ctrl+L` load module, `Ctrl+N` create snapshot) SHALL remain bound to their actions, and SHALL have no effect while their tab is not active. Tab-switching shortcuts (`Ctrl+1`…`Ctrl+4`) remain global.
@@ -88,6 +112,12 @@ Existing verb shortcuts (`F5` refresh, `Ctrl+E` enable/disable, `Ctrl+L` load mo
 #### Scenario: Bindings survive tab switching
 - **WHEN** the user switches through all four tabs and returns
 - **THEN** each verb still carries its original shortcut
+
+A shortcut whose action is excluded because the running platform does not implement its capability SHALL NOT be bound at all, so that pressing it does nothing and it is not advertised anywhere.
+
+#### Scenario: Excluded verbs have no live shortcut
+- **WHEN** a verb is excluded by platform capability and its shortcut is pressed on its own tab
+- **THEN** nothing happens, no backend is called, and no menu or tooltip advertises that shortcut
 
 ### Requirement: Toolbar icons pair with retained text
 Toolbar actions SHALL use desktop theme icons via `QIcon::fromTheme` with a `QStyle` standard-icon fallback where a standard name exists, and SHALL keep their visible text. Destructive, advanced and ambiguous commands SHALL NOT become icon-only. Each action's accessible name SHALL remain its visible text. The toolbar SHALL stay usable at the `800x520` minimum window size, relying on Qt's native toolbar overflow rather than compressing or truncating controls.

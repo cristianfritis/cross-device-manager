@@ -1,5 +1,6 @@
 #include "devmgr/app/device_service.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -7,6 +8,23 @@
 #include "devmgr/core/events.hpp"
 
 namespace devmgr::app {
+namespace {
+
+// A removal event's DeviceId is not trustworthy: real udev strips the
+// ID_VENDOR_ID / ID_MODEL_ID / ID_SERIAL_SHORT properties from a `remove`
+// uevent, so the hotplug monitor derives a different id than the one recorded
+// at add time. The platform-native id (a sysfs path on Linux, a device
+// instance id on Windows) is the one field that is present and identical on
+// both events, so a removal that misses on id falls back to matching it.
+auto findForRemoval(std::unordered_map<std::string, core::Device>& model,
+                    const core::Device& event) {
+    auto it = model.find(event.id.value);
+    if (it != model.end() || event.nativeId.empty()) return it;
+    return std::ranges::find_if(
+        model, [&](const auto& entry) { return entry.second.nativeId == event.nativeId; });
+}
+
+}  // namespace
 
 void DeviceService::applyEnumeration(std::vector<core::Device> snapshot) {
     std::vector<core::Device> added;
@@ -48,13 +66,13 @@ void DeviceService::applyDelta(const pal::HotplugEvent& event) {
     {
         std::scoped_lock lock(mutex_);
         const std::string key = event.device.id.value;
-        auto it = model_.find(key);
         if (event.action == pal::HotplugEvent::Action::Removed) {
-            if (it != model_.end()) {
+            if (auto it = findForRemoval(model_, event.device); it != model_.end()) {
                 removed = core::DeviceRemovedEvent{it->second.id};
                 model_.erase(it);
             }
         } else {  // Added or Changed — reconcile against the live model
+            auto it = model_.find(key);
             if (it == model_.end()) {
                 model_.emplace(key, event.device);
                 added = core::DeviceAddedEvent{event.device};

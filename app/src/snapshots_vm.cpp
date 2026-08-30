@@ -30,7 +30,11 @@ std::string toLower(std::string s) {
 std::string localDateTime(std::int64_t utcSeconds) {
     const auto t = static_cast<std::time_t>(utcSeconds);
     std::tm local{};
+#ifdef _WIN32
+    if (localtime_s(&local, &t) != 0) return "?";
+#else
     if (localtime_r(&t, &local) == nullptr) return "?";
+#endif
     static constexpr std::size_t kTimeBufferSize = 20;  // "YYYY-mm-dd HH:MM" + NUL
     std::array<char, kTimeBufferSize> buffer{};
     if (std::strftime(buffer.data(), buffer.size(), "%Y-%m-%d %H:%M", &local) == 0) return "?";

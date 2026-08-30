@@ -117,6 +117,66 @@ TEST(DeviceServiceDelta, AddThenNoopThenChangeThenRemove) {
     EXPECT_TRUE(service.devices().empty());
 }
 
+// Real udev strips ID_VENDOR_ID / ID_MODEL_ID / ID_SERIAL_SHORT from `remove`
+// uevents, so the hotplug monitor's mapDevice() computes a DIFFERENT DeviceId
+// on removal than the one stored at add time. Only the platform-native id
+// (syspath on Linux, instance id on Windows) survives on both. applyDelta()
+// must fall back to matching a removal on nativeId so the device actually
+// leaves the model on a physical unplug.
+TEST(DeviceServiceDelta, RemovalMatchesOnNativeIdWhenTheDerivedIdDiffers) {
+    using devmgr::pal::HotplugEvent;
+    devmgr::runtime::EventBus bus;
+    devmgr::app::DeviceService service(bus);
+
+    int removed = 0;
+    devmgr::core::DeviceId removedId{""};
+    auto sR = bus.subscribe<devmgr::core::DeviceRemovedEvent>([&](const auto& e) {
+        ++removed;
+        removedId = e.id;
+    });
+
+    devmgr::core::Device added;
+    added.id = devmgr::core::DeviceId{"dev-fullprops"};
+    added.nativeId = "/sys/devices/pci0000:00/0000:00:08.3/0000:c5:00.0/usb4/4-1";
+    added.name = "DataTraveler";
+    service.applyDelta(HotplugEvent{HotplugEvent::Action::Added, added});
+    ASSERT_EQ(service.devices().size(), 1u);
+
+    // The removal event carries the same nativeId but a degraded derived id.
+    devmgr::core::Device removeEvent;
+    removeEvent.id = devmgr::core::DeviceId{"dev-degraded"};
+    removeEvent.nativeId = added.nativeId;
+    service.applyDelta(HotplugEvent{HotplugEvent::Action::Removed, removeEvent});
+
+    EXPECT_EQ(removed, 1);
+    EXPECT_EQ(removedId.value, "dev-fullprops");  // the model's real id, not the event's
+    EXPECT_TRUE(service.devices().empty());
+}
+
+// The nativeId fallback must not turn an unrelated removal into a spurious
+// erase: an empty nativeId on the event never matches a real device.
+TEST(DeviceServiceDelta, RemovalWithEmptyNativeIdDoesNotMatchByFallback) {
+    using devmgr::pal::HotplugEvent;
+    devmgr::runtime::EventBus bus;
+    devmgr::app::DeviceService service(bus);
+
+    int removed = 0;
+    auto sR = bus.subscribe<devmgr::core::DeviceRemovedEvent>([&](const auto&) { ++removed; });
+
+    devmgr::core::Device added;
+    added.id = devmgr::core::DeviceId{"dev-1"};
+    added.nativeId = "";  // a backend that does not populate it
+    service.applyDelta(HotplugEvent{HotplugEvent::Action::Added, added});
+
+    devmgr::core::Device removeEvent;
+    removeEvent.id = devmgr::core::DeviceId{"dev-other"};
+    removeEvent.nativeId = "";
+    service.applyDelta(HotplugEvent{HotplugEvent::Action::Removed, removeEvent});
+
+    EXPECT_EQ(removed, 0);
+    EXPECT_EQ(service.devices().size(), 1u);
+}
+
 TEST(DeviceServiceDelta, ChangeOfUnknownActsAsAddAndRemoveOfAbsentIsNoop) {
     using devmgr::pal::HotplugEvent;
     devmgr::runtime::EventBus bus;

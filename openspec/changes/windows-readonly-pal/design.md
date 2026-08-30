@@ -377,7 +377,9 @@ of which function was convenient.
 
 *The GUI's floor is higher, and it is a second declared number.* Qt 6 officially
 supports Windows 10 version 1809 and later — every Qt 6 release, including the
-LTS this change pins. Qt will in practice run at 1607 (its hard dependency,
+release this change pins (6.10.3, a feature release — the pin follows the
+acceptance machine, see docs/WINDOWS-DEVELOPMENT.md). Qt will in practice run at
+1607 (its hard dependency,
 `GetSystemMetricsForDpi`, arrived in that release), but "runs" is not "supported",
 and a defect below Qt's floor has no upstream recourse. So the supported-platform
 statement carries two numbers: **1607 for the backend and the CLI, 1809 for the

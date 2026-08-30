@@ -57,7 +57,7 @@ echo "module ops OK"
 echo "==> [4/5] snapshot restore write-back (state dir + modprobe.d)"
 sid=$(devmgr snapshot create --label sandbox-smoke)
 [ -n "$sid" ] || { echo "create printed no id"; exit 1; }
-[ -s /var/lib/devmgrd/HEAD ] || { echo "state dir not written under the sandbox"; exit 1; }
+[ -s /var/lib/devmgrd/snapshots/HEAD ] || { echo "state dir not written under the sandbox"; exit 1; }
 call SetDeviceEnabled sb "$USBDEV" false
 devmgr snapshot restore "$sid" >/dev/null
 [ "$(cat "$USBDEV/authorized")" = "1" ] || { echo "restore did not converge hardware"; exit 1; }

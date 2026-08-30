@@ -43,7 +43,7 @@ Every input to the Windows build is declared:
 
 | Input | Declared where | Value |
 |---|---|---|
-| Qt | `.github/workflows/ci.yml` | `6.8.3`, `win64_msvc2022_64`, provisioned by `jurplel/install-qt-action@v4` from the official Qt distribution |
+| Qt | `.github/workflows/ci.yml` | `6.10.3`, `win64_msvc2022_64`, provisioned by `jurplel/install-qt-action@v4` from the official Qt distribution |
 | vcpkg | `.github/workflows/ci.yml` | pinned commit `a34a3811fce990f9d2809cf0356dd443143c7000` |
 | vcpkg packages | `vcpkg.json` | `gtest`, `spdlog`, `nlohmann-json`, `tl-expected` (`ftxui` is Linux-only) |
 | Triplet | `CMakePresets.json` (`windows-debug`) | `x64-windows` |

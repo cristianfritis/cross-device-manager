@@ -82,8 +82,13 @@ class SnapshotsVmTest : public ::testing::Test {
     SnapshotsVmTest() {
         // Byte-frozen rows render local time; pin the zone so the frozen
         // literals below are deterministic on every machine.
+#ifdef _WIN32
+        _putenv_s("TZ", "UTC");
+        _tzset();
+#else
         setenv("TZ", "UTC", 1);
         tzset();
+#endif
     }
 
     void seedAndRefresh(std::vector<core::SnapshotMeta> metas) {

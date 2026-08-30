@@ -133,7 +133,7 @@ bool dropLegalSuffix(std::string& vendor) {
     while (!vendor.empty() &&
            (vendor.back() == ',' || std::isspace(static_cast<unsigned char>(vendor.back())) != 0))
         vendor.pop_back();
-    const auto* hit = std::ranges::find_if(kLegalSuffixes, [&vendor](std::string_view suffix) {
+    const auto hit = std::ranges::find_if(kLegalSuffixes, [&vendor](std::string_view suffix) {
         if (vendor.size() <= suffix.size()) return false;  // never strip to nothing
         const char boundary = vendor[vendor.size() - suffix.size() - 1];
         return (boundary == ' ' || boundary == ',') &&

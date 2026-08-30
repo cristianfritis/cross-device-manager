@@ -74,11 +74,25 @@ No state SHALL be conveyed by color alone in either UI. The TUI SHALL honor `NO_
 - **THEN** it is identifiable by the marker glyph on its list row together with the criticality word in the detail pane on the same screen, with no color dependence
 
 ### Requirement: Consistent device presentation
-Device presentation cosmetics SHALL be unified across UIs: bus names rendered through one shared `displayBus()` helper (single casing everywhere), and the modalias cosmetic defect fixed so identity fields render consistently.
+Device presentation cosmetics SHALL be unified across every surface — graphical, terminal, and command-line — and SHALL be produced by the shared presentation helpers rather than reimplemented per surface. Bus names SHALL be rendered through the one shared bus-display helper, giving a single casing everywhere. Identity fields SHALL render consistently and SHALL NOT expose a platform-specific mechanism name to the user.
+
+A surface SHALL NOT assume that any particular identity or descriptive property is present, because which properties a device carries depends on the platform backend that enumerated it. A property the backend did not supply SHALL be omitted from the rendering rather than shown as an empty, placeholder, or literal-unknown row, so that a device enumerated by a backend with fewer properties reads as a smaller correct record rather than a damaged one.
 
 #### Scenario: Bus casing matches
 - **WHEN** the same device is shown in TUI and GUI lists and details
 - **THEN** the bus name uses identical casing and wording in all four places
+
+#### Scenario: Command-line output matches the other surfaces
+- **WHEN** a device's name and bus are rendered by a command-line inventory verb
+- **THEN** they are byte-identical to what the graphical and terminal surfaces render for the same device
+
+#### Scenario: Absent properties are omitted, not blanked
+- **WHEN** a device's record lacks properties that devices on another platform carry
+- **THEN** the detail rendering omits those rows entirely, and no row shows an empty value, a dash, or the word unknown in their place
+
+#### Scenario: No platform mechanism names leak into the UI
+- **WHEN** any device list row, detail pane, or command-line inventory line is rendered on any platform
+- **THEN** no label or value names a platform-specific enumeration mechanism, and the identity field is presented under a platform-neutral label
 
 ### Requirement: Backend diagnostics are keyboard-reachable
 The expandable diagnostic that carries raw backend detail SHALL be operable without a pointer on both surfaces, and SHALL carry an accessible name in the GUI. A hover-only affordance such as a bare tooltip is not sufficient, because it leaves the diagnostic unreachable for keyboard and assistive-technology users. The affordance SHALL be discoverable: labelled in the GUI, and present in the TUI's shortcut legend while a degraded backend is being reported.

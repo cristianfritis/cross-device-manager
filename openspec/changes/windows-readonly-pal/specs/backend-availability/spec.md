@@ -63,6 +63,8 @@ A degraded backend SHALL be presented as information by default. It SHALL escala
 ### Requirement: Reads remain usable while a backend is degraded
 A degraded backend SHALL NOT blank, replace, or block the regions of a view that other sources can still populate. Mutation controls that the unavailability blocks SHALL remain visible and SHALL explain their unavailability using the same shared sentence rather than a separately authored string.
 
+Blocking SHALL apply to the verb's INVOCATION as well as to its presentation: an attempt SHALL be refused locally with the shared sentence rather than dispatched to the unavailable backend and reported through whatever error that backend eventually returns. This is what makes the rule hold on a surface where a control has no disabled visual state — a keyboard shortcut is still a mutation control, and one that fires while its toolbar equivalent is disabled is the same verb behaving two ways in the same state.
+
 This applies to a backend that exists on the running platform. A verb whose backing capability has no implementation on the running platform is not blocked but inapplicable: it SHALL be hidden rather than shown disabled, because a disabled control asserts that the verb could run under some reachable condition, and here none exists. The distinction SHALL be drawn from the platform capability descriptor, not from a failed call.
 
 #### Scenario: Degraded daemon leaves reads intact
@@ -72,6 +74,10 @@ This applies to a backend that exists on the running platform. A verb whose back
 #### Scenario: Blocked verb reuses the shared sentence
 - **WHEN** a verb is disabled because its backend is unavailable
 - **THEN** the reason presented for the disabled verb is the shared sentence for that backend, not a separate wording
+
+#### Scenario: A verb with no disabled state refuses rather than dispatching
+- **WHEN** a surface offers a mutation as a keyboard shortcut and the backend behind that mutation is unavailable
+- **THEN** the key is refused where it is pressed, the shared sentence for that backend is presented, and no request reaches the unavailable backend
 
 #### Scenario: Unsupported verb is absent rather than disabled
 - **WHEN** a view renders on a platform whose capability descriptor reports the verb's backing capability as not implemented
