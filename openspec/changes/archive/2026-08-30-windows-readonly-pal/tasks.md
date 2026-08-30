@@ -185,32 +185,97 @@ behaviours.
 - [x] 11a.3 Order the gate AFTER each site's existing guard verdict, so a critical-device or placeholder-row refusal keeps outranking the availability note — it is the more specific reason and the one that survives the daemon coming back
 - [x] 11a.4 Publish the shared sentence VERBATIM, with no verb prefix, so the spec's "SHALL NOT reword, prefix, or suffix it" holds on this path too
 - [x] 11a.5 Record the invocation half of the rule in the `backend-availability` delta and main specs — blocking applies to a verb's invocation, not only its presentation — with a scenario for a surface whose control has no disabled visual state
-- [ ] 11a.6 Owner re-run of 11.4 against the new build: with `devmgrd` stopped, each key above prints the shared sentence on the status line and dispatches nothing; `r` and `h` still work
+- [x] 11a.6 Owner re-run of 11.4 against the new build: with `devmgrd` stopped, each key above prints the shared sentence on the status line and dispatches nothing; `r` and `h` still work — VERIFIED in one daemon-up-to-down TUI session with a selected `SnapshotHealth::Ok` fixture. All nine gated keys (`e/U/B`, `l/u`, `s/r/d/x`) printed the exact shared sentence and emitted zero product IPC; device `r` performed its allowed read and snapshot `h` changed the history rendering locally with zero IPC. Evidence: `.pi/vm-artifacts/minimal/11a6-final-results/results.json`
 
 ## 12. Windows verification gate (owner)
 
 Automated Windows CI proves compilation only. These rows are the behavioural
 gate and cannot be satisfied by a green run.
 
-**Partial verification run 2026-08-29 on the `win10-agent` VM (Windows 10.0.19044 /
-21H2, VS 2022 BuildTools, Qt `C:\Qt\6.10.3\msvc2022_64`, vcpkg at the CI-pinned
-commit).** The full Windows target (core, app, platform/windows, gui, cli) compiles
-and links. `ctest` = 456/458; the two are environment-only — `devmgr_gui_selftest`
-needs `qoffscreen.dll` (passes with the full Qt install CI uses → "self-test rows: 88")
-and the CTest discovery step needs Qt on `PATH`; run directly `devmgr_gui_tests` is
-100/100 and `DeviceServiceDelta` (the group-1a fix) is 6/6. Two findings below.
+**Verification runs 2026-08-29 and 2026-08-30 on the `win10-agent` VM (Windows
+10.0.19044 / 21H2, VS 2022 BuildTools, Qt `C:\Qt\6.10.3\msvc2022_64`, vcpkg at the
+CI-pinned commit).** The full Windows target (core, app, platform/windows, gui,
+cli) compiles and links; local CTest is **557/557**. The first run read 456/458,
+both environment-only: `devmgr_gui_selftest` needed `qoffscreen.dll` and the CTest
+discovery step needed Qt on `PATH`. Neither was a product defect and both are
+resolved. 12.11 below is the roll-up; the three code findings this gate turned up
+are 12a, 12b, and — via 13.5 — 13a.
 
-- [ ] 12.1 GUI starts on real Windows and Devices lists devices whose names, vendors, and buses match Device Manager for the same machine — GUI starts; Devices lists 88 devices with real Windows names / bus classes; **name/vendor/bus vs Device Manager on the same box is the owner's visual compare**
-- [ ] 12.2 Plug a USB device: it appears without a manual refresh. Unplug it: it disappears. Repeat at least three times — needs USB passthrough to the VM + the owner
-- [ ] 12.3 Close the application while a device is being plugged and unplugged repeatedly; confirm no hang and no crash on exit (this is the D8 hazard) — needs USB passthrough + the owner
-- [ ] 12.4 Modules, Updates, and Snapshots each show their unsupported sentence; each tab is reachable and its explanation readable with the keyboard alone — VERIFIED: all three show their unsupported sentence in place of content (no list, error, retry); each tab reached with Ctrl+Tab alone. **Minor:** on Modules/Updates/Snapshots the sentence renders inside the fixed-width left list column and is horizontally clipped — readable only by scrolling. Owner to confirm this is acceptable or file a follow-up.
-- [ ] 12.5 Devices toolbar shows only `Refresh`; no disabled mutating verb and no orphan separator is present anywhere — VERIFIED from screenshot: toolbar is `Refresh` only, no greyed verbs, no orphan separator
-- [ ] 12.6 `devmgr devices list` and `devmgr devices show` produce correct output; `--json` parses; names and buses match what the GUI shows — VERIFIED: `devices list` = 88 rows (name / [bus] / status / id); `devices show` prints the 8 shared detail fields; `--json` parses (ConvertFrom-Json OK) with `label`/`value` pairs
-- [ ] 12.7 Device detail omits rows for properties Windows does not report, rather than showing blank or unknown values — mechanism verified (mapper `setProperty` early-returns on empty; unit tests 7.10). Every device on this VM populates all 8 fields, so no live omit example was reachable; owner to spot-check a device Windows under-describes
-- [ ] 12.8 Read the detail pane for several devices and confirm every row is labelled in product-facing words — Manufacturer, Driver Version, Device Instance ID, Hardware IDs, Class — with no `DEVPKEY`-shaped text anywhere on screen or in `devices show --json` — VERIFIED via CLI `devices show` + `--json` across several devices: labels are exactly the shared vocabulary; no `DEVPKEY_`/`DEVPROP` text. (`PCI\VEN_...` strings are the hardware-id *values*, correctly under the "Hardware IDs" / "Device Instance ID" labels.)
-- [ ] 12.9 Confirm a device with a problem condition shows its state through the shared status colour and word, with no extra status row — no device with a problem condition exists in this clean VM (`System board` is `Unknown`, not a fault). Owner to verify on a machine that has one, or induce one
+- [x] 12.1 GUI starts on real Windows and Devices lists devices whose names, vendors, and buses match Device Manager for the same machine — **VERIFIED by visual comparison on `win10-agent`**: the native Device Manager and `devmgr-gui` were viewed on the same box; representative PCI/USB device categories, names, vendors, buses, and the app's detail fields are consistent. Evidence: `.pi/vm-artifacts/windows/12-1-devmgmt-clean.png` and `.pi/vm-artifacts/windows/12-1-device-manager-app-compare.png`
+- [x] 12.2 Plug a USB device: it appears without a manual refresh. Unplug it: it disappears. Repeat at least three times — **VERIFIED by the owner 2026-08-30**, physically, with USB passthrough into the `win10-agent` VM: across repeated plug/unplug cycles the row appeared and disappeared reactively, with no manual `Refresh` and no keypress. This is the Windows half of the reactive-hotplug behaviour 1a.5 verified on Linux, and the live proof of the `CM_Register_Notification` path (D8)
+- [x] 12.3 Close the application while a device is being plugged and unplugged repeatedly; confirm no hang and no crash on exit (this is the D8 hazard) — **VERIFIED by the owner 2026-08-30**, physically, with USB passthrough into the `win10-agent` VM: the application was closed during repeated plug/unplug activity and exited cleanly — no hang, no crash. The D8 shutdown contract holds against real callbacks in flight: `stop()` calls `CM_Unregister_Notification` off the callback thread, it blocks until in-flight callbacks return, and the generation counter keeps a late callback off torn state
+- [x] 12.4 Modules, Updates, and Snapshots each show their unsupported sentence; each tab is reachable and its explanation readable with the keyboard alone — VERIFIED: all three show their unsupported sentence in place of content (no list, error, retry); each tab reached with Ctrl+Tab alone. The clipping this row found — the sentence rendered inside the fixed-width left list column and was readable only by scrolling — went to the owner as a decision on 2026-08-30 and the verdict was **fix it now, do not accept it**: on these three tabs the unsupported sentence IS the content, so a clipped sentence is a clipped tab. Fixed under 12b — the banner half and the list-row half both, each verified by rendering the Windows-shaped descriptor on Linux and reading the result
+- [x] 12.5 Devices toolbar shows only `Refresh`; no disabled mutating verb and no orphan separator is present anywhere — VERIFIED from screenshot: toolbar is `Refresh` only, no greyed verbs, no orphan separator
+- [x] 12.6 `devmgr devices list` and `devmgr devices show` produce correct output; `--json` parses; names and buses match what the GUI shows — VERIFIED: `devices list` = 88 rows (name / [bus] / status / id); `devices show` prints the 8 shared detail fields; `--json` parses (ConvertFrom-Json OK) with `label`/`value` pairs
+- [x] 12.7 Device detail omits rows for properties Windows does not report, rather than showing blank or unknown values — VERIFIED against under-described live devices `vport0p1` and `vport0p2`: `devices show`/`--json` emitted only Hardware IDs and Device Instance ID, with no blank or unknown detail rows. Evidence: `.pi/vm-artifacts/windows/windows-cli-acceptance/`
+- [x] 12.8 Read the detail pane for several devices and confirm every row is labelled in product-facing words — Manufacturer, Driver Version, Device Instance ID, Hardware IDs, Class — with no `DEVPKEY`-shaped text anywhere on screen or in `devices show --json` — VERIFIED via CLI `devices show` + `--json` and owner-reviewed GUI detail pane across several devices: labels are exactly the shared vocabulary; no `DEVPKEY_`/`DEVPROP` text. (`PCI\VEN_...` strings are the hardware-id *values*, correctly under the "Hardware IDs" / "Device Instance ID" labels.) Evidence: `.pi/vm-artifacts/windows/12a3-bare-launch-owner-final-clean.png`
+- [x] 12.9 Confirm a device with a problem condition shows its state through the shared status colour and word, with no extra status row — **VERIFIED on real hardware 2026-08-30**, both arms of `statusFor()`, against the passed-through card reader `USB\VID_14CD&PID_1212\121220160204` (`USB Mass Storage Device`, driver `USBSTOR` 10.0.19041.1288). Evidence: `.pi/vm-artifacts/windows/12-9-disabled-evidence/01-disabled-22.json` and `.pi/vm-artifacts/windows/12-9-error-evidence/02-error-service-fault.json`.
+
+    | Arm | Induced | Windows problem code | devmgr status |
+    | --- | --- | --- | --- |
+    | switch-off | `Disable-PnpDevice` | **22** `CM_PROB_DISABLED` | `Disabled` |
+    | fault | driver service `Start=4` | **32** `CM_PROB_DISABLED_SERVICE` | `Error` |
+
+    Code 32 is the better proof the driver-package route would have given: the mapper's rule is "22 or 29 is a switch-off, EVERY other problem is a fault", so a code the change never anticipated resolving to `Error` exercises the rule rather than a hard-coded 28.
+
+    **The two records differ in exactly one line.** Diffed here: `"status": "Disabled"` versus `"status": "Error"`, and nothing else — same `id` `dev-5efd18cf3d60e9fa`, same identity, same eight detail labels. That is the row's claim proved directly: the shared taxonomy carries the state and the fault changes nothing else in the record. Both records carry Manufacturer / Driver / Driver Version / Driver Provider / Driver Date / Class / Hardware IDs / Device Instance ID and **no label matching `Status|Problem|Code` and none matching `DEVPKEY|DEVPROP|CM_PROB`** — re-checked here against the files, not taken on the script's word. The stable `id` across the fault also confirms identity is derived from the instance id and not from the driver.
+
+    One clarification the row's own wording needs: **there is no status colour to check on Windows.** The GUI carries device status as the WORD in the detail pane's single unconditional `Status:` row (`app/src/device_detail_vm.cpp:113`) and adds no colour — docs/DESIGN.md §9's GUI colour exception — and the TUI, where the role colour and glyph live, is not built on Windows.
+
+    Getting here took four attempts and cost two script defects and one wrong assumption, all recorded because the next person to run this gate will hit them: (1) the first target, a VirtIO serial port, cannot be disabled at all — `Disable-PnpDevice` returns `0x80041001` with no explanation — so `-ListCandidates` now decodes `DEVPKEY_Device_Capabilities` and says which branches each device can serve and why not; (2) the reader runs an inbox `usbstor.inf` with no `oemNN.inf`, so the driver-package route was a dead end and `-ErrorViaService` was added to fault the device through its driver service instead, with the original `Start` saved and restored; (3) `Assert-SharedStatus` crashed with `The property 'Count' cannot be found on this object` on a device that was behaving CORRECTLY — under `Set-StrictMode` a `Where-Object` matching nothing yields `$null` and one matching once yields a scalar — fixed with `@()` and verified by lifting the function verbatim into a PowerShell container and exercising six shapes including the zero-match and one-match cases; (4) the restore failed and the script still exited 0, which is the one outcome a gate script must never produce — the restore is now asserted rather than printed, verifies the service `Start` actually went back, cycles the devnode and falls back to a physical replug, and a machine left faulted fails the run. The owner restored `USBSTOR` by hand and confirmed the VM healthy: F: back, problem code 0, PnP OK, DevMgr `Active`
 - [x] 12.10 Confirm the owner machine's Qt version matches the version CI pins (task 10.4), and record both — **RESOLVED by moving the pin.** Acceptance machine (`win10-agent`): **Qt 6.10.3**, `C:\Qt\6.10.3\msvc2022_64`. CI pin: **6.10.3** (`.github/workflows/ci.yml`), was 6.8.3. `docs/WINDOWS-DEVELOPMENT.md` and `docs/REPRODUCIBILITY.md` updated to match; the LTS rationale is replaced with the real one (6.10.3 is a feature release — the pin follows the acceptance gate, and the cost of leaving the 6.8 LTS branch is stated). `design.md` D14's "the LTS this change pins" corrected. The 1809 GUI floor is unchanged: it holds for every Qt 6 release.
-- [ ] 12.11 Record the result of every row above with the Windows build number and version tested, confirming it is at or above Windows 10 1607 — tested on **Windows 10.0.19044 (21H2)** — above the 1607 backend/CLI floor (14393) and the 1809 GUI floor (17763)
+- [x] 12.11 Record the result of every row above with the Windows build number and version tested, confirming it is at or above Windows 10 1607
+
+**Machine.** `win10-agent`, **Windows 10.0.19044 (21H2)** — above the 1607
+backend/CLI floor (14393) and above the 1809 GUI floor (17763), so both declared
+floors are exercised by a build that clears them, not merely asserted. Toolchain:
+VS 2022 BuildTools, Qt `C:\Qt\6.10.3\msvc2022_64`, vcpkg at the CI-pinned commit
+— the same Qt and the same MSVC major the CI job now pins (12.10, 13a.1), so the
+build gate and this behavioural gate agree on the compiler and the framework.
+
+**Automated, on that machine.** Full Windows target (core, app, platform/windows,
+gui, cli) compiles and links. Local CTest **557/557 passed**, including
+`devmgr_gui_version` and `devmgr_gui_selftest` (12a.3) and `DeviceServiceDelta`
+6/6 (the group-1a hotplug fix). The earlier 456/458 reading was the same tree
+before the Qt `PATH` and `qoffscreen.dll` environment faults were resolved; both
+were environment-only and neither was a product defect.
+
+**Rows.**
+
+| Row | Result | How |
+| --- | --- | --- |
+| 12.1 device list matches Device Manager | PASS | owner visual compare, both apps on the same box |
+| 12.2 USB hotplug add/remove, ≥3 cycles | PASS | owner, physical, USB passthrough 2026-08-30 |
+| 12.3 close during plug/unplug — no hang, no crash | PASS | owner, physical, USB passthrough 2026-08-30 |
+| 12.4 unsupported sentence on the three tabs, keyboard-reachable | PASS | owner; found the clipping → fixed under 12b |
+| 12.5 Devices toolbar is `Refresh` only | PASS | owner screenshot |
+| 12.6 `devices list` / `show` / `--json` | PASS | 88 rows; 8 shared fields; `ConvertFrom-Json` OK |
+| 12.7 absent properties omitted, not blanked | PASS | live under-described devices `vport0p1`, `vport0p2` |
+| 12.8 detail labels are product words, no `DEVPKEY` | PASS | CLI + owner-reviewed GUI detail pane |
+| 12.9 problem condition through the shared taxonomy | PASS | live codes 22→`Disabled` and 32→`Error`; records differ in one line |
+| 12.10 owner Qt version vs the CI pin | PASS | both 6.10.3; resolved by moving the pin |
+| 12a.3 no console window on a bare GUI launch | PASS | owner-reviewed launch, `WIN32_EXECUTABLE` |
+| 12b.4 banner sentence wraps and reads, both states | PASS | rendered and read on Linux 2026-08-30 |
+| 12b.5-8 the list-row half of the clipping | PASS | ProseRowDelegate; h-scroll 363/126/76 → 0 |
+
+**Defects this gate found, all fixed in-change.** The hotplug removal
+correlation bug (1a — latent since Phase 2, on Linux too), the GUI linking as a
+console-subsystem executable (12a), the Qt version mismatch between CI and the
+acceptance machine (12.10), the unpinned CI runner image (13a), and the clipped
+unsupported sentence (12b). Every one of them is a thing a green compile-only CI
+run reports as success, which is the argument for this gate existing.
+
+**Every row above is now closed.** The gate is complete: 12.1-12.11, 12a and 12b
+all pass, on Windows 10.0.19044 (21H2), above both declared floors.
+
+**What this gate was worth.** It found six defects that a green compile-only CI
+reports as success — the hotplug removal correlation bug (1a, latent since Phase
+2 and present on Linux too), the GUI linking as a console-subsystem executable
+(12a), the Qt version mismatch between CI and the acceptance machine (12.10), the
+unpinned CI runner image (13a), the clipped unsupported sentence (12b), and, in
+12.9, two defects in the gate's own tooling. Not one of them is visible to a
+compiler. That is the argument for a behavioural gate existing at all, and it is
+why `acceptance-suite` now requires one per platform.
 
 ### 12a. Windows GUI is a console-subsystem executable (found 2026-08-29)
 
@@ -222,15 +287,48 @@ assumption carried to Windows (task 9.1 territory).
 
 - [x] 12a.1 Make `devmgr-gui` a `WIN32_EXECUTABLE` on Windows only, keeping it a normal console binary on Linux — `gui/CMakeLists.txt` sets the property under `if(WIN32)`. Qt supplies the `WinMain` shim through `Qt6::Core`, which links `Qt6::EntryPointPrivate` behind a `$<TARGET_PROPERTY:WIN32_EXECUTABLE>` generator expression, so no extra link is needed; the Windows CI job (13.5) is what proves that
 - [x] 12a.2 Preserve `--version` and `--self-test` terminal output (a WIN32 app has no attached stdout when run from a shell): `AttachConsole(ATTACH_PARENT_PROCESS)` at startup when a parent console exists, or an equivalent, before any `std::cout`/`std::cerr` — `gui/src/main.cpp` `attachParentConsole()`, called first thing in `main`. It checks `GetStdHandle(STD_OUTPUT_HANDLE)` FIRST and returns if a launcher already supplied one: CTest and shell redirects hand the process a pipe, and reopening `CONOUT$` over it would send the output to the console instead of to the caller reading the pipe. Only with no output handle does it attach the parent console, re-`freopen_s` the three C streams and `sync_with_stdio(true)` so `cout`/`cerr` rebind. From Explorer there is no parent console, `AttachConsole` fails, and the program stays windowed
-- [ ] 12a.3 Confirm `devmgr_gui_version` and `devmgr_gui_selftest` CTest tests still pass, and that a bare GUI launch shows no console window — Linux half done: full `ctest` 853/853 with both tests green (the property is a no-op there, which is the point). The Windows half — both tests green under CI and no `conhost` window on a bare launch — is 13.5 plus one owner look
+- [x] 12a.3 Confirm `devmgr_gui_version` and `devmgr_gui_selftest` CTest tests still pass, and that a bare GUI launch shows no console window — Linux: full `ctest` 853/853, both green (the property is a no-op there, which is the point). Windows: local CTest **557/557 passed**, `devmgr-gui --version` and `--self-test` passed, and a bare `devmgr-gui.exe` launch was owner-reviewed on `win10-agent` with no console/conhost window visible. Evidence: `.pi/vm-artifacts/windows/12a3-bare-launch-owner-final-clean.png`
+
+### 12b. The unsupported sentence was clipped in the tab's list column (found 2026-08-30)
+
+On Modules / Updates / Snapshots a read-only platform has no list: the shared
+sentence is pushed as the tab's single LIST ROW (`ModulesVM::pushEmptyStateRow`
+and its Updates/Snapshots twins) and also appears in the banner above it. Both
+sat in the splitter's fixed-width left column and both ran off the edge.
+
+Measured on Linux against `ReadOnlyFixture` — the synthetic descriptor that
+reproduces the Windows shape exactly, same `MainWindow`, same widgets — at a
+1100x700 window, left column 254 px:
+
+| Tab | item width, before → after | h-scroll max, before → after | banner wrapped, before → after |
+| --- | --- | --- | --- |
+| Modules | 617 px → 249 px | 363 → 0 | no → yes |
+| Updates | 380 px → 249 px | 126 → 0 | no → yes |
+| Snapshots | 330 px → 249 px | 76 → 0 | no → yes |
+
+So there were TWO clipped elements, not one, and the row the owner actually
+described — "the sentence renders inside the fixed-width left list column and is
+horizontally clipped, readable only by scrolling" — is the LIST ROW: a
+`QListView` item does not wrap, and the view answers an over-wide item with a
+horizontal scrollbar.
+
+- [x] 12b.1 Word-wrap every availability banner sentence label — `makeAvailabilityBanner()` set `setWordWrap(true)` on the *diagnostic* label but never on the *sentence* label beside it. Fixed there, which covers Devices and Modules; `updatesBannerLabel_` and `snapshotsBannerLabel_` are hand-built outside that factory (`main_window.cpp:487,554`) and had never had the wrap at all, so they got it too. All four banners now wrap, which is also what removes the inconsistency of two banners behaving one way and two the other
+- [x] 12b.2 Green Linux build + full unit suite, unchanged results — `cmake --build build -j24` clean, `ctest` **853/853 passed, 0 failed**
+- [x] 12b.3 Re-run the format and clang-tidy gates over the changed file — `scripts/check-format.sh --container`: **OK, 284 file(s) clean** under clang-format-18. Container clang-tidy over all 81 translation units: **exit 0**, `Suppressed 3007921 warnings (3007106 in non-user code, 815 NOLINT)` — the two numbers account for the total, so no user diagnostic was emitted. Byte-identical to the 13.4 reading, so 13.4 still stands over the changed tree
+- [x] 12b.4 Verify the banner half on Linux — VERIFIED here 2026-08-30 by rendering `MainWindow` offscreen and reading the images. Degraded Linux state (`devmgrd` unreachable, Devices and Snapshots): the shared sentence wraps to two lines, stays bold for the Warning role, keeps its `Details ▾` disclosure beside it, the disclosure row below is unmoved, and the device rows are untouched with no horizontal scrollbar. Read-only state: all three banners wrap and read in full
+- [x] 12b.5 Wrap the list row, and ONLY the list row — owner decision 2026-08-30, after the measurement above showed the clipped element was the row, not the banner. `main_window.cpp:691` deliberately sets `setWordWrap(false)` plus `ElideRight` on all four views per docs/DESIGN.md §2.4 (rows elide; the full value stays reachable in the detail pane), and that rule is right for a data row and wrong for this one: the unsupported sentence has no detail-pane entry to be reachable in, so eliding it would leave it unreadable. New `gui::ProseRowDelegate` (`gui/src/prose_row_delegate.{hpp,cpp}`) wraps a row the model marks with `kProseRowRole` and defers to the base delegate for every other row; the three list models publish that role as `vm_.unsupportedContent().has_value()`, which is exact because a wholly unsupported tab has no data and `pushEmptyStateRow()` makes the sentence its single row. Installed on Modules / Updates / Snapshots only — Devices always has a real enumerator, so it has no prose row. The elide loop is untouched, so §2.4 still governs every data row
+- [x] 12b.6 Verified on Linux against `ReadOnlyFixture`, the descriptor that reproduces the Windows shape, at a 1100x700 window — before → after, per tab: h-scroll maximum **363 → 0** (Modules), **126 → 0** (Updates), **76 → 0** (Snapshots); item width 617/380/330 px → 249 px against a 254 px viewport; row height 14 px → 46/32/32 px, i.e. the sentence wrapped to three/two/two lines and reads in full with no scrolling. The images were rendered and read, not just measured. The control holds too: a module row 76 characters wide stays `prose=false`, one line high, elided, with its full value in the detail pane
+- [x] 12b.7 Regression tests, both halves — `UnsupportedSentenceWrapsAndNeedsNoHorizontalScroll` asserts the role, `sizeHintForColumn <= viewport`, `horizontalScrollBar()->maximum() == 0` and a wrapped row height on all three tabs; `LongDataRowStillElidesRatherThanWrapping` asserts a long data row is not prose, stays one line, and keeps `ElideRight`. Each guards its own premise, so neither can pass vacuously if the sentence later becomes short enough to fit
+- [x] 12b.9 Amend `ui-accessibility` so the next implementer does not re-introduce this — the requirement the code cited to justify `setWordWrap(false)` on all four views is "Layout minimums and long-value handling", and as written it says long values SHALL elide with the full value reachable in the detail surface. That is right for a data row and silent about a row that IS the view's explanation, so applying it there was a defensible misreading of a spec that did not say enough. The delta now states the carve-out: the elide rule governs DATA rows, an explanatory row standing in place of a list SHALL render in full and SHALL NOT require horizontal scrolling or elision, with a scenario for each side — the sentence wrapping in a narrow column, and a data row in the same list still eliding. Written after 13.6's sync, so it re-opens the sync
+- [x] 12b.8 Green Linux build + full unit suite after the delegate — `ctest` **855/855 passed, 0 failed** (853 plus the two new). Container format gate: **OK, 286 file(s) clean** under clang-format-18. Container clang-tidy over all 82 translation units (81 plus `gui/src/prose_row_delegate.cpp`): **exit 0**, `Suppressed 3068074 warnings (3067256 in non-user code, 818 NOLINT)` — the two numbers account for the total, so no user diagnostic was emitted. NOLINT moved 815 → 818: the three `new ProseRowDelegate(view)` expressions, which sit inside the constructor's existing `NOLINTBEGIN(cppcoreguidelines-owning-memory)` region with every other Qt parent-owned widget, so the delta is accounted for rather than merely tolerated
 
 ## 13. Gates
 
 - [x] 13.1 `openspec validate windows-readonly-pal --strict` passes
 - [x] 13.2 Container unit tests green — re-run 2026-08-29 after 11a/12a: `docker compose -f test/docker-compose.yml run --rm unit` = **854/854**, 0 failed (`SysfsControllerTest.UnwritableAttrIsIo` skipped — it needs a non-root user, as always in this image)
 - [x] 13.3 `scripts/check-format.sh --container` passes under clang-format-18 — re-run 2026-08-29 after 11a/12a: **OK, 284 file(s) clean** under `/usr/bin/clang-format-18`. No divergence from the host clang-format 22 pass, which had only reformatted the newly added lines
-- [x] 13.4 Container clang-tidy gate exits 0 with no user diagnostics — re-run 2026-08-29 after 11a/12a: **exit 0** over all 81 translation units. `Suppressed 3007921 warnings (3007106 in non-user code, 815 NOLINT)` — the two numbers account for the total, so no user diagnostic was emitted (the exit code alone is not the check here: the gate is piped, so the count line is what proves it)
-- [ ] 13.5 Windows CI job green
+- [x] 13.4 Container clang-tidy gate exits 0 with no user diagnostics — final re-run 2026-08-30 after 12b, over all 82 translation units: **exit 0**, `Suppressed 3068074 warnings (3067256 in non-user code, 818 NOLINT)` — the two numbers account for the total, so no user diagnostic was emitted (the exit code alone is not the check here: the gate is piped, so the count line is what proves it). The 2026-08-29 reading after 11a/12a was 81 units and `Suppressed 3007921 (3007106 non-user, 815 NOLINT)`; the whole delta is `prose_row_delegate.cpp` and its three NOLINT-covered `new` expressions (12b.8)
+- [x] 13.5 Windows CI job green — run [33282695317](https://github.com/cristianfritis/cross-device-manager/actions/runs/33282695317) on `feature/phase_9`, 2026-08-30. Both jobs succeeded. `windows-build-and-test` on the newly pinned `windows-2022`: Provision Qt (pinned) / Provision vcpkg (pinned commit) / Configure / Build (core, app, platform/windows, gui, cli) / Unit tests / CLI inventory gate all green — so the `WIN32_EXECUTABLE` change links (Qt's `WinMain` shim arrives through `Qt6::Core` as expected, 12a.1) and Qt 6.10.3 provisions and builds (12.10). `build-and-test` green too, including the container clang-tidy and clang-format steps. The previous run [33282332775](https://github.com/cristianfritis/cross-device-manager/actions/runs/33282332775) is the `windows-latest` failure that 13a fixes. Step conclusions are the evidence here; the raw ctest counts are not, because `gh run view --log` returns HTTP 403 for this token
 
 ### 13a. The Windows CI runner image was not pinned (found 2026-08-29)
 
@@ -246,5 +344,5 @@ own toolchain row declared `windows-latest` AS the value, which is not a value.
 - [x] 13a.1 Pin `runs-on` to `windows-2022`, the image GitHub names as the VS 2022 fallback, with the reason recorded beside it. This also makes CI agree with the acceptance machine's VS 2022 BuildTools — the same argument that moved the Qt pin in 12.10, pointed at the compiler
 - [x] 13a.2 Correct the `docs/REPRODUCIBILITY.md` toolchain row: the declared value is an image label with a fixed toolchain, not `latest`
 - [x] 13a.3 Note in `docs/WINDOWS-DEVELOPMENT.md` that the preset requires a VS 2022 install, so a VS 2026 machine will not configure it
-- [ ] 13a.4 Moving to Visual Studio 2026 is deliberately NOT done here: MSBuild, the MSVC toolchain, the .NET SDK and the Windows SDK headers all move together, and CI and the acceptance machine must move in one step. Own change
-- [x] 13.6 Sync delta specs to main specs and create the three new main specs
+- [x] 13a.4 Moving to Visual Studio 2026 is deliberately NOT done here: MSBuild, the MSVC toolchain, the .NET SDK and the Windows SDK headers all move together, and CI and the acceptance machine must move in one step. Own change — **CONFIRMED by the owner 2026-08-30: keep it separate.** The deliverable of this row is the decision, and it is now recorded in three places that a future reader will actually hit: the `runs-on: windows-2022` pin carries its reason beside it (13a.1), `docs/REPRODUCIBILITY.md` declares the image label as a fixed-toolchain value rather than `latest` (13a.2), and `docs/WINDOWS-DEVELOPMENT.md` states that the preset needs a VS 2022 install so a VS 2026 machine will not configure it (13a.3). Nothing in `windows-readonly-pal` blocks on the migration; it is a toolchain change with its own gate — CI, the acceptance VM and `docs/REPRODUCIBILITY.md` moving in one step — and belongs in its own OpenSpec change, not folded into a PAL change as a side effect. `windows-2022` is supported for three years, so there is no deadline forcing it into this one
+- [x] 13.6 Sync delta specs to main specs and create the three new main specs — re-run at close-out after 12b.9 added a `ui-accessibility` carve-out that postdates the first sync

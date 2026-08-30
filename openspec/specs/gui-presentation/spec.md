@@ -16,7 +16,7 @@ never replace it.
 ### Requirement: Toolbar composition follows the active tab
 The GUI toolbar SHALL present only the verbs belonging to the active tab. A verb owned by another tab SHALL be hidden (`QAction::setVisible(false)`), not merely disabled, so that a disabled toolbar action always means *this verb applies here and cannot run right now*. The toolbar region itself SHALL remain a single stable toolbar; per-tab toolbars, stacked toolbars, and rebuilding the toolbar on tab change are not permitted.
 
-Tab ownership determines which verbs are candidates. A candidate whose backing capability has no implementation on the running platform SHALL NOT be a member of its tab's verb set at all. Platform membership SHALL be decided once from the platform capability descriptor, and SHALL NOT be re-derived per frame or inferred from a failed call.
+Tab ownership determines which verbs are *candidates*. A candidate whose backing capability has no implementation on the running platform SHALL NOT be a member of its tab's verb set at all, so the per-tab sets below describe a platform that implements every capability. Platform membership SHALL be decided once from the platform capability descriptor, and SHALL NOT be re-derived per frame or inferred from a failed call.
 
 The per-tab verb sets SHALL be:
 
@@ -28,11 +28,11 @@ The per-tab verb sets SHALL be:
 | Snapshots | `Create Snapshot…`, `Restore Snapshot…`, `Diff Snapshot`, `History`, `Delete Snapshot` |
 
 #### Scenario: Standing on Devices
-- **WHEN** the Devices tab is active
+- **WHEN** the Devices tab is active on a platform implementing every capability
 - **THEN** the visible toolbar actions are exactly `Refresh`, the enable/disable verb, `Bind driver…` and `Unbind driver (advanced)`, in that order, and no Modules, Updates or Snapshots verb is visible
 
 #### Scenario: Standing on Snapshots
-- **WHEN** the Snapshots tab is active
+- **WHEN** the Snapshots tab is active on a platform implementing every capability
 - **THEN** the visible toolbar actions are exactly `Create Snapshot…`, `Restore Snapshot…`, `Diff Snapshot`, `History` and `Delete Snapshot`, in that order, and `Refresh` is not visible
 
 #### Scenario: Switching tabs re-composes the toolbar
@@ -50,7 +50,7 @@ The per-tab verb sets SHALL be:
 ### Requirement: One function owns action presentation
 A single presentation function SHALL own visibility, enablement, dynamic text and tooltip for every toolbar action, and SHALL be the only place that sets them. It SHALL run on every input that can change them: tab change, selection change, model reset, backend-availability change, and operation start/completion. Platform capability is not among those inputs because it cannot change within a process; it SHALL be applied once when the toolbar is constructed, and the presentation function SHALL NOT re-derive it.
 
-That function SHALL NOT perform sysfs, libkmod, D-Bus, or filesystem work. It SHALL read only ViewModel and `BackendStatusVM` state already resolved for the current frame, and SHALL NOT author wording for a state the ViewModels or the availability banner already name.
+That function SHALL NOT perform sysfs, libkmod, D-Bus, or filesystem work, and SHALL NOT call any platform backend. It SHALL read only ViewModel and `BackendStatusVM` state already resolved for the current frame, and SHALL NOT author wording for a state the ViewModels or the availability banner already name.
 
 #### Scenario: Presentation is recomputed on every relevant input
 - **WHEN** the active tab, the current selection, the model contents, backend availability, or an in-flight operation changes
@@ -72,7 +72,7 @@ Platform inapplicability and runtime blocking SHALL NOT be conflated. A capabili
 `Dismiss Request` SHALL be visible on the Updates tab only while a dismissible request exists, that condition being read from the ViewModel rather than derived in the GUI.
 
 #### Scenario: Daemon unreachable on the active tab
-- **WHEN** `devmgrd` is unreachable and the Devices tab is active
+- **WHEN** `devmgrd` is unreachable and the Devices tab is active on a platform that implements device control
 - **THEN** the enable/disable verb, `Bind driver…` and `Unbind driver (advanced)` are all still visible, all disabled, and each carries the shared unavailability sentence as its tooltip; `Refresh` remains visible and enabled, reads staying usable while the daemon is down
 
 #### Scenario: Guard refusal stays visible
@@ -86,6 +86,10 @@ Platform inapplicability and runtime blocking SHALL NOT be conflated. A capabili
 #### Scenario: Unsupported capability hides rather than disables
 - **WHEN** the capability descriptor reports a verb's backing capability as not implemented and that verb's tab is active
 - **THEN** the verb is not visible, and no disabled control bearing an unsupported tooltip appears anywhere on the toolbar
+
+#### Scenario: Unreachable and unimplemented are told apart without calling
+- **WHEN** the presentation function decides between hiding and disabling a verb
+- **THEN** it reads the platform capability descriptor and the backend availability state, and it invokes no backend in order to reach the decision
 
 ### Requirement: Separator groups without orphans
 Visible toolbar actions SHALL be separated into the `docs/DESIGN.md` §5.3 groups — refresh, persistent enable/disable, additive commands, destructive commands, advanced commands. When a group is hidden, no leading, trailing, or consecutive visible separator SHALL remain, so a separator is visible only between two visible actions. This SHALL hold when a group is empty because the running platform does not implement its verbs, including when every group on a tab is empty.

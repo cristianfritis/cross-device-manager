@@ -13,7 +13,7 @@ The Windows backend SHALL declare Windows 10 version 1607 as its minimum support
 
 The floor exists because the hotplug notification interface this backend requires is unavailable before that version; the backend SHALL NOT work around it by falling back to an interface with weaker delivery or shutdown guarantees.
 
-The graphical surface SHALL declare a separate, higher minimum of Windows 10 version 1809, because that is the minimum its toolkit officially supports. The supported-platform documentation SHALL state both numbers and SHALL state that between them the command-line surface is supported and the graphical one is not.
+The graphical surface SHALL declare a separate, higher minimum of Windows 10 version 1809, because that is the minimum its toolkit officially supports. The supported-platform documentation SHALL state both numbers and SHALL state that between them the command-line surface is supported and the graphical one is not. A surface SHALL NOT be declared supported on a version its toolkit does not support, even where it would run.
 
 #### Scenario: Build refuses an earlier target
 - **WHEN** the Windows backend is configured to target a Windows version earlier than 10 version 1607
@@ -94,6 +94,10 @@ A Windows device's operational state, including any reported problem condition, 
 - **WHEN** a Windows device reports a problem condition
 - **THEN** its status is one of the shared taxonomy's values, is coloured and labelled by the same shared mapping every other platform uses, and no additional status row appears in its detail
 
+#### Scenario: No second notion of status exists
+- **WHEN** a Windows device's detail fields are examined
+- **THEN** none of them is a status field, because status is carried by the shared model's status value alone
+
 ### Requirement: Bus classification reuses the shared taxonomy
 Windows devices SHALL be classified into the existing shared bus taxonomy by device instance identifier prefix, with no new enumerator values introduced. USB-enumerated devices SHALL classify as USB, PCI-enumerated devices as PCI, ACPI- and root-enumerated devices as the platform bus, and every other prefix as other. The raw prefix SHALL be preserved in the property map.
 
@@ -147,7 +151,11 @@ Because the Windows backend implements no criticality probing, every Windows dev
 
 #### Scenario: Mutation without probing is refused at the specification level
 - **WHEN** a future change proposes enabling any device-mutating verb on Windows
-- **THEN** it is not permitted to ship unless it also supplies a Windows criticality prober
+- **THEN** it is not permitted to ship unless it also supplies a Windows criticality prober, because otherwise the guard would permit disabling a device that is essential to operating the machine
+
+#### Scenario: Absence of probing is recorded, not implied
+- **WHEN** the Windows backend set is created
+- **THEN** the capability descriptor reports criticality probing as not implemented, so the condition is observable rather than inferred from every device appearing ordinary
 
 ### Requirement: Windows presents unsupported views honestly
 On Windows, each view whose backing capability is not implemented SHALL present that backend's shared unavailability sentence for the unsupported kind, at information severity. It SHALL NOT present an empty list without explanation, an error, or a retry affordance that cannot succeed.

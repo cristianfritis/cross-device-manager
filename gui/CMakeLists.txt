@@ -9,6 +9,7 @@ add_library(devmgr_gui STATIC
     src/gui_app.cpp
     src/main_window.cpp
     src/module_list_model.cpp
+    src/prose_row_delegate.cpp
     src/qt_ui_dispatcher.cpp
     src/snapshot_list_model.cpp
     src/update_list_model.cpp)

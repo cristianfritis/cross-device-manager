@@ -23,9 +23,19 @@ Keyboard focus SHALL be visibly indicated at all times in both UIs. GUI interact
 ### Requirement: Layout minimums and long-value handling
 Both UIs SHALL remain usable at a defined minimum size (GUI minimum window size; TUI minimum terminal size, degrading gracefully below it). Long values (device names, snapshot reasons, file paths) SHALL elide in rows without data loss — the full value SHALL always be reachable in the detail surface.
 
+That rule governs DATA rows, whose full value the detail surface holds. It SHALL NOT be applied to an explanatory row that stands in place of a list — the shared unavailability sentence a view shows when its backend is unimplemented, which no detail surface repeats. Such a row SHALL be rendered in full, wrapping within the width available to it, and SHALL NOT require horizontal scrolling or elision to be read. A surface that elides or clips that sentence has not stated why the view is empty; it has only claimed to.
+
 #### Scenario: Long reason survives elision
 - **WHEN** a snapshot reason exceeds the row width
 - **THEN** the row elides it and the detail view shows the full text
+
+#### Scenario: The unsupported sentence is readable without scrolling
+- **WHEN** a view whose backend the platform does not implement renders its shared unavailability sentence in place of a list, in a column narrower than the sentence
+- **THEN** the sentence wraps and is readable in full without horizontal scrolling, and it is neither elided nor clipped
+
+#### Scenario: The wrapping exception does not reach data rows
+- **WHEN** a data row in the same list exceeds the column width on a platform where the backend is implemented
+- **THEN** that row still elides, and its full value is still reachable in the detail surface
 
 ### Requirement: Defined loading, empty, and error states
 Every list and detail view in both UIs SHALL define all three states — loading, empty, and error — with the same wording across GUI and TUI per docs/DESIGN.md. Blank panels with no explanation are not permitted.

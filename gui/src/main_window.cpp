@@ -1,5 +1,7 @@
 #include "gui/src/main_window.hpp"
 
+#include "gui/src/prose_row_delegate.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -485,6 +487,9 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // T11 TUI Updates screen, in widgets. No filter input: UpdatesVM exposes
     // none (mirrors the TUI shape).
     updatesBannerLabel_ = new QLabel;
+    // Hand-built rather than from makeAvailabilityBanner(), which is why it
+    // missed the wrap the other two banners get there (task 12b).
+    updatesBannerLabel_->setWordWrap(true);
     // Disclosure for the raw backend detail (backend-availability spec: the
     // diagnostic is preserved but never primary). A checkable button rather than
     // a tooltip: a tooltip is pointer-only, so the detail would be unreachable
@@ -552,6 +557,9 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
     // task 3.3 adds the filter field, the Diff/History views and the durable
     // recovery-guidance surface, keeping parity with the TUI tab.
     snapshotsBannerLabel_ = new QLabel;
+    // Hand-built rather than from makeAvailabilityBanner(), which is why it
+    // missed the wrap the other two banners get there (task 12b).
+    snapshotsBannerLabel_->setWordWrap(true);
     snapshotsBannerLabel_->setVisible(false);  // no counts to show until the tab is entered (B4)
     // The Updates disclosure, verbatim, for the backend this page reads: the
     // snapshot list comes from devmgrd, so an unreachable daemon is explained
@@ -684,6 +692,16 @@ MainWindow::MainWindow(app::ApplicationFacade& facade, app::DeviceListVM& listVm
         view->setTextElideMode(Qt::ElideRight);
         view->setWordWrap(false);
     }
+
+    // ...with one exception, on the three tabs a platform can leave wholly
+    // unsupported: there the shared sentence IS the row, and eliding prose that
+    // has no detail-pane entry to fall back to would leave it unreadable, while
+    // leaving it unwrapped left it readable only by scrolling (task 12.4/12b).
+    // The delegate wraps the row the model marks prose and nothing else, so the
+    // elide above still governs every data row. Devices is not in the list: it
+    // always has a real enumerator, so it has no prose row to wrap.
+    for (QListView* view : {modulesView_, updatesView_, snapshotsView_})
+        view->setItemDelegate(new ProseRowDelegate(view));
 
     // Keyboard shortcuts (DESIGN.md §10 keyboard-complete operation): tab
     // switching plus the per-view primary verb. The verb actions are gated to
@@ -996,6 +1014,12 @@ void MainWindow::updateSnapshotsDetailPane() {
 MainWindow::AvailabilityBanner MainWindow::makeAvailabilityBanner() {
     AvailabilityBanner b;
     b.label = new QLabel;
+    // The banner row lives inside the splitter's fixed-width left column, so an
+    // unwrapped sentence is clipped horizontally and readable only by scrolling
+    // — which the Windows gate saw on Modules/Updates/Snapshots, where the
+    // unsupported sentence IS the tab's content (task 12.4/12b). Wrapping is
+    // what the diagnostic label below already does; the sentence gets the same.
+    b.label->setWordWrap(true);
     b.details = new QToolButton;
     b.details->setCheckable(true);
     b.details->setText(QStringLiteral("Details ▾"));

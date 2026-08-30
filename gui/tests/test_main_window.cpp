@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QScrollBar>
 #include <QShortcut>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -50,6 +51,7 @@
 #include "fakes/fake_privileged_channel.hpp"
 #include "fakes/fake_update_provider.hpp"
 #include "gui/src/main_window.hpp"
+#include "gui/src/prose_row_delegate.hpp"
 #include "gui/src/qt_ui_dispatcher.hpp"
 
 using namespace devmgr;
@@ -1905,4 +1907,81 @@ TEST(MainWindowTest, ExcludedVerbsCarryNoShortcut) {
     EXPECT_TRUE(window.createSnapshotAction()->shortcut().isEmpty());
     // Refresh survives: enumeration is implemented, so its verb and its key are.
     EXPECT_EQ(window.refreshAction()->shortcut(), QKeySequence(QKeySequence::Refresh));
+}
+
+// gui-presentation / task 12b: the shared unsupported sentence is the tab's
+// whole content, so it has to be READABLE — not elided, and not parked behind a
+// horizontal scrollbar. ProseRowDelegate wraps it and nothing else, so
+// docs/DESIGN.md §2.4's elide rule keeps governing every data row.
+TEST(MainWindowTest, UnsupportedSentenceWrapsAndNeedsNoHorizontalScroll) {
+    ReadOnlyFixture f;
+    auto window = f.makeWindow();
+    window.resize(1100, 700);
+    window.show();
+    QCoreApplication::processEvents();
+
+    struct Page {
+        const char* name;
+        int tab;
+        QListView* view;
+    };
+    const Page pages[] = {{"Modules", 1, window.modulesView()},
+                          {"Updates", 2, window.updatesView()},
+                          {"Snapshots", 3, window.snapshotsView()}};
+
+    for (const auto& page : pages) {
+        window.tabs()->setCurrentIndex(page.tab);
+        QCoreApplication::processEvents();
+        QTest::qWait(20);
+
+        auto* view = page.view;
+        ASSERT_EQ(view->model()->rowCount(), 1) << page.name;
+        const QModelIndex row = view->model()->index(0, 0);
+        EXPECT_TRUE(row.data(gui::kProseRowRole).toBool()) << page.name << ": row is not prose";
+
+        // The row fits the column, so the view raises no horizontal scrollbar —
+        // the defect the Windows gate reported was exactly this scrollbar.
+        EXPECT_LE(view->sizeHintForColumn(0), view->viewport()->width()) << page.name;
+        EXPECT_EQ(view->horizontalScrollBar()->maximum(), 0)
+            << page.name << ": the sentence is readable only by scrolling";
+
+        // ...because it wrapped: a sentence longer than the column occupies more
+        // than one line of it.
+        const QFontMetrics metrics(view->font());
+        EXPECT_GT(metrics.horizontalAdvance(row.data(Qt::DisplayRole).toString()),
+                  view->viewport()->width())
+            << page.name << ": sentence fits on one line, so this asserts nothing";
+        EXPECT_GT(view->sizeHintForRow(0), metrics.lineSpacing()) << page.name << ": did not wrap";
+    }
+}
+
+// The other half of the same rule: a DATA row still elides. A module name wider
+// than the column stays one line high and keeps its full value in the detail
+// pane, which is what §2.4 asks for and what the delegate must not disturb.
+TEST(MainWindowTest, LongDataRowStillElidesRatherThanWrapping) {
+    Fixture f;
+    core::LoadedModule module;
+    module.name = "a_very_long_module_name_that_would_certainly_wrap_if_the_delegate_were_wrong";
+    f.pal.seedLoadedModule(module);
+    f.facade.refresh().wait();
+    QCoreApplication::processEvents();
+
+    auto window = f.makeWindow();
+    window.resize(1100, 700);
+    window.show();
+    window.tabs()->setCurrentIndex(1);
+    QCoreApplication::processEvents();
+    QTest::qWait(20);
+
+    auto* view = window.modulesView();
+    ASSERT_GT(view->model()->rowCount(), 0);
+    const QModelIndex row = view->model()->index(0, 0);
+    ASSERT_FALSE(row.data(gui::kProseRowRole).toBool()) << "a real module row must not be prose";
+
+    const QFontMetrics metrics(view->font());
+    ASSERT_GT(metrics.horizontalAdvance(row.data(Qt::DisplayRole).toString()),
+              view->viewport()->width())
+        << "row fits the column, so this asserts nothing";
+    EXPECT_LE(view->sizeHintForRow(0), metrics.lineSpacing() + 4) << "a data row wrapped";
+    EXPECT_EQ(view->textElideMode(), Qt::ElideRight);
 }
