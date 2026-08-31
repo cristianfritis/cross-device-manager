@@ -618,18 +618,56 @@ TUI changes should render components to fixed FTXUI screens and verify:
 Prefer structural assertions and small text/layout snapshots over brittle
 full-window pixel comparisons tied to one desktop style.
 
-### 12.2 Manual matrix
+### 12.2 Running-application checks
 
-Before calling a visual change complete, inspect:
+The checks in 12.1 render a view in isolation. They cannot see a legend that is
+cut off by a real terminal, a note that one surface shows and the other omits,
+or a control that is present in the widget tree but not on screen — the class of
+defect the 2026-07-27 matrix found by hand. The design-verification harness
+(`test/design/`, run by `docker compose -f test/docker-compose.yml run --rm
+design`) covers that gap by driving the built `devmgr-gui` and `devmgr-tui`.
 
-- GUI: light, dark, and a high-contrast palette.
-- GUI: 100%, 125%, and 200% display scale.
-- GUI: `1024x640` and `800x520` windows.
-- TUI: true color, 256 color, and monochrome where available.
-- TUI: `120x32`, `100x28`, and `80x24` terminals.
-- Both: keyboard-only Devices and Modules workflows.
-- Both: long device names, long paths, no selection, no matches, daemon down,
-  guard refusal, delayed signature lookup, and operation failure.
+It sweeps every view at every size in 12.1 and 12.3, in a degraded and a healthy
+backend posture, and asserts:
+
+- Cross-surface parity on rendered text: a sentence or verb one surface shows
+  and the other omits fails.
+- Every shortcut a legend advertises at the widest terminal is still advertised
+  at the narrowest. The legend gives up typography, never a shortcut.
+- Accessible names on every focusable list, tree, filter and toolbar action.
+- A verb belonging to an inactive tab is **hidden**, not merely disabled —
+  evaluated on showing state, because hidden actions remain in the
+  accessibility tree.
+- A long value elided in a list row is present in full in the detail pane.
+- Status text is identical with and without colour.
+- No primary control extends outside the window at the minimum size.
+
+Backends and devices are fixtures, not the host's: the device set is an
+`umockdev` record and the fwupd service is a double, so results are the same on
+every machine.
+
+This tier is **additive**. It does not replace 12.1, and it does not replace the
+manual matrix below — a green harness run is not grounds to skip 12.3.
+
+### 12.3 Manual matrix
+
+The harness covers the mechanical rows. These remain human judgement, and a
+visual change is not complete until they are inspected:
+
+- GUI: light, dark, and a high-contrast palette. *(Not automatable: the
+  accessibility tree carries no colour, and 12.1 forbids asserting on pixels.)*
+- GUI: 100%, 125%, and 200% display scale. *(Not automated: the failure mode is
+  visual crowding, not a missing element.)*
+- TUI: true color and 256 color. *(Monochrome is automated in 12.2.)*
+- Both: keyboard-only Devices and Modules workflows. *(The harness drives by
+  accessibility action, not key events, so it does not exercise a keyboard
+  path.)*
+- Both: no matches, guard refusal, delayed signature lookup, and operation
+  failure. *(No posture drives these yet.)*
+
+Automated in 12.2, and no longer requiring a manual pass: `1024x640` and
+`800x520` windows; the `120x32`, `100x28` and `80x24` terminals; monochrome
+rendering; long device names and long paths; no selection; and daemon down.
 
 The Impeccable browser detector and live mode are not validation for this
 project: they inspect web markup and CSS, not C++ Qt Widgets or FTXUI output.

@@ -53,6 +53,39 @@ jobs:
         # Hard gate: any clang-tidy diagnostic in core/src fails the build.
         run: docker compose -f test/docker-compose.yml run --rm unit bash -c "clang-tidy -p build/linux-debug --warnings-as-errors='*' core/src/*.cpp app/src/*.cpp platform/linux/src/*.cpp gui/src/*.cpp daemon/src/*.cpp cli/src/*.cpp tui/src/*.cpp tui/src/views/*.cpp"
 
+  # Design verification (design-verification spec): drives the REAL devmgr-gui
+  # and devmgr-tui and asserts what a user would actually see -- cross-surface
+  # parity on rendered text, legend shortcuts surviving every terminal width,
+  # accessible names, and off-tab verbs being hidden rather than merely
+  # disabled.
+  #
+  # NON-BLOCKING ON PURPOSE (cua-design-sandbox D8). A UI probe is a flakiness
+  # source, and it must not wedge unrelated merges before it has a record.
+  # Making it blocking is a later, deliberate decision with green runs behind
+  # it -- not something that happens by leaving this line out.
+  design-verification:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the unit image the design image layers on
+        run: docker compose -f test/docker-compose.yml build unit
+      - name: Design verification sweep
+        run: |
+          mkdir -p "$PWD/design-artifacts"
+          docker compose -f test/docker-compose.yml build design
+          docker compose -f test/docker-compose.yml run --rm \
+            -v "$PWD/design-artifacts:/out" design
+      - name: Upload captured surfaces
+        # A failure has to be diagnosable without reproducing it locally: the
+        # a11y trees, the captured panes and the screenshots are the evidence.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-verification-surfaces
+          path: design-artifacts/
+          if-no-files-found: warn
+
   # Windows: COMPILATION AND UNIT TESTS ONLY. A hosted runner sees a synthetic
   # device set with no physical USB and no hotplug, so a green job here says the
   # Windows backend builds and its logic is correct — never that it works on a

@@ -1,0 +1,52 @@
+P: /devices/pci0000:00/0000:00:14.0/usb1/1-1
+E: SUBSYSTEM=usb
+E: DEVTYPE=usb_device
+E: ID_VENDOR_ID=1d6b
+E: ID_MODEL_ID=0002
+E: ID_MODEL_FROM_DATABASE=Fixture Root Hub
+E: MODALIAS=usb:v1D6Bp0002d0001
+A: idVendor=1d6b
+A: idProduct=0002
+A: authorized=1
+
+P: /devices/pci0000:00/0000:00:14.0/usb1/1-2
+E: SUBSYSTEM=usb
+E: DEVTYPE=usb_device
+E: ID_VENDOR_ID=abcd
+E: ID_MODEL_ID=1234
+E: ID_MODEL_FROM_DATABASE=Fixture Extremely Long Device Name For Elision Testing Across Both Surfaces 0123456789
+E: MODALIAS=usb:vABCDp1234d0001
+A: idVendor=abcd
+A: idProduct=1234
+A: authorized=1
+
+P: /devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3.1/1-3.1.4/1-3.1.4.2/1-3.1.4.2.7
+E: SUBSYSTEM=usb
+E: DEVTYPE=usb_device
+E: ID_VENDOR_ID=beef
+E: ID_MODEL_ID=cafe
+E: ID_MODEL_FROM_DATABASE=Fixture Deeply Nested Device
+E: MODALIAS=usb:vBEEFpCAFEd0001
+A: idVendor=beef
+A: idProduct=cafe
+A: authorized=1
+
+P: /devices/pci0000:00/0000:00:14.0/usb1/1-4
+E: SUBSYSTEM=usb
+E: DEVTYPE=usb_device
+E: ID_VENDOR_ID=0409
+E: ID_MODEL_ID=005a
+E: ID_MODEL_FROM_DATABASE=Fixture Deauthorized Device
+E: MODALIAS=usb:v0409p005Ad0001
+A: idVendor=0409
+A: idProduct=005a
+A: authorized=0
+
+P: /devices/pci0000:00/0000:00:02.0
+E: SUBSYSTEM=pci
+E: ID_VENDOR_ID=8086
+E: ID_MODEL_ID=1234
+E: ID_MODEL_FROM_DATABASE=Fixture Display Controller
+E: MODALIAS=pci:v00008086d00001234
+A: vendor=0x8086
+A: device=0x1234

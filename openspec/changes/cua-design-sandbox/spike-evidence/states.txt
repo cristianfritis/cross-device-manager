@@ -1,0 +1,36 @@
+toolbar children=24
+
+name                         role         SHOWING VISIBLE ENABLED
+                             check box    False   False   True
+Refresh                      push button  True    True    True
+                             filler       True    True    True
+Disable                      push button  True    True    False
+                             filler       True    True    True
+Bind driver…                 push button  True    True    False
+                             filler       True    True    True
+Unbind driver (advanced)     push button  True    True    False
+Load Module…                 push button  False   False   False
+                             filler       False   False   True
+Unload                       push button  False   False   False
+Refresh Updates              push button  False   False   False
+                             filler       False   False   True
+Install Update               push button  False   False   False
+                             filler       False   False   True
+Dismiss Request              push button  False   False   False
+Create Snapshot…             push button  False   False   False
+                             filler       False   False   True
+Restore Snapshot…            push button  False   False   False
+                             filler       False   False   True
+Diff Snapshot                push button  False   False   False
+History                      check box    False   False   False
+                             filler       False   False   True
+Delete Snapshot              push button  False   False   False
+
+page tab list childCount=6
+  tab[0] name='Devices' showing=True
+  tab[1] name='Modules' showing=True
+  tab[2] name='Updates' showing=True
+  tab[3] name='Snapshots' showing=True
+  tab[4] name='Scroll Left' showing=False
+  tab[5] name='Scroll Right' showing=False
+states=0

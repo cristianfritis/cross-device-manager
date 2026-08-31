@@ -1,0 +1,41 @@
+desktop children (registered apps): 1
+  app[0] name='devmgr-gui' role=application
+
+--- tree (depth<=3) ---
+[application] name='devmgr-gui'
+  [frame] name='Device Manager'
+    [tool bar] name='main'
+      [check box] name=''
+      [push button] name='Refresh'
+      [filler] name=''
+      [push button] name='Disable'
+      [filler] name=''
+      [push button] name='Bind driver…'
+      [filler] name=''
+      [push button] name='Unbind driver (advanced)'
+      [push button] name='Load Module…'
+      [filler] name=''
+      [push button] name='Unload'
+      [push button] name='Refresh Updates'
+      [filler] name=''
+      [push button] name='Install Update'
+      [filler] name=''
+      [push button] name='Dismiss Request'
+      [push button] name='Create Snapshot…'
+      [filler] name=''
+      [push button] name='Restore Snapshot…'
+      [filler] name=''
+      [push button] name='Diff Snapshot'
+      [check box] name='History'
+      [filler] name=''
+      [push button] name='Delete Snapshot'
+    [filler] name='Views'
+      [layered pane] name=''
+      [page tab list] name='Devices'
+    [status bar] name=''
+      [unknown] name=''
+
+total nodes=305 named=255
+roles: {'list item': 198, 'filler': 22, 'push button': 15, 'label': 10, 'unknown': 9, 'table column header': 8, 'table cell': 8, 'check box': 6, 'split pane': 4, 'tree': 4, 'text': 4, 'list': 4}
+GATE: PASS - named, addressable child elements exposed
+walk=0

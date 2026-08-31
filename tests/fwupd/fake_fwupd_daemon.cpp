@@ -9,8 +9,10 @@ using devmgr::platform_linux::fwupd::kInterface;
 using devmgr::platform_linux::fwupd::kObjectPath;
 }  // namespace
 
-FakeFwupdDaemon::FakeFwupdDaemon() {
-    connection_ = sdbus::createSessionBusConnection(sdbus::ServiceName{kBusName});
+FakeFwupdDaemon::FakeFwupdDaemon(Bus bus) {
+    connection_ = bus == Bus::System
+                      ? sdbus::createSystemBusConnection(sdbus::ServiceName{kBusName})
+                      : sdbus::createSessionBusConnection(sdbus::ServiceName{kBusName});
     object_ = sdbus::createObject(*connection_, sdbus::ObjectPath{kObjectPath});
     registerVTable();
     connection_->enterEventLoopAsync();

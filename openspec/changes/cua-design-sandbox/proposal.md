@@ -38,9 +38,26 @@ harness the project keeps.
   developer machine, and so it does not depend on the operator's desktop
   session.
 
-Findings from the live run that the harness must be able to reproduce, as its
-own acceptance criteria: the five defects above, each of which it should fail
-on before the fix and pass on after.
+The five defects above are the harness's design rationale — the shapes it must
+be able to see. They are **not** its acceptance criteria, and an earlier version
+of this proposal was wrong to make them so.
+
+Attempting the replay established why (design D7, `spike-evidence/replay/`).
+F1, F2 and F3 were never present together in a committed revision: `git grep`
+shows `i=diagnostics`, the addition that overflowed the Snapshots legend, first
+appears in `38eaa00` — the same commit as the legend fitting that fixed it. The
+three defects lived only in the working tree of 2026-07-27, between the feature
+landing and the manual matrix catching it. No commit exhibits them, so no replay
+can fail on them.
+
+That sharpens the case for the harness rather than weakening it: those defects
+were caught by a human driving a pre-commit tree and by nothing else, which is
+exactly the tree a developer would point this harness at.
+
+The acceptance criterion is therefore that the harness be **demonstrably able to
+fail on a real committed defect**. It is: against `dcb25d4` it emits 51 findings
+for the committed `tab-contextual-toolbar` defect — every tab's verbs visible on
+every tab — and against `HEAD` it emits none.
 
 ## Capabilities
 

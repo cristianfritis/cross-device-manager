@@ -1,0 +1,11 @@
+FROM test-unit:latest
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb openbox x11-utils xauth \
+        at-spi2-core dbus-x11 \
+        qt6-qpa-plugins \
+        libx11-6 libxi6 libxkbcommon0 \
+        dconf-cli gsettings-desktop-schemas \
+        tmux procps x11-apps imagemagick \
+        python3-pyatspi python3-gi gir1.2-atspi-2.0 \
+    && rm -rf /var/lib/apt/lists/*

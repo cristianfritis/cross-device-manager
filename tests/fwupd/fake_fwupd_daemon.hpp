@@ -30,7 +30,14 @@ class FakeFwupdDaemon {
     using InstallHook = std::function<void(const std::string& deviceId, int cabFd,
                                            const std::map<std::string, sdbus::Variant>& options)>;
 
-    FakeFwupdDaemon();  // claims name, registers vtable, starts loop
+    // Which bus to claim the name on. Session is the default and is what the
+    // devmgr_fwupd suite uses under dbus-run-session; System is for the
+    // design-verification harness, where the GUI reaches fwupd on the system
+    // bus exactly as it does in production (FwupdUpdateProvider::Config
+    // value-initializes useSessionBus to false).
+    enum class Bus { Session, System };
+
+    explicit FakeFwupdDaemon(Bus bus = Bus::Session);  // claims name, vtable, loop
     ~FakeFwupdDaemon();
 
     FakeFwupdDaemon(const FakeFwupdDaemon&) = delete;

@@ -23,3 +23,19 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.fedora
+  # Design verification (design-verification spec): drives the real devmgr-gui
+  # through its accessibility tree and the real devmgr-tui through fixed-size
+  # tmux panes, and asserts what a user would actually see. This is the tier
+  # above the offscreen/fixed-screen tests -- those cannot fail on a truncated
+  # legend or a note missing from one surface, because they never render a real
+  # terminal or a real window.
+  #
+  # NOTE: like every service here, this has NO volume mount. The image carries a
+  # copy of the source, so a source change needs `docker compose build design`
+  # before the run reflects it -- otherwise the harness reports on the previous
+  # build.
+  design:
+    build:
+      context: ..
+      dockerfile: test/design/Dockerfile.design
+    command: ["bash", "/src/test/design/run.sh"]

@@ -1,0 +1,7 @@
+BEFORE (Devices): ['Refresh', 'Disable', 'Bind driver…', 'Unbind driver (advanced)']
+
+Modules tab actions available: ['Press']
+AFTER  (Modules): ['Load Module…', 'Unload']
+
+RESULT: PASS - element action landed, toolbar recomposed
+click=0

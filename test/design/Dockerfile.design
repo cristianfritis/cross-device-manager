@@ -1,0 +1,33 @@
+# Design-verification image (design-verification spec, cua-design-sandbox D9).
+#
+# Layered on the unit image rather than folded into it: the unit image is on the
+# build-and-test hot path for every push, and this adds an X server, a window
+# manager, an accessibility stack and a terminal multiplexer for a job that is
+# non-blocking. Keeping them apart means the hot path pays nothing.
+#
+# Every input here is an Ubuntu package. There is no network fetch at build time
+# and nothing new for docs/REPRODUCIBILITY.md's pinned-inputs table — these are
+# pinned by the base image exactly as the existing toolchain is. That was the
+# deciding difference against a release-installed driver binary (D1).
+FROM test-unit:latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb openbox x11-utils xauth xdotool \
+        at-spi2-core dbus-x11 \
+        qt6-qpa-plugins \
+        libx11-6 libxi6 libxkbcommon0 \
+        dconf-cli gsettings-desktop-schemas \
+        python3-pyatspi python3-gi gir1.2-atspi-2.0 \
+        imagemagick tmux procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# ImageMagick's stock policy refuses to write some formats under a non-desktop
+# policy; screenshots are PNGs of our own X display, so allow them explicitly
+# rather than shelling out to a second capture tool.
+RUN sed -i 's|<policy domain="coder" rights="none" pattern="PNG" */>||' \
+        /etc/ImageMagick-6/policy.xml 2>/dev/null || true
+
+COPY test/design/ /src/test/design/
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/src/test/design
+CMD ["bash", "/src/test/design/run.sh"]

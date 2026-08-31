@@ -1,0 +1,206 @@
+[
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Install Update' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Load Module\u2026' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Dismiss Request' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Unload' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Refresh Updates' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Disable' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Install Update' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Unbind driver (advanced)' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Bind driver\u2026' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Dismiss Request' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Refresh' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Refresh Updates' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Disable' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Unbind driver (advanced)' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Load Module\u2026' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Bind driver\u2026' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Unload' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Refresh' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Disable' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Install Update' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Unbind driver (advanced)' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Load Module\u2026' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Bind driver\u2026' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Dismiss Request' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Unload' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Refresh' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Refresh Updates' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Install Update' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Load Module\u2026' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Unload' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Devices: 'Refresh Updates' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Disable' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Install Update' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Unbind driver (advanced)' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Bind driver\u2026' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Refresh' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Modules: 'Refresh Updates' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Disable' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Unbind driver (advanced)' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Load Module\u2026' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Bind driver\u2026' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Unload' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Updates: 'Refresh' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Disable' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Install Update' belongs to Updates but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Unbind driver (advanced)' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Load Module\u2026' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Bind driver\u2026' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Unload' belongs to Modules but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Refresh' belongs to Devices but is showing"
+  },
+  {
+    "check": "off-tab-verb",
+    "detail": "Snapshots: 'Refresh Updates' belongs to Updates but is showing"
+  }
+]
